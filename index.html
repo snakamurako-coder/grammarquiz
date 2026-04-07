@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BrightStage - 並び替えUI</title>
+  <style>
+    /* 全体のスタイル */
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      background-color: #f4f7f6;
+      padding: 20px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    /* 問題文エリア */
+    .question-box {
+      background: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+      margin-bottom: 20px;
+    }
+    .question-ja {
+      font-size: 1.3em;
+      font-weight: bold;
+      color: #333;
+    }
+
+    /* ドラッグ＆ドロップのエリア */
+    .area-label {
+      font-size: 0.9em;
+      font-weight: bold;
+      color: #666;
+      margin-bottom: 8px;
+    }
+    .sortable-area {
+      min-height: 70px; /* 空になってもドロップ可能な高さを確保 */
+      padding: 15px;
+      border-radius: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 25px;
+      transition: background-color 0.2s;
+    }
+    
+    /* 回答欄（溝のイメージ） */
+    #answer-slot {
+      background-color: #e3f2fd;
+      border: 3px dashed #90caf9;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    /* 仮置き場（プール） */
+    #word-pool {
+      background-color: #eceff1;
+      border: 3px dashed #b0bec5;
+    }
+
+    /* 単語カード */
+    .word-card {
+      background-color: white;
+      border: 1px solid #d1d5db;
+      padding: 12px 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      cursor: grab;
+      font-size: 1.2em;
+      color: #333;
+      user-select: none;
+      touch-action: manipulation; /* スマホでの操作性を向上 */
+    }
+    .word-card:active {
+      cursor: grabbing;
+      box-shadow: 0 2px 3px rgba(0,0,0,0.1);
+      transform: translateY(2px);
+    }
+
+    /* ドラッグ中の半透明カード（残像） */
+    .sortable-ghost {
+      opacity: 0.4;
+      background-color: #e0e0e0;
+    }
+
+    /* 回答ボタン */
+    #submit-btn {
+      display: none; /* 初期状態は非表示 */
+      width: 100%;
+      padding: 15px;
+      font-size: 1.2em;
+      font-weight: bold;
+      background-color: #4caf50;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      box-shadow: 0 4px 6px rgba(76, 175, 80, 0.3);
+      transition: background-color 0.2s;
+    }
+    #submit-btn:hover {
+      background-color: #43a047;
+    }
+
+    /* 結果メッセージ */
+    #result-msg {
+      margin-top: 15px;
+      font-size: 1.2em;
+      font-weight: bold;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="question-box">
+    <div class="question-ja" id="question-ja"></div>
+  </div>
+
+  <div class="area-label">▼ 回答欄（ここにカードを並べてください）</div>
+  <div id="answer-slot" class="sortable-area"></div>
+
+  <div class="area-label">▼ 仮置き場（カードプール）</div>
+  <div id="word-pool" class="sortable-area"></div>
+
+  <button id="submit-btn">これで回答する</button>
+  <div id="result-msg"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+  <script>
+    // 1. データ準備（GASから取得したデータを想定）
+    const questionData = {
+      japanese: "これは私が昨日買った本です。",
+      correct_answer: "This is the book I bought yesterday.",
+      // ※実際の運用では、サーバー側でシャッフルして渡すか、JSでシャッフルします
+      words: ["the", "book", "is", "I", "bought", "This", "yesterday."], 
+      dummies: ["a"] // 不要語（ダミー）
+    };
+
+    const pool = document.getElementById('word-pool');
+    const slot = document.getElementById('answer-slot');
+    const submitBtn = document.getElementById('submit-btn');
+    const resultMsg = document.getElementById('result-msg');
+
+    // 問題文をセット
+    document.getElementById('question-ja').textContent = questionData.japanese;
+
+    // 単語とダミーを結合してシャッフル
+    let allWords = [...questionData.words, ...questionData.dummies];
+    allWords.sort(() => Math.random() - 0.5); 
+
+    // カードを生成して仮置き場に配置
+    allWords.forEach(word => {
+      const card = document.createElement('div');
+      card.className = 'word-card';
+      card.textContent = word;
+      pool.appendChild(card);
+    });
+
+    // 2. SortableJSの初期化
+    const sortableOptions = {
+      group: 'shared', // 異なるエリア間でカードを移動可能にする設定
+      animation: 150,  // カードがスッと移動するアニメーション速度
+      ghostClass: 'sortable-ghost',
+      onSort: function (evt) {
+        // ドラッグ＆ドロップが完了するたびに呼ばれる
+        checkSubmitVisibility();
+        resultMsg.textContent = ""; // 移動したら結果メッセージを消す
+      }
+    };
+
+    // 回答欄と仮置き場の両方にSortableを適用
+    new Sortable(slot, sortableOptions);
+    new Sortable(pool, sortableOptions);
+
+    // 3. ボタンの表示/非表示判定
+    function checkSubmitVisibility() {
+      // 「仮置き場に残っているカードの数」が「ダミーの数」以下になったら
+      // （＝必要なカードがすべて回答欄に移動されたら）ボタンを表示する
+      const remainingInPool = pool.children.length;
+      const expectedDummies = questionData.dummies.length;
+      
+      if (remainingInPool <= expectedDummies) {
+        submitBtn.style.display = 'block';
+      } else {
+        submitBtn.style.display = 'none';
+      }
+    }
+
+    // 4. 回答の正誤判定
+    submitBtn.addEventListener('click', () => {
+      // 回答欄にあるカードのテキストを配列として取得し、スペース区切りで結合
+      const userWords = Array.from(slot.children).map(card => card.textContent);
+      const userAnswer = userWords.join(' ');
+
+      if (userAnswer === questionData.correct_answer) {
+        resultMsg.textContent = "⭕️ 正解！素晴らしいです！";
+        resultMsg.style.color = "#4caf50";
+      } else {
+        resultMsg.textContent = "❌ 惜しい！並び順を確認してみましょう。";
+        resultMsg.style.color = "#f44336";
+      }
+    });
+  </script>
+</body>
+</html>
