@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BrightStage - 並び替えUI</title>
+  <title>BrightStage - 並び替えUI (v2)</title>
   <style>
     /* 全体のスタイル */
     body {
@@ -28,15 +28,22 @@
       color: #333;
     }
 
-    /* ドラッグ＆ドロップのエリア */
+    /* 各エリアのラベル */
+    .area-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-bottom: 8px;
+    }
     .area-label {
       font-size: 0.9em;
       font-weight: bold;
       color: #666;
-      margin-bottom: 8px;
     }
+
+    /* ドラッグ＆ドロップのエリア共通 */
     .sortable-area {
-      min-height: 70px; /* 空になってもドロップ可能な高さを確保 */
+      min-height: 60px;
       padding: 15px;
       border-radius: 12px;
       display: flex;
@@ -46,17 +53,24 @@
       transition: background-color 0.2s;
     }
     
-    /* 回答欄（溝のイメージ） */
+    /* 1. 回答欄（溝のイメージ） */
     #answer-slot {
       background-color: #e3f2fd;
       border: 3px dashed #90caf9;
       box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
     }
     
-    /* 仮置き場（プール） */
+    /* 2. 仮置き場（プール） */
     #word-pool {
       background-color: #eceff1;
       border: 3px dashed #b0bec5;
+      margin-bottom: 10px; /* ボタンがあるため少し狭める */
+    }
+
+    /* 3. 使わないカード（除外置き場） */
+    #trash-slot {
+      background-color: #ffebee;
+      border: 3px dashed #ef9a9a;
     }
 
     /* 単語カード */
@@ -70,23 +84,33 @@
       font-size: 1.2em;
       color: #333;
       user-select: none;
-      touch-action: manipulation; /* スマホでの操作性を向上 */
+      touch-action: manipulation;
     }
     .word-card:active {
       cursor: grabbing;
       box-shadow: 0 2px 3px rgba(0,0,0,0.1);
       transform: translateY(2px);
     }
-
-    /* ドラッグ中の半透明カード（残像） */
     .sortable-ghost {
       opacity: 0.4;
       background-color: #e0e0e0;
     }
 
-    /* 回答ボタン */
+    /* 各種ボタン */
+    .btn-small {
+      padding: 6px 12px;
+      font-size: 0.85em;
+      background-color: #607d8b;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    .btn-small:hover { background-color: #455a64; }
+
     #submit-btn {
-      display: none; /* 初期状態は非表示 */
+      display: none; 
       width: 100%;
       padding: 15px;
       font-size: 1.2em;
@@ -99,11 +123,8 @@
       box-shadow: 0 4px 6px rgba(76, 175, 80, 0.3);
       transition: background-color 0.2s;
     }
-    #submit-btn:hover {
-      background-color: #43a047;
-    }
+    #submit-btn:hover { background-color: #43a047; }
 
-    /* 結果メッセージ */
     #result-msg {
       margin-top: 15px;
       font-size: 1.2em;
@@ -118,80 +139,92 @@
     <div class="question-ja" id="question-ja"></div>
   </div>
 
-  <div class="area-label">▼ 回答欄（ここにカードを並べてください）</div>
+  <div class="area-header">
+    <div class="area-label">▼ 回答欄（ここにカードを並べてください）</div>
+  </div>
   <div id="answer-slot" class="sortable-area"></div>
 
-  <div class="area-label">▼ 仮置き場（カードプール）</div>
+  <div class="area-header">
+    <div class="area-label">▼ 仮置き場（自由に並べ替え可能）</div>
+    <button id="move-all-btn" class="btn-small">↑ この順序で回答欄に流し込む</button>
+  </div>
   <div id="word-pool" class="sortable-area"></div>
+
+  <div class="area-header">
+    <div class="area-label">▼ 使わないカード（除外置き場）</div>
+  </div>
+  <div id="trash-slot" class="sortable-area"></div>
 
   <button id="submit-btn">これで回答する</button>
   <div id="result-msg"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
   <script>
-    // 1. データ準備（GASから取得したデータを想定）
     const questionData = {
       japanese: "これは私が昨日買った本です。",
       correct_answer: "This is the book I bought yesterday.",
-      // ※実際の運用では、サーバー側でシャッフルして渡すか、JSでシャッフルします
       words: ["the", "book", "is", "I", "bought", "This", "yesterday."], 
-      dummies: ["a"] // 不要語（ダミー）
+      dummies: ["a"]
     };
 
-    const pool = document.getElementById('word-pool');
-    const slot = document.getElementById('answer-slot');
+    const answerSlot = document.getElementById('answer-slot');
+    const wordPool = document.getElementById('word-pool');
+    const trashSlot = document.getElementById('trash-slot');
+    
+    const moveAllBtn = document.getElementById('move-all-btn');
     const submitBtn = document.getElementById('submit-btn');
     const resultMsg = document.getElementById('result-msg');
 
-    // 問題文をセット
+    // 問題のセットアップ
     document.getElementById('question-ja').textContent = questionData.japanese;
-
-    // 単語とダミーを結合してシャッフル
     let allWords = [...questionData.words, ...questionData.dummies];
     allWords.sort(() => Math.random() - 0.5); 
 
-    // カードを生成して仮置き場に配置
     allWords.forEach(word => {
       const card = document.createElement('div');
       card.className = 'word-card';
       card.textContent = word;
-      pool.appendChild(card);
+      wordPool.appendChild(card);
     });
 
-    // 2. SortableJSの初期化
+    // SortableJSの初期化（3つのエリアを共有グループにする）
     const sortableOptions = {
-      group: 'shared', // 異なるエリア間でカードを移動可能にする設定
-      animation: 150,  // カードがスッと移動するアニメーション速度
+      group: 'shared',
+      animation: 150,
       ghostClass: 'sortable-ghost',
-      onSort: function (evt) {
-        // ドラッグ＆ドロップが完了するたびに呼ばれる
+      onSort: function () {
         checkSubmitVisibility();
-        resultMsg.textContent = ""; // 移動したら結果メッセージを消す
+        resultMsg.textContent = "";
       }
     };
+    new Sortable(answerSlot, sortableOptions);
+    new Sortable(wordPool, sortableOptions);
+    new Sortable(trashSlot, sortableOptions);
 
-    // 回答欄と仮置き場の両方にSortableを適用
-    new Sortable(slot, sortableOptions);
-    new Sortable(pool, sortableOptions);
+    // 新機能：仮置き場のカードを一気に回答欄へ流し込む
+    moveAllBtn.addEventListener('click', () => {
+      // wordPool内のすべてのカードを取得し、順番にanswerSlotへ移動
+      const cards = Array.from(wordPool.children);
+      cards.forEach(card => {
+        answerSlot.appendChild(card);
+      });
+      checkSubmitVisibility();
+      resultMsg.textContent = "";
+    });
 
-    // 3. ボタンの表示/非表示判定
+    // ボタンの表示判定ロジックを更新
     function checkSubmitVisibility() {
-      // 「仮置き場に残っているカードの数」が「ダミーの数」以下になったら
-      // （＝必要なカードがすべて回答欄に移動されたら）ボタンを表示する
-      const remainingInPool = pool.children.length;
-      const expectedDummies = questionData.dummies.length;
-      
-      if (remainingInPool <= expectedDummies) {
+      // 「回答欄」に入っているカードの数が、正解に必要な単語数と一致したらボタンを表示
+      if (answerSlot.children.length === questionData.words.length) {
         submitBtn.style.display = 'block';
       } else {
         submitBtn.style.display = 'none';
       }
     }
 
-    // 4. 回答の正誤判定
+    // 回答判定
     submitBtn.addEventListener('click', () => {
-      // 回答欄にあるカードのテキストを配列として取得し、スペース区切りで結合
-      const userWords = Array.from(slot.children).map(card => card.textContent);
+      const userWords = Array.from(answerSlot.children).map(card => card.textContent);
       const userAnswer = userWords.join(' ');
 
       if (userAnswer === questionData.correct_answer) {
