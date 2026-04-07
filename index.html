@@ -3,134 +3,40 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BrightStage - 並び替えUI (v2)</title>
+  <title>BrightStage - 並び替えUI (v3 Keyboard)</title>
   <style>
-    /* 全体のスタイル */
-    body {
-      font-family: 'Helvetica Neue', Arial, sans-serif;
-      background-color: #f4f7f6;
-      padding: 20px;
-      max-width: 600px;
-      margin: 0 auto;
-    }
+    /* 1. 全体 & メインUIのスタイル（前回を継承・調整） */
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f7f6; padding: 10px; padding-bottom: 250px; /* キーボード用の余白 */ max-width: 600px; margin: 0 auto; }
+    .question-box { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 15px; }
+    .question-ja { font-size: 1.2em; font-weight: bold; color: #333; }
+    .area-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 5px; }
+    .area-label { font-size: 0.85em; font-weight: bold; color: #666; }
+    .sortable-area { min-height: 50px; padding: 10px; border-radius: 12px; display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; transition: background-color 0.2s; }
+    #answer-slot { background-color: #e3f2fd; border: 2px dashed #90caf9; }
+    #word-pool { background-color: #eceff1; border: 2px dashed #b0bec5; margin-bottom: 10px; }
+    #trash-slot { background-color: #ffebee; border: 2px dashed #ef9a9a; }
+    .word-card { background-color: white; border: 1px solid #d1d5db; padding: 10px 16px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor: grab; font-size: 1.1em; color: #333; user-select: none; touch-action: manipulation; }
+    .word-card:active { cursor: grabbing; transform: translateY(2px); }
+    .sortable-ghost { opacity: 0.3; }
+    .btn-small { padding: 4px 10px; font-size: 0.8em; background-color: #607d8b; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    #submit-btn { display: none; width: 100%; padding: 15px; font-size: 1.2em; background-color: #4caf50; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px;}
+    #result-msg { margin-top: 10px; font-size: 1.1em; font-weight: bold; text-align: center; }
 
-    /* 問題文エリア */
-    .question-box {
-      background: #fff;
-      padding: 20px;
-      border-radius: 8px;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-      margin-bottom: 20px;
-    }
-    .question-ja {
-      font-size: 1.3em;
-      font-weight: bold;
-      color: #333;
-    }
+    /* 2. 不足語入力エリアのスタイル */
+    #missing-word-input-area { background: #fff; padding: 15px; border-radius: 8px; border: 2px solid #ff9800; margin-bottom: 15px; display: flex; gap: 10px; align-items: center; }
+    .input-label { font-weight: bold; color: #ff9800; }
+    #missing-word-display { flex-grow: 1; padding: 10px; font-size: 1.2em; border: 2px solid #ccc; border-radius: 4px; background-color: #f9f9f9; min-height: 1.2em; /* 空でも高さを保つ */ }
+    #create-card-btn { padding: 10px 20px; background-color: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    #create-card-btn:disabled { background-color: #ccc; cursor: not-allowed; }
 
-    /* 各エリアのラベル */
-    .area-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-end;
-      margin-bottom: 8px;
-    }
-    .area-label {
-      font-size: 0.9em;
-      font-weight: bold;
-      color: #666;
-    }
-
-    /* ドラッグ＆ドロップのエリア共通 */
-    .sortable-area {
-      min-height: 60px;
-      padding: 15px;
-      border-radius: 12px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-bottom: 25px;
-      transition: background-color 0.2s;
-    }
-    
-    /* 1. 回答欄（溝のイメージ） */
-    #answer-slot {
-      background-color: #e3f2fd;
-      border: 3px dashed #90caf9;
-      box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
-    }
-    
-    /* 2. 仮置き場（プール） */
-    #word-pool {
-      background-color: #eceff1;
-      border: 3px dashed #b0bec5;
-      margin-bottom: 10px; /* ボタンがあるため少し狭める */
-    }
-
-    /* 3. 使わないカード（除外置き場） */
-    #trash-slot {
-      background-color: #ffebee;
-      border: 3px dashed #ef9a9a;
-    }
-
-    /* 単語カード */
-    .word-card {
-      background-color: white;
-      border: 1px solid #d1d5db;
-      padding: 12px 20px;
-      border-radius: 8px;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-      cursor: grab;
-      font-size: 1.2em;
-      color: #333;
-      user-select: none;
-      touch-action: manipulation;
-    }
-    .word-card:active {
-      cursor: grabbing;
-      box-shadow: 0 2px 3px rgba(0,0,0,0.1);
-      transform: translateY(2px);
-    }
-    .sortable-ghost {
-      opacity: 0.4;
-      background-color: #e0e0e0;
-    }
-
-    /* 各種ボタン */
-    .btn-small {
-      padding: 6px 12px;
-      font-size: 0.85em;
-      background-color: #607d8b;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    }
-    .btn-small:hover { background-color: #455a64; }
-
-    #submit-btn {
-      display: none; 
-      width: 100%;
-      padding: 15px;
-      font-size: 1.2em;
-      font-weight: bold;
-      background-color: #4caf50;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      box-shadow: 0 4px 6px rgba(76, 175, 80, 0.3);
-      transition: background-color 0.2s;
-    }
-    #submit-btn:hover { background-color: #43a047; }
-
-    #result-msg {
-      margin-top: 15px;
-      font-size: 1.2em;
-      font-weight: bold;
-      text-align: center;
-    }
+    /* 3. カスタムソフトウェアキーボードのスタイル */
+    #keyboard-container { position: fixed; bottom: 0; left: 0; width: 100%; background-color: #d2d6da; padding: 5px 0; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); z-index: 1000; display: none; /* 初期は非表示 */ user-select: none; }
+    .keyboard-row { display: flex; justify-content: center; gap: 4px; margin-bottom: 4px; padding: 0 4px; }
+    .key { background-color: #fff; border: none; border-radius: 5px; height: 45px; flex-grow: 1; max-width: 50px; font-size: 1.2em; color: #000; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 1px 0 rgba(0,0,0,0.2); touch-action: manipulation; transition: background-color 0.1s; }
+    .key:active { background-color: #adb5bd; }
+    .key.wide { max-width: 80px; font-size: 0.9em; background-color: #adb5bd; }
+    .key.space { max-width: 200px; background-color: #fff; }
+    .key.activated { background-color: #333 !important; color: #fff; } /* Shift/Caps用 */
   </style>
 </head>
 <body>
@@ -139,102 +45,277 @@
     <div class="question-ja" id="question-ja"></div>
   </div>
 
+  <div id="missing-word-input-area">
+    <div class="input-label">不足語:</div>
+    <div id="missing-word-display" 
+         autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
+    <button id="create-card-btn" disabled>カードを作成</button>
+  </div>
+
   <div class="area-header">
-    <div class="area-label">▼ 回答欄（ここにカードを並べてください）</div>
+    <div class="area-label">▼ 回答欄（並べてください）</div>
   </div>
   <div id="answer-slot" class="sortable-area"></div>
 
   <div class="area-header">
-    <div class="area-label">▼ 仮置き場（自由に並べ替え可能）</div>
-    <button id="move-all-btn" class="btn-small">↑ この順序で回答欄に流し込む</button>
+    <div class="area-label">▼ 仮置き場</div>
+    <button id="move-all-btn" class="btn-small">↑ 流し込む</button>
   </div>
   <div id="word-pool" class="sortable-area"></div>
 
   <div class="area-header">
-    <div class="area-label">▼ 使わないカード（除外置き場）</div>
+    <div class="area-label">▼ 除外置き場</div>
   </div>
   <div id="trash-slot" class="sortable-area"></div>
 
   <button id="submit-btn">これで回答する</button>
   <div id="result-msg"></div>
 
+
+  <div id="keyboard-container"></div>
+
+
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
   <script>
+    //========================================
+    // 1. データ & 初期化
+    //========================================
     const questionData = {
-      japanese: "これは私が昨日買った本です。",
+      japanese: "これは私が昨日買った本です。(上級: '本' が欠損)",
       correct_answer: "This is the book I bought yesterday.",
-      words: ["the", "book", "is", "I", "bought", "This", "yesterday."], 
+      // 正解の全単語リスト
+      all_correct_words: ["This", "is", "the", "book", "I", "bought", "yesterday."], 
+      // プールにある単語（ここから 'book' が欠損している設定）
+      pool_words: ["This", "the", "is", "I", "bought", "yesterday."], 
+      missing_word_trigger: "book", // ユーザーが入力すべき正解
       dummies: ["a"]
     };
 
     const answerSlot = document.getElementById('answer-slot');
     const wordPool = document.getElementById('word-pool');
     const trashSlot = document.getElementById('trash-slot');
-    
-    const moveAllBtn = document.getElementById('move-all-btn');
+    const createCardBtn = document.getElementById('create-card-btn');
+    const missingWordDisplay = document.getElementById('missing-word-display');
+    const kbContainer = document.getElementById('keyboard-container');
     const submitBtn = document.getElementById('submit-btn');
     const resultMsg = document.getElementById('result-msg');
 
     // 問題のセットアップ
     document.getElementById('question-ja').textContent = questionData.japanese;
-    let allWords = [...questionData.words, ...questionData.dummies];
-    allWords.sort(() => Math.random() - 0.5); 
+    
+    // カードプール初期配置
+    let initialPool = [...questionData.pool_words, ...questionData.dummies];
+    initialPool.sort(() => Math.random() - 0.5); 
+    initialPool.forEach(word => createCard(word, wordPool));
 
-    allWords.forEach(word => {
-      const card = document.createElement('div');
-      card.className = 'word-card';
-      card.textContent = word;
-      wordPool.appendChild(card);
-    });
-
-    // SortableJSの初期化（3つのエリアを共有グループにする）
-    const sortableOptions = {
-      group: 'shared',
-      animation: 150,
-      ghostClass: 'sortable-ghost',
-      onSort: function () {
-        checkSubmitVisibility();
-        resultMsg.textContent = "";
-      }
-    };
+    // SortableJSの初期化
+    const sortableOptions = { group: 'shared', animation: 150, ghostClass: 'sortable-ghost', onSort: checkSubmitVisibility };
     new Sortable(answerSlot, sortableOptions);
     new Sortable(wordPool, sortableOptions);
     new Sortable(trashSlot, sortableOptions);
 
-    // 新機能：仮置き場のカードを一気に回答欄へ流し込む
-    moveAllBtn.addEventListener('click', () => {
-      // wordPool内のすべてのカードを取得し、順番にanswerSlotへ移動
-      const cards = Array.from(wordPool.children);
-      cards.forEach(card => {
-        answerSlot.appendChild(card);
-      });
+    // ヘルパー：カード生成
+    function createCard(text, container) {
+      const card = document.createElement('div');
+      card.className = 'word-card';
+      card.textContent = text;
+      container.appendChild(card);
+    }
+
+    // 流し込むボタン
+    document.getElementById('move-all-btn').addEventListener('click', () => {
+      Array.from(wordPool.children).forEach(card => answerSlot.appendChild(card));
       checkSubmitVisibility();
-      resultMsg.textContent = "";
     });
 
-    // ボタンの表示判定ロジックを更新
+    // 回答ボタンの表示判定
     function checkSubmitVisibility() {
-      // 「回答欄」に入っているカードの数が、正解に必要な単語数と一致したらボタンを表示
-      if (answerSlot.children.length === questionData.words.length) {
+      // 回答欄のカード数が、本来の正解の単語数（欠損語も含めた数）と一致したら表示
+      if (answerSlot.children.length === questionData.all_correct_words.length) {
         submitBtn.style.display = 'block';
       } else {
         submitBtn.style.display = 'none';
       }
+      resultMsg.textContent = ""; // 移動したら結果を消す
     }
 
     // 回答判定
     submitBtn.addEventListener('click', () => {
-      const userWords = Array.from(answerSlot.children).map(card => card.textContent);
-      const userAnswer = userWords.join(' ');
-
+      const userAnswer = Array.from(answerSlot.children).map(card => card.textContent).join(' ');
       if (userAnswer === questionData.correct_answer) {
-        resultMsg.textContent = "⭕️ 正解！素晴らしいです！";
+        resultMsg.textContent = "⭕️ 正解！素晴らしい補足です！";
         resultMsg.style.color = "#4caf50";
       } else {
-        resultMsg.textContent = "❌ 惜しい！並び順を確認してみましょう。";
+        resultMsg.textContent = "❌ 惜しい！並び順や入力した語句を確認。";
         resultMsg.style.color = "#f44336";
       }
     });
+
+    //========================================
+    // 2. 欠損語補足ロジック & 入力エリア
+    //========================================
+    let currentInput = ""; // 現在の入力文字列
+
+    // 入力エリア（模擬欄）をクリックしたときにキーボードを表示
+    missingWordDisplay.addEventListener('click', (e) => {
+      kbContainer.style.display = 'block';
+      kbContainer.setAttribute('data-target', 'missing'); // どこへの入力かを記録
+      e.stopPropagation(); // bodyへのイベント伝播を防ぐ
+    });
+
+    // ボディをクリックしたらキーボードを閉じる
+    document.body.addEventListener('click', () => {
+      kbContainer.style.display = 'none';
+    });
+
+    // カードを作成ボタン
+    createCardBtn.addEventListener('click', () => {
+      if (!currentInput) return;
+
+      // 1. 入力された文字で新しいカードを作り、プールに追加
+      createCard(currentInput, wordPool);
+
+      // 2. 入力エリアをクリア、キーボードを隠す
+      currentInput = "";
+      updateInputDisplay();
+      kbContainer.style.display = 'none';
+
+      // 3. (オプション) 1回作ったら、入力エリア自体を無効化（重複作成防止）
+      // createCardBtn.disabled = true;
+      // missingWordDisplay.style.opacity = 0.5;
+      // missingWordDisplay.innerText = "(作成済み)";
+
+      checkSubmitVisibility(); // ボタン出現判定を更新
+    });
+
+
+    //========================================
+    // 3. カスタムソフトウェアキーボードの実装
+    //========================================
+    
+    // シフトの状態管理: 0:Normal, 1:Shift, 2:CapsLock
+    let shiftState = 0;
+    let lastShiftClickTime = 0;
+
+    // QWERTY配列定義（記号やピリオドは今回の例では省略）
+    const keyLayout = {
+      normal: [
+        ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+        ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
+        ["Shift", "z", "x", "c", "v", "b", "n", "m", "Back"]
+      ],
+      shifted: [
+        ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+        ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
+        ["Shift", "Z", "X", "C", "V", "B", "N", "M", "Back"]
+      ]
+    };
+
+    // キーボードの描画
+    function renderKeyboard() {
+      kbContainer.innerHTML = ''; // クリア
+      const rows = (shiftState > 0) ? keyLayout.shifted : keyLayout.normal;
+
+      rows.forEach((row, rowIndex) => {
+        const rowDiv = document.createElement('div');
+        rowDiv.className = 'keyboard-row';
+        
+        row.forEach(key => {
+          const keyBtn = document.createElement('button');
+          keyBtn.className = 'key';
+          keyBtn.textContent = (key === "Back") ? "⌫" : key;
+
+          // 特殊キーのスタイル調整
+          if (key === "Shift") {
+            keyBtn.classList.add('wide');
+            keyBtn.id = 'key-shift';
+            if (shiftState === 1) keyBtn.classList.add('activated'); // Shiftオン
+            if (shiftState === 2) keyBtn.innerHTML = '⬆️<span style="font-size:0.6em">LOCK</span>'; // Caps
+          }
+          if (key === "Back") keyBtn.classList.add('wide');
+
+          // マウス/タッチイベント（clickは遅いのでpointerdownを使用）
+          keyBtn.addEventListener('pointerdown', (e) => {
+            e.preventDefault(); // フォーカス移動を防ぐ
+            e.stopPropagation(); // bodyクリックを防ぐ
+            handleKeyPress(key);
+          });
+
+          rowDiv.appendChild(keyBtn);
+        });
+        kbContainer.appendChild(rowDiv);
+      });
+    }
+
+    // キーが押された時の処理（物理・ソフト共通）
+    function handleKeyPress(key) {
+      if (key === "Shift") {
+        handleShiftLogic();
+      } else if (key === "Back") {
+        currentInput = currentInput.slice(0, -1);
+      } else {
+        // 通常の文字入力
+        currentInput += key;
+
+        // Shift状態だったら、1文字入力後にNormalに戻す
+        if (shiftState === 1) {
+          shiftState = 0;
+        }
+      }
+      updateInputDisplay();
+      renderKeyboard(); // 状態が変わるため再描画
+    }
+
+    // 入力エリアの表示更新
+    function updateInputDisplay() {
+      missingWordDisplay.textContent = currentInput;
+      createCardBtn.disabled = (currentInput.length === 0);
+    }
+
+    // シフトのロジック（押している間は大文字・二回素早く押すと大文字キープ）
+    function handleShiftLogic() {
+      const now = Date.now();
+      const timeDiff = now - lastShiftClickTime;
+
+      if (timeDiff < 300) {
+        // 素早いダブルクリック -> CapsLockへ
+        shiftState = 2;
+      } else {
+        // シングルクリック -> 状態をトグル
+        if (shiftState === 0) shiftState = 1;
+        else shiftState = 0; // ShiftオンやCapsLockからNormalへ
+      }
+      lastShiftClickTime = now;
+    }
+
+    // 初期描画
+    renderKeyboard();
+
+    //========================================
+    // 4. 物理キーボードのフック（ショートカット扱い）
+    //========================================
+    window.addEventListener('keydown', (e) => {
+      // キーボードが表示されていない場合は反応しない
+      if (kbContainer.style.display === 'none') return;
+      
+      let pressedKey = e.key;
+
+      // 物理キーの標準入力をすべてキャンセル（コピペ、予測変換などを防ぐマスター設定）
+      e.preventDefault();
+
+      // 物理キーの名称をソフトウェアキーボードの名称に変換
+      if (pressedKey === "Backspace") pressedKey = "Back";
+      if (pressedKey === "Shift") pressedKey = "Shift";
+
+      // QWERTY配列に存在する文字か、Shift/Backであれば処理を実行
+      const allKeysNormal = keyLayout.normal.flat();
+      const allKeysShifted = keyLayout.shifted.flat();
+      
+      if (allKeysNormal.includes(pressedKey) || allKeysShifted.includes(pressedKey)) {
+        handleKeyPress(pressedKey);
+      }
+    });
+
   </script>
 </body>
 </html>
