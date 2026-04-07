@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BrightStage - 並び替えUI (v3 Keyboard)</title>
+  <title>BrightStage - 並び替えUI (v4 Keyboard Extended)</title>
   <style>
-    /* 1. 全体 & メインUIのスタイル（前回を継承・調整） */
-    body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f7f6; padding: 10px; padding-bottom: 250px; /* キーボード用の余白 */ max-width: 600px; margin: 0 auto; }
+    /* 1. 全体 & メインUIのスタイル */
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f7f6; padding: 10px; padding-bottom: 300px; /* キーボード用の余白を拡大 */ max-width: 600px; margin: 0 auto; }
     .question-box { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 15px; }
     .question-ja { font-size: 1.2em; font-weight: bold; color: #333; }
     .area-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 5px; }
@@ -25,18 +25,19 @@
     /* 2. 不足語入力エリアのスタイル */
     #missing-word-input-area { background: #fff; padding: 15px; border-radius: 8px; border: 2px solid #ff9800; margin-bottom: 15px; display: flex; gap: 10px; align-items: center; }
     .input-label { font-weight: bold; color: #ff9800; }
-    #missing-word-display { flex-grow: 1; padding: 10px; font-size: 1.2em; border: 2px solid #ccc; border-radius: 4px; background-color: #f9f9f9; min-height: 1.2em; /* 空でも高さを保つ */ }
-    #create-card-btn { padding: 10px 20px; background-color: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    #missing-word-display { flex-grow: 1; padding: 10px; font-size: 1.2em; border: 2px solid #ccc; border-radius: 4px; background-color: #f9f9f9; min-height: 1.2em; cursor: pointer;}
+    #create-card-btn { padding: 10px 15px; background-color: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
     #create-card-btn:disabled { background-color: #ccc; cursor: not-allowed; }
 
     /* 3. カスタムソフトウェアキーボードのスタイル */
-    #keyboard-container { position: fixed; bottom: 0; left: 0; width: 100%; background-color: #d2d6da; padding: 5px 0; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); z-index: 1000; display: none; /* 初期は非表示 */ user-select: none; }
-    .keyboard-row { display: flex; justify-content: center; gap: 4px; margin-bottom: 4px; padding: 0 4px; }
-    .key { background-color: #fff; border: none; border-radius: 5px; height: 45px; flex-grow: 1; max-width: 50px; font-size: 1.2em; color: #000; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 1px 0 rgba(0,0,0,0.2); touch-action: manipulation; transition: background-color 0.1s; }
+    #keyboard-container { position: fixed; bottom: 0; left: 0; width: 100%; background-color: #d2d6da; padding: 8px 0; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); z-index: 1000; display: none; user-select: none; touch-action: manipulation;}
+    .keyboard-row { display: flex; justify-content: center; gap: 4px; margin-bottom: 6px; padding: 0 4px; }
+    .key { background-color: #fff; border: none; border-radius: 5px; height: 42px; flex-grow: 1; max-width: 45px; font-size: 1.1em; color: #000; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 1px 0 rgba(0,0,0,0.2); touch-action: manipulation; transition: background-color 0.1s; }
     .key:active { background-color: #adb5bd; }
-    .key.wide { max-width: 80px; font-size: 0.9em; background-color: #adb5bd; }
-    .key.space { max-width: 200px; background-color: #fff; }
-    .key.activated { background-color: #333 !important; color: #fff; } /* Shift/Caps用 */
+    .key.wide { max-width: 70px; font-size: 0.9em; background-color: #adb5bd; }
+    .key.space { max-width: 250px; } /* Spaceキーは広く */
+    .key.enter { max-width: 100px; background-color: #ff9800; color: white; font-weight: bold; } /* Enterキーは色付き */
+    .key.activated { background-color: #333 !important; color: #fff; } 
   </style>
 </head>
 <body>
@@ -47,8 +48,7 @@
 
   <div id="missing-word-input-area">
     <div class="input-label">不足語:</div>
-    <div id="missing-word-display" 
-         autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
+    <div id="missing-word-display" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
     <button id="create-card-btn" disabled>カードを作成</button>
   </div>
 
@@ -71,9 +71,7 @@
   <button id="submit-btn">これで回答する</button>
   <div id="result-msg"></div>
 
-
   <div id="keyboard-container"></div>
-
 
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
   <script>
@@ -81,13 +79,11 @@
     // 1. データ & 初期化
     //========================================
     const questionData = {
-      japanese: "これは私が昨日買った本です。(上級: '本' が欠損)",
+      japanese: "これは私が昨日買った本です。(上級: 'book' が欠損)",
       correct_answer: "This is the book I bought yesterday.",
-      // 正解の全単語リスト
       all_correct_words: ["This", "is", "the", "book", "I", "bought", "yesterday."], 
-      // プールにある単語（ここから 'book' が欠損している設定）
       pool_words: ["This", "the", "is", "I", "bought", "yesterday."], 
-      missing_word_trigger: "book", // ユーザーが入力すべき正解
+      missing_word_trigger: "book",
       dummies: ["a"]
     };
 
@@ -100,21 +96,17 @@
     const submitBtn = document.getElementById('submit-btn');
     const resultMsg = document.getElementById('result-msg');
 
-    // 問題のセットアップ
     document.getElementById('question-ja').textContent = questionData.japanese;
     
-    // カードプール初期配置
     let initialPool = [...questionData.pool_words, ...questionData.dummies];
     initialPool.sort(() => Math.random() - 0.5); 
     initialPool.forEach(word => createCard(word, wordPool));
 
-    // SortableJSの初期化
     const sortableOptions = { group: 'shared', animation: 150, ghostClass: 'sortable-ghost', onSort: checkSubmitVisibility };
     new Sortable(answerSlot, sortableOptions);
     new Sortable(wordPool, sortableOptions);
     new Sortable(trashSlot, sortableOptions);
 
-    // ヘルパー：カード生成
     function createCard(text, container) {
       const card = document.createElement('div');
       card.className = 'word-card';
@@ -122,24 +114,20 @@
       container.appendChild(card);
     }
 
-    // 流し込むボタン
     document.getElementById('move-all-btn').addEventListener('click', () => {
       Array.from(wordPool.children).forEach(card => answerSlot.appendChild(card));
       checkSubmitVisibility();
     });
 
-    // 回答ボタンの表示判定
     function checkSubmitVisibility() {
-      // 回答欄のカード数が、本来の正解の単語数（欠損語も含めた数）と一致したら表示
       if (answerSlot.children.length === questionData.all_correct_words.length) {
         submitBtn.style.display = 'block';
       } else {
         submitBtn.style.display = 'none';
       }
-      resultMsg.textContent = ""; // 移動したら結果を消す
+      resultMsg.textContent = "";
     }
 
-    // 回答判定
     submitBtn.addEventListener('click', () => {
       const userAnswer = Array.from(answerSlot.children).map(card => card.textContent).join(' ');
       if (userAnswer === questionData.correct_answer) {
@@ -154,90 +142,87 @@
     //========================================
     // 2. 欠損語補足ロジック & 入力エリア
     //========================================
-    let currentInput = ""; // 現在の入力文字列
+    let currentInput = "";
 
-    // 入力エリア（模擬欄）をクリックしたときにキーボードを表示
+    // 入力エリアをクリックしたときにキーボードを表示
     missingWordDisplay.addEventListener('click', (e) => {
       kbContainer.style.display = 'block';
-      kbContainer.setAttribute('data-target', 'missing'); // どこへの入力かを記録
-      e.stopPropagation(); // bodyへのイベント伝播を防ぐ
     });
 
-    // ボディをクリックしたらキーボードを閉じる
-    document.body.addEventListener('click', () => {
+    // 【修正箇所】ボディのクリックで閉じる処理を厳密化。
+    // キーボード自身や入力エリア内のタップでは閉じないようにしました。
+    document.body.addEventListener('click', (e) => {
+      if (e.target.closest('#missing-word-input-area') || e.target.closest('#keyboard-container')) {
+        return; // キャンセルせず何もしない
+      }
       kbContainer.style.display = 'none';
     });
 
-    // カードを作成ボタン
+    // カードを作成ボタン（またはEnterキー）が押された時の処理
     createCardBtn.addEventListener('click', () => {
       if (!currentInput) return;
-
-      // 1. 入力された文字で新しいカードを作り、プールに追加
       createCard(currentInput, wordPool);
-
-      // 2. 入力エリアをクリア、キーボードを隠す
       currentInput = "";
       updateInputDisplay();
-      kbContainer.style.display = 'none';
-
-      // 3. (オプション) 1回作ったら、入力エリア自体を無効化（重複作成防止）
-      // createCardBtn.disabled = true;
-      // missingWordDisplay.style.opacity = 0.5;
-      // missingWordDisplay.innerText = "(作成済み)";
-
-      checkSubmitVisibility(); // ボタン出現判定を更新
+      kbContainer.style.display = 'none'; // 作成完了したらキーボードを閉じる
+      checkSubmitVisibility(); 
     });
 
 
     //========================================
     // 3. カスタムソフトウェアキーボードの実装
     //========================================
-    
-    // シフトの状態管理: 0:Normal, 1:Shift, 2:CapsLock
     let shiftState = 0;
     let lastShiftClickTime = 0;
 
-    // QWERTY配列定義（記号やピリオドは今回の例では省略）
+    // 【修正箇所】最上部に記号列、最下部にSpace/Enter列を追加
     const keyLayout = {
       normal: [
+        ["!", "\"", "$", "%", "&", "'", "(", ")", "-", "¥"],
         ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
         ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
-        ["Shift", "z", "x", "c", "v", "b", "n", "m", "Back"]
+        ["Shift", "z", "x", "c", "v", "b", "n", "m", "Back"],
+        ["Space", "Enter"]
       ],
       shifted: [
+        ["!", "\"", "$", "%", "&", "'", "(", ")", "-", "¥"],
         ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
         ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
-        ["Shift", "Z", "X", "C", "V", "B", "N", "M", "Back"]
+        ["Shift", "Z", "X", "C", "V", "B", "N", "M", "Back"],
+        ["Space", "Enter"]
       ]
     };
 
-    // キーボードの描画
     function renderKeyboard() {
-      kbContainer.innerHTML = ''; // クリア
+      kbContainer.innerHTML = ''; 
       const rows = (shiftState > 0) ? keyLayout.shifted : keyLayout.normal;
 
-      rows.forEach((row, rowIndex) => {
+      rows.forEach((row) => {
         const rowDiv = document.createElement('div');
         rowDiv.className = 'keyboard-row';
         
         row.forEach(key => {
           const keyBtn = document.createElement('button');
           keyBtn.className = 'key';
-          keyBtn.textContent = (key === "Back") ? "⌫" : key;
+          
+          // 表示テキストの調整
+          if (key === "Back") keyBtn.textContent = "⌫";
+          else if (key === "Space") keyBtn.textContent = "空白"; // 表示は空白でもOK
+          else keyBtn.textContent = key;
 
           // 特殊キーのスタイル調整
           if (key === "Shift") {
             keyBtn.classList.add('wide');
-            keyBtn.id = 'key-shift';
-            if (shiftState === 1) keyBtn.classList.add('activated'); // Shiftオン
-            if (shiftState === 2) keyBtn.innerHTML = '⬆️<span style="font-size:0.6em">LOCK</span>'; // Caps
+            if (shiftState === 1) keyBtn.classList.add('activated');
+            if (shiftState === 2) keyBtn.innerHTML = '⬆️<span style="font-size:0.6em">LOCK</span>';
           }
           if (key === "Back") keyBtn.classList.add('wide');
+          if (key === "Space") keyBtn.classList.add('space');
+          if (key === "Enter") keyBtn.classList.add('enter');
 
-          // マウス/タッチイベント（clickは遅いのでpointerdownを使用）
+          // 【修正箇所】タップ時のイベント
           keyBtn.addEventListener('pointerdown', (e) => {
-            e.preventDefault(); // フォーカス移動を防ぐ
-            e.stopPropagation(); // bodyクリックを防ぐ
+            e.preventDefault(); 
             handleKeyPress(key);
           });
 
@@ -247,67 +232,56 @@
       });
     }
 
-    // キーが押された時の処理（物理・ソフト共通）
     function handleKeyPress(key) {
       if (key === "Shift") {
         handleShiftLogic();
       } else if (key === "Back") {
         currentInput = currentInput.slice(0, -1);
-      } else {
-        // 通常の文字入力
-        currentInput += key;
-
-        // Shift状態だったら、1文字入力後にNormalに戻す
-        if (shiftState === 1) {
-          shiftState = 0;
+      } else if (key === "Space") {
+        currentInput += " "; // スペースを追加
+      } else if (key === "Enter") {
+        // Enterを押した場合は「カードを作成」ボタンをクリックした扱いにする
+        if(currentInput.length > 0) {
+          createCardBtn.click();
         }
+        return; // Enterの後は文字追加等の処理をしない
+      } else {
+        currentInput += key;
+        if (shiftState === 1) shiftState = 0;
       }
       updateInputDisplay();
-      renderKeyboard(); // 状態が変わるため再描画
+      renderKeyboard(); 
     }
 
-    // 入力エリアの表示更新
     function updateInputDisplay() {
       missingWordDisplay.textContent = currentInput;
       createCardBtn.disabled = (currentInput.length === 0);
     }
 
-    // シフトのロジック（押している間は大文字・二回素早く押すと大文字キープ）
     function handleShiftLogic() {
       const now = Date.now();
       const timeDiff = now - lastShiftClickTime;
-
-      if (timeDiff < 300) {
-        // 素早いダブルクリック -> CapsLockへ
-        shiftState = 2;
-      } else {
-        // シングルクリック -> 状態をトグル
-        if (shiftState === 0) shiftState = 1;
-        else shiftState = 0; // ShiftオンやCapsLockからNormalへ
-      }
+      if (timeDiff < 300) shiftState = 2;
+      else shiftState = (shiftState === 0) ? 1 : 0;
       lastShiftClickTime = now;
     }
 
-    // 初期描画
     renderKeyboard();
 
     //========================================
-    // 4. 物理キーボードのフック（ショートカット扱い）
+    // 4. 物理キーボードのフック
     //========================================
     window.addEventListener('keydown', (e) => {
-      // キーボードが表示されていない場合は反応しない
       if (kbContainer.style.display === 'none') return;
       
       let pressedKey = e.key;
+      e.preventDefault(); // デフォルトの入力をキャンセル
 
-      // 物理キーの標準入力をすべてキャンセル（コピペ、予測変換などを防ぐマスター設定）
-      e.preventDefault();
-
-      // 物理キーの名称をソフトウェアキーボードの名称に変換
       if (pressedKey === "Backspace") pressedKey = "Back";
       if (pressedKey === "Shift") pressedKey = "Shift";
+      if (pressedKey === " ") pressedKey = "Space";
+      if (pressedKey === "Enter") pressedKey = "Enter";
 
-      // QWERTY配列に存在する文字か、Shift/Backであれば処理を実行
       const allKeysNormal = keyLayout.normal.flat();
       const allKeysShifted = keyLayout.shifted.flat();
       
