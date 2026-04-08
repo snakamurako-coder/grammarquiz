@@ -16,9 +16,10 @@ const unitData = {
 };
 
 // UI要素
-const screens = { 
-  settings: document.getElementById('settings-screen'), 
-  game: document.getElementById('game-screen') 
+const screens = {
+  login: document.getElementById('login-screen'),
+  settings: document.getElementById('settings-screen'),
+  game: document.getElementById('game-screen')
 };
 const elements = {
   subject: document.getElementById('subject-select'),
@@ -253,15 +254,48 @@ document.getElementById('return-settings-btn').addEventListener('click', () => {
   screens.settings.style.display = 'block';
 });
 
+// ======= Google認証 (Phase 6) =======
+async function handleCredentialResponse(response) {
+  const msgEl = document.getElementById('login-msg');
+  msgEl.textContent = "認証中...";
+  msgEl.style.color = "#555";
+  
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      body: JSON.stringify({
+        action: "login",
+        idToken: response.credential
+      })
+    });
+    
+    const data = await res.json();
+    if (data.status === "success") {
+      // 認証成功
+      currentUserId = data.user.account; // whitelistのaccountとする
+      
+      const unInput = document.getElementById('username-input');
+      if (unInput) unInput.value = currentUserId;
+      localStorage.setItem('brightstage_username', currentUserId);
+      
+      screens.login.style.display = 'none';
+      screens.settings.style.display = 'block';
+      msgEl.textContent = "";
+      
+      renderUnits(getSelectedSubjectName());
+    } else {
+      msgEl.textContent = "エラー: " + data.message;
+      msgEl.style.color = "#f44336";
+    }
+  } catch (error) {
+    msgEl.textContent = "通信エラーが発生しました。";
+    msgEl.style.color = "#f44336";
+  }
+}
+window.handleCredentialResponse = handleCredentialResponse;
+
 // 初期化実行
 document.addEventListener('DOMContentLoaded', () => {
-  const unInput = document.getElementById('username-input');
-  if (unInput) {
-    const savedName = localStorage.getItem('brightstage_username');
-    if (savedName && savedName !== "Guest") {
-      unInput.value = savedName;
-      currentUserId = savedName;
-    }
-  }
-  renderUnits(getSelectedSubjectName());
+  // DOM読み込み直後はLogin画面を表示したまま待機。
+  // GSIライブラリが自動でボタンを描画します。
 });
