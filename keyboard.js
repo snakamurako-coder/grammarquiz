@@ -1,14 +1,15 @@
 // keyboard.js
-// ソフトウェアキーボードと不足語入力関連ロジック
+// ソフトウェアキーボード汎用モジュール
 
 const KeyboardModule = (() => {
-  const missDisplay = document.getElementById('missing-word-display');
-  const createBtn = document.getElementById('create-card-btn');
   const kbContainer = document.getElementById('keyboard-container');
   
   let currentInput = "";
   let shiftState = 0;
   let lastShiftClickTime = 0;
+  let displayElement = null;
+  let onEnterCallback = null;
+  let onUpdateCallback = null;
 
   const keyLayout = {
     normal: [
@@ -26,6 +27,15 @@ const KeyboardModule = (() => {
       ["Space", "Enter"]
     ]
   };
+
+  function init(targetElement, initialText, enterCallback, updateCallback) {
+    displayElement = targetElement;
+    currentInput = initialText || "";
+    onEnterCallback = enterCallback;
+    onUpdateCallback = updateCallback;
+    updateInputDisplay();
+    renderKeyboard();
+  }
 
   function renderKeyboard() {
     kbContainer.innerHTML = ''; 
@@ -71,8 +81,8 @@ const KeyboardModule = (() => {
     } else if (key === "Space") {
       currentInput += " ";
     } else if (key === "Enter") {
-      if(currentInput.length > 0) {
-        createBtn.click();
+      if (onEnterCallback) {
+        onEnterCallback(currentInput);
       }
       return; 
     } else {
@@ -84,8 +94,12 @@ const KeyboardModule = (() => {
   }
 
   function updateInputDisplay() {
-    missDisplay.textContent = currentInput;
-    createBtn.disabled = (currentInput.length === 0);
+    if (displayElement) {
+      displayElement.textContent = currentInput;
+    }
+    if (onUpdateCallback) {
+      onUpdateCallback(currentInput);
+    }
   }
 
   function handleShiftLogic() {
@@ -96,31 +110,22 @@ const KeyboardModule = (() => {
     lastShiftClickTime = now;
   }
 
-  missDisplay.addEventListener('click', () => {
+  function show() {
     kbContainer.style.display = 'block';
-  });
+  }
 
-  document.body.addEventListener('click', (e) => {
-    if (e.target.closest('#missing-word-input-area') || e.target.closest('#keyboard-container')) {
-      return; 
-    }
+  function hide() {
     kbContainer.style.display = 'none';
-  });
+  }
 
-  createBtn.addEventListener('click', () => {
-    if (!currentInput) return;
-    if (window.SortingModule) {
-      window.SortingModule.createCard(currentInput, window.SortingModule.getPool());
-      window.SortingModule.checkSubmitVisibility();
-    }
-    currentInput = "";
+  function resetInput(text = "") {
+    currentInput = text;
     updateInputDisplay();
-    kbContainer.style.display = 'none'; 
-  });
+  }
 
+  // 物理キーボードサポート
   window.addEventListener('keydown', (e) => {
     if (kbContainer.style.display === 'none') return;
-    
     let pressedKey = e.key;
     e.preventDefault(); 
 
@@ -141,4 +146,13 @@ const KeyboardModule = (() => {
     renderKeyboard();
   });
 
+  return {
+    init,
+    show,
+    hide,
+    resetInput
+  };
 })();
+
+// エクスポート
+window.KeyboardModule = KeyboardModule;

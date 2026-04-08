@@ -47,35 +47,49 @@
       <button id="create-card-btn" disabled>カードを作成</button>
     </div>
 
-    <div class="area-header">
-      <div class="area-label">▼ 回答欄（並べてください）</div>
+    <!-- 並び替え用 UI -->
+    <div id="sort-ui" style="display:none;">
+      <div class="area-header">
+        <div class="area-label">▼ 回答欄（並べてください）</div>
+      </div>
+      <div id="sentence-container">
+        <span id="prefix-text" class="fixed-text"></span>
+        <div id="answer-slot" class="sortable-area"></div>
+        <span id="suffix-text" class="fixed-text"></span>
+      </div>
+      <div class="area-header">
+        <div class="area-label">▼ 仮置き場</div>
+        <button id="move-all-btn" class="btn-small">↑ 流し込む</button>
+      </div>
+      <div id="word-pool" class="sortable-area"></div>
+      <div class="area-header">
+        <div class="area-label">▼ 除外置き場</div>
+      </div>
+      <div id="trash-slot" class="sortable-area"></div>
+      <button id="submit-btn" style="display: none; width: 100%; padding: 15px; font-size: 1.2em; background-color: #4caf50; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px;">これで回答する</button>
     </div>
 
-    <!-- Sentence Format for Sortable area -->
-    <div id="sentence-container">
-      <span id="prefix-text" class="fixed-text"></span>
-      <div id="answer-slot" class="sortable-area"></div>
-      <span id="suffix-text" class="fixed-text"></span>
+    <!-- 4択問題用 UI -->
+    <div id="choice-ui" style="display:none;">
+      <div id="choice-sentence-container" class="sentence-container fixed-text" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px;"></div>
+      <div id="choice-buttons-container" class="choices-grid"></div>
     </div>
 
-    <div class="area-header">
-      <div class="area-label">▼ 仮置き場</div>
-      <button id="move-all-btn" class="btn-small">↑ 流し込む</button>
+    <!-- タイピング（和文英訳・空所）用 UI -->
+    <div id="typing-ui" style="display:none;">
+      <div id="typing-sentence-container" class="sentence-container fixed-text" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;"></div>
+      <div id="typing-input-display" class="typing-display" style="min-height: 40px; padding: 10px; border: 2px solid #ccc; border-radius: 4px; background-color: #fff; cursor: pointer; font-size: 1.2em; margin-bottom: 15px;">タップして入力</div>
+      <button id="typing-submit-btn" style="display: none; width: 100%; padding: 15px; font-size: 1.2em; background-color: #4caf50; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px;">これで回答する</button>
     </div>
-    <div id="word-pool" class="sortable-area"></div>
 
-    <div class="area-header">
-      <div class="area-label">▼ 除外置き場</div>
-    </div>
-    <div id="trash-slot" class="sortable-area"></div>
-
-    <button id="submit-btn" style="display: none;">これで回答する</button>
     <div id="result-msg"></div>
   </div>
 
   <div id="keyboard-container"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+  <script src="choice.js"></script>
+  <script src="typing.js"></script>
   <script src="sorting.js"></script>
   <script src="keyboard.js"></script>
   <script src="app.js"></script>

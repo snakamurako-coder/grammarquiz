@@ -9,7 +9,19 @@ const SortingModule = (() => {
   const resultMsg = document.getElementById('result-msg');
   const moveAllBtn = document.getElementById('move-all-btn');
   
+  const missDisplay = document.getElementById('missing-word-display');
+  const createCardBtn = document.getElementById('create-card-btn');
+  const missingWordArea = document.getElementById('missing-word-input-area');
+  
   let qData = null;
+
+  document.body.addEventListener('click', (e) => {
+    if (window.KeyboardModule && document.getElementById('sort-ui').style.display === 'block') {
+      if (!e.target.closest('#missing-word-input-area') && !e.target.closest('#keyboard-container')) {
+        window.KeyboardModule.hide();
+      }
+    }
+  });
 
   function initGame(questionData) {
     qData = questionData;
@@ -23,7 +35,37 @@ const SortingModule = (() => {
     initialPool.sort(() => Math.random() - 0.5);
     initialPool.forEach(w => createCard(w, wordPool));
     
+    // キーボード機能の初期化
+    if (window.KeyboardModule) {
+      window.KeyboardModule.init(
+        missDisplay, 
+        "", 
+        (text) => {
+           if (text) createCardAction(text);
+        }, 
+        (text) => {
+           createCardBtn.disabled = (text.length === 0);
+        }
+      );
+      
+      missDisplay.onclick = (e) => {
+        window.KeyboardModule.show();
+        e.stopPropagation();
+      };
+      
+      createCardBtn.onclick = () => {
+         if (!createCardBtn.disabled) createCardAction(missDisplay.textContent);
+      };
+    }
+    
     checkSubmitVisibility();
+  }
+
+  function createCardAction(text) {
+    createCard(text, wordPool);
+    checkSubmitVisibility();
+    if(window.KeyboardModule) window.KeyboardModule.resetInput("");
+    createCardBtn.disabled = true;
   }
 
   function createCard(text, container) {
