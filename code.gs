@@ -18,6 +18,13 @@ function doGet(e) {
     } catch (error) {
       return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
     }
+  } else if (action === 'getCatalog') {
+    try {
+      const data = fetchCatalogFromDrive();
+      return sendResponse({ status: "success", data: data });
+    } catch (error) {
+      return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
+    }
   }
   return sendResponse({ status: "error", message: "Invalid action" });
 }
@@ -104,6 +111,27 @@ function fetchQuestionsFromSheet(params) {
   }
 
   return questions;
+}
+
+function fetchCatalogFromDrive() {
+  let materialsFolder = null;
+  const mFolders = DriveApp.getFoldersByName("materials");
+  if (mFolders.hasNext()) materialsFolder = mFolders.next();
+  if (!materialsFolder) throw new Error("materialsフォルダが見つかりません。");
+
+  const catalog = {};
+  const files = materialsFolder.getFilesByType(MimeType.GOOGLE_SHEETS);
+  
+  while (files.hasNext()) {
+    const file = files.next();
+    const subjectName = file.getName();
+    const ss = SpreadsheetApp.open(file);
+    const sheets = ss.getSheets();
+    const unitNames = sheets.map(s => s.getName());
+    catalog[subjectName] = unitNames;
+  }
+
+  return catalog;
 }
 
 // メインの受信処理
