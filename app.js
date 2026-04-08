@@ -285,8 +285,27 @@ window.onLoginSuccess = function(user) {
   renderUnits(getSelectedSubjectName());
 };
 
+// ログアウト機能
+document.addEventListener('DOMContentLoaded', () => {
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', () => {
+      if (window.AuthService) {
+        window.AuthService.clearSession();
+      }
+      location.reload(); // ページをリロードしてログイン画面に戻す
+    });
+  }
+});
+
 // 初期化実行
 document.addEventListener('DOMContentLoaded', () => {
-  // DOM読み込み直後はLogin画面を表示したまま待機。
-  // GSIライブラリが自動でボタンを描画します。
+  // 自動ログイン（セッション復元）の試行
+  if (window.AuthService && window.AuthService.loadSession()) {
+    console.log("前回ログインしたユーザー情報からセッションを復元中...", window.AuthService.currentUser);
+    window.onLoginSuccess(window.AuthService.currentUser);
+  } else {
+    // セッションがない場合はLogin画面を表示したまま待機。
+    // GSIライブラリが自動でボタンを描画します。
+  }
 });
