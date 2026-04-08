@@ -5,16 +5,44 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BrightStage</title>
   <link rel="stylesheet" href="style.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
+  <!-- Login Screen -->
+  <div id="login-screen">
+    <div class="header-title">BrightStage ログイン</div>
+    <div class="setting-section" style="text-align: center; padding: 40px 10px;">
+      <p style="margin-bottom: 20px; font-size: 1.1em; color: #555;">システムを利用するにはGoogleアカウント認証が必要です。</p>
+      
+      <!-- Googleログインボタン -->
+      <div id="g_id_onload"
+         data-client_id="YOUR_CLIENT_ID_HERE.apps.googleusercontent.com"
+         data-context="signin"
+         data-ux_mode="popup"
+         data-callback="handleCredentialResponse"
+         data-auto_prompt="false">
+      </div>
+      <div class="g_id_signin"
+         data-type="standard"
+         data-shape="rectangular"
+         data-theme="outline"
+         data-text="signin_with"
+         data-size="large"
+         data-logo_alignment="left"
+         style="display: flex; justify-content: center;">
+      </div>
+      <div id="login-msg" style="margin-top: 15px; color: #f44336; font-weight: bold;"></div>
+    </div>
+  </div>
+
   <!-- Game Settings & Modes -->
-  <div id="settings-screen">
+  <div id="settings-screen" style="display: none;">
     <div class="header-title">BrightStage 学習設定</div>
 
     <div class="setting-section">
-      <div class="section-title">0. ユーザー情報</div>
-      <input type="text" id="username-input" placeholder="名前やIDを入力してください" style="width:100%; padding: 10px; font-size: 1.1em; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box;">
+      <div class="section-title">0. ユーザー情報（認証済み）</div>
+      <input type="text" id="username-input" style="width:100%; padding: 10px; font-size: 1.1em; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; background-color: #f5f5f5;" disabled>
     </div>
     
     <div class="setting-section">

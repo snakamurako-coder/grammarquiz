@@ -1,103 +1,79 @@
-// スプレッドシートを操作・返却するGASの基本構造（APIとして機能させる）
+// code.gs 統合版
+// レスポンスを返す共通関数
+const sendResponse = (responseObject) => {
+  return ContentService.createTextOutput(JSON.stringify(responseObject))
+    .setMimeType(ContentService.MimeType.JSON);
+};
+
+function doOptions(e) {
+  return ContentService.createTextOutput("OK").setMimeType(ContentService.MimeType.TEXT);
+}
 
 function doGet(e) {
-  const output = ContentService.createTextOutput();
-  output.setMimeType(ContentService.MimeType.JSON);
-  
   const action = e.parameter.action;
-  
   if (action === 'getQuestions') {
     try {
       const data = fetchQuestionsFromSheet(e.parameter);
-      output.setContent(JSON.stringify({ status: "success", data: data }));
+      return sendResponse({ status: "success", data: data });
     } catch (error) {
-      output.setContent(JSON.stringify({ status: "error", message: error.toString(), stack: error.stack }));
+      return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
     }
-  } else {
-    output.setContent(JSON.stringify({ status: "error", message: "Invalid action" }));
   }
-  
-  return output;
+  return sendResponse({ status: "error", message: "Invalid action" });
 }
 
 function fetchQuestionsFromSheet(params) {
-  const subject = params.subject; // 例： "中学1年 英語"
-  const unit = params.unit;       // 例： "be動詞"
+  const subject = params.subject;
+  const unit = params.unit;
 
   if (!subject || !unit) {
     throw new Error("subject (学年・科目) と unit (単元名) のパラメータが必須です。");
   }
 
   let materialsFolder = null;
+  const mFolders = DriveApp.getFoldersByName("materials");
+  if (mFolders.hasNext()) materialsFolder = mFolders.next();
+  if (!materialsFolder) throw new Error("materialsフォルダが見つかりません。");
 
-  try {
-    // 実行スクリプトファイルの親フォルダを基準にmaterialsを探す
-    const scriptId = ScriptApp.getScriptId();
-    const scriptFile = DriveApp.getFileById(scriptId);
-    const parents = scriptFile.getParents();
-    if (parents.hasNext()) {
-      const parentFolder = parents.next();
-      const mFolders = parentFolder.getFoldersByName("materials");
-      if (mFolders.hasNext()) materialsFolder = mFolders.next();
-    }
-  } catch (e) {
-    // コンテナバインド等で失敗した場合はフォールバック
-  }
-
-  if (!materialsFolder) {
-    // 全体からmaterialsフォルダを探して最初に見つかったものを利用
-    const mFolders = DriveApp.getFoldersByName("materials");
-    if (mFolders.hasNext()) {
-      materialsFolder = mFolders.next();
-    } else {
-      throw new Error("materialsフォルダが見つかりません。");
-    }
-  }
-  
-  // 対象のブックを探す
   const files = materialsFolder.getFilesByName(subject);
-  if (!files.hasNext()) {
-    throw new Error("スプレッドシートが見つかりません: " + subject);
-  }
+  if (!files.hasNext()) throw new Error("スプレッドシートが見つかりません: " + subject);
   const spreadsheetFile = files.next();
   const ss = SpreadsheetApp.open(spreadsheetFile);
-  
+
   const unitList = unit.split(',').map(u => u.trim());
   const questions = [];
 
   for (let u = 0; u < unitList.length; u++) {
     const sheetName = unitList[u];
     if (!sheetName) continue;
-    
     const sheet = ss.getSheetByName(sheetName);
-    if (!sheet) continue; // 見つからない単元はスキップ
-    
+    if (!sheet) continue;
+
     const data = sheet.getDataRange().getValues();
     if (data.length <= 1) continue;
-    
+
     const headers = data[0];
-    
     for (let r = 1; r < data.length; r++) {
       const row = data[r];
-      
+
       function getValue(headerName) {
         const idx = headers.indexOf(headerName);
         return idx !== -1 ? row[idx] : "";
       }
-      
+
       const id = getValue("通し番号");
       const format = getValue("問題形式");
-      
+
       if (id === "" || format === "") continue;
-      
+
       const japanese = getValue("日本語訳・和文") || getValue("和文（空所有）");
       const sentence_template = getValue("並び替え用英文") || getValue("英文（空所有）");
       const correct_answer = getValue("正答") || getValue("英文");
       const dummy_selection_method = getValue("ダミー選出方法");
-      
+
       const poolWords = [];
       const dummies = [];
-      
+
       for (let c = 0; c < headers.length; c++) {
         const h = headers[c] ? headers[c].toString() : "";
         if (h.startsWith("並び替え語句") && !h.includes("ダミー")) {
@@ -106,9 +82,9 @@ function fetchQuestionsFromSheet(params) {
           if (row[c] !== "") dummies.push(row[c]);
         }
       }
-      
+
       const assembledCorrectWords = correct_answer ? correct_answer.toString().split(' ') : [];
-      
+
       const q = {
         id: id,
         unit: sheetName,
@@ -122,160 +98,186 @@ function fetchQuestionsFromSheet(params) {
         dummy_selection_method: dummy_selection_method,
         explanation: getValue("その他説明やヒント")
       };
-      
+
       questions.push(q);
     }
   }
-  
+
   return questions;
 }
 
-// POSTリクエストを受け取った時（学習結果の保存に使用）
+// メインの受信処理
 function doPost(e) {
-  const output = ContentService.createTextOutput();
-  output.setMimeType(ContentService.MimeType.JSON);
-  
   try {
-    const postData = JSON.parse(e.postData.contents);
-    if (postData.action === 'saveResult') {
-      const results = postData.results;
-      if (results && results.length > 0) {
-        
-        let configFolder = null;
-        try {
-          const scriptId = ScriptApp.getScriptId();
-          const parents = DriveApp.getFileById(scriptId).getParents();
-          let parentFolder = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
-          const cFolders = parentFolder.getFoldersByName("config");
-          if (cFolders.hasNext()) configFolder = cFolders.next();
-        } catch (err) {}
+    const requestData = JSON.parse(e.postData.contents);
+    const action = requestData.action;
 
-        if (!configFolder) {
-          const cFolders = DriveApp.getFoldersByName("config");
-          if (cFolders.hasNext()) configFolder = cFolders.next();
-        }
-        
-        if (configFolder) {
-          const aFiles = configFolder.getFilesByName("管理ブック");
-          if (aFiles.hasNext()) {
-            const ss = SpreadsheetApp.open(aFiles.next());
-            const sheet = ss.getSheetByName("成績記録");
-            if (sheet) {
-              // 排他制御や高速化のためには2次元配列にしてまとめて書き込む手法もありますが、
-              // フェーズ5の初期実装としてループでのappendRowにて確実に行を追加します。
-              const rows = [];
-              for (let i = 0; i < results.length; i++) {
-                const r = results[i];
-                rows.push([
-                  r.timestamp, 
-                  r.userId, 
-                  r.questionId, 
-                  r.subject, 
-                  r.unit, 
-                  r.isCorrect, 
-                  r.mode
-                ]);
-              }
-              // まとめて書き込み（高速化）
-              const startRow = sheet.getLastRow() + 1;
-              sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
-            }
-          }
-        }
-      }
-      output.setContent(JSON.stringify({ status: "success" }));
+    // アクション（目的）によって処理を振り分ける
+    if (action === "login") {
+      return handleLogin(requestData);
+    } else if (action === "saveResult") {
+      return handleSaveResult(requestData); // アプリ側成績用
+    } else if (action === "save") {
+      return handleSave(requestData);       // 既存利用用
+    } else if (action === "get_csv_data") {
+      return handleGetData(requestData);    // 既存利用用
     } else {
-      output.setContent(JSON.stringify({ status: "error", message: "Invalid action" }));
+      return sendResponse({ status: "error", message: "無効なactionです" });
     }
   } catch (error) {
-    output.setContent(JSON.stringify({ status: "error", message: error.toString() }));
+    return sendResponse({ status: "error", message: error.toString() });
   }
-  return output;
 }
 
-// ＝＝＝＝＝ 初期セットアップ用関数 ＝＝＝＝＝
-// ※ Google Apps Script のエディタ上で「setupEnvironment」を選択し「実行」を押してください。
-function setupEnvironment() {
-  const scriptId = ScriptApp.getScriptId();
-  const scriptFile = DriveApp.getFileById(scriptId);
-  const parents = scriptFile.getParents();
-  let parentFolder;
-  if (parents.hasNext()) {
-    parentFolder = parents.next();
+// =========================================================
+// ① ログイン処理（以前のコードをそのまま関数化）
+// =========================================================
+function handleLogin(requestData) {
+  const idToken = requestData.idToken;
+  if (!idToken) return sendResponse({ status: "error", message: "IDトークンがありません" });
+
+  const tokenInfoUrl = `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`;
+  const tokenResponse = UrlFetchApp.fetch(tokenInfoUrl, { muteHttpExceptions: true });
+  if (tokenResponse.getResponseCode() !== 200) return sendResponse({ status: "error", message: "無効なトークンです" });
+  
+  const tokenData = JSON.parse(tokenResponse.getContentText());
+  const props = PropertiesService.getScriptProperties();
+  if (tokenData.aud !== props.getProperty('CLIENT_ID')) {
+    return sendResponse({ status: "error", message: "不正なアクセスです" });
+  }
+
+  const userEmail = tokenData.email;
+  const spreadId = props.getProperty('SPREADSHEET_ID');
+  if (!spreadId) return sendResponse({ status: "error", message: "SPREADSHEET_IDが設定されていません" });
+
+  const sheet = SpreadsheetApp.openById(spreadId).getSheetByName('whitelist');
+  if (!sheet) return sendResponse({ status: "error", message: "whitelistシートが見つかりません" });
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const accountIdx = headers.indexOf('account');
+  if (accountIdx === -1) return sendResponse({ status: "error", message: "account列がありません" });
+
+  let foundUser = null;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][accountIdx] === userEmail) {
+      foundUser = {};
+      for (let j = 0; j < headers.length; j++) {
+        if (headers[j]) foundUser[headers[j]] = data[i][j];
+      }
+      break;
+    }
+  }
+  
+  if (foundUser) {
+    return sendResponse({ status: "success", user: foundUser, message: "認証成功" });
   } else {
-    parentFolder = DriveApp.getRootFolder();
+    return sendResponse({ status: "error", message: "許可されていないユーザーです" });
+  }
+}
+
+// =========================================================
+// 成績保存処理（Phase 5用・リファクタ版）
+// =========================================================
+function handleSaveResult(requestData) {
+  const results = requestData.results;
+  if (!results || results.length === 0) return sendResponse({ status: "success" });
+
+  const props = PropertiesService.getScriptProperties();
+  const spreadId = props.getProperty('SPREADSHEET_ID');
+  
+  if (!spreadId) {
+    return sendResponse({ status: "error", message: "SPREADSHEET_IDが設定されていません。" });
   }
 
-  // 1. materials (教材格納) フォルダの作成
-  let materialsFolder;
-  const mFolders = parentFolder.getFoldersByName("materials");
-  if (mFolders.hasNext()) {
-    materialsFolder = mFolders.next();
-    Logger.log("既存の materials フォルダを見つけました。");
-  } else {
-    materialsFolder = parentFolder.createFolder("materials");
-    Logger.log("新規に materials フォルダを作成しました。");
+  const ss = SpreadsheetApp.openById(spreadId);
+  let sheet = ss.getSheetByName("成績記録");
+  
+  if (!sheet) {
+    sheet = ss.insertSheet("成績記録");
+    sheet.appendRow(["タイムスタンプ", "ユーザーID", "問題ID", "学年科目", "単元", "正誤判定", "出題モード"]);
   }
 
-  // 2. config (管理・成績蓄積用) フォルダの作成
-  let configFolder;
-  const cFolders = parentFolder.getFoldersByName("config");
-  if (cFolders.hasNext()) {
-    configFolder = cFolders.next();
-    Logger.log("既存の config フォルダを見つけました。");
-  } else {
-    configFolder = parentFolder.createFolder("config");
-    Logger.log("新規に config フォルダを作成しました。");
-  }
-
-  // 3. ログ・成績管理ブックのセットアップ (configフォルダ内)
-  const adminBookName = "管理ブック";
-  const aFiles = configFolder.getFilesByName(adminBookName);
-  if (!aFiles.hasNext()) {
-    const ss = SpreadsheetApp.create(adminBookName);
-    const file = DriveApp.getFileById(ss.getId());
-    file.moveTo(configFolder);
-    
-    const logSheet = ss.getSheets()[0];
-    logSheet.setName("成績記録");
-    logSheet.appendRow(["タイムスタンプ", "ユーザーID", "問題ID", "学年科目", "単元", "正誤判定", "出題モード"]);
-    Logger.log("管理ブック（成績記録用）を作成しました。");
-  }
-
-  // 4. サンプル教材ブックのセットアップ (materialsフォルダ内)
-  const sampleBookName = "中学1年 英語";
-  const sFiles = materialsFolder.getFilesByName(sampleBookName);
-  if (!sFiles.hasNext()) {
-    const ss = SpreadsheetApp.create(sampleBookName);
-    const file = DriveApp.getFileById(ss.getId());
-    file.moveTo(materialsFolder);
-    
-    const sheet = ss.getSheets()[0];
-    sheet.setName("be動詞");
-    
-    // 見出し追加
-    const headers = [
-      "通し番号", "問題形式", "日本語訳・和文", "和文（空所有）", "並び替え用英文", "英文（空所有）",
-      "正答", "ダミー選出方法", "並び替え語句1", "並び替え語句2", "並び替え語句3", "並び替え語句ダミー1",
-      "ダミー回答1", "ダミー回答2", "ダミー回答3", "その他説明やヒント"
-    ];
-    sheet.appendRow(headers);
-    
-    // サンプルデータ追加
-    sheet.appendRow([
-      "Q001", "並び替え", "私は学生です。", "", "I am a student.", "", "I am a student.", 
-      "", "I", "am", "a", "student", "teacher", "", "", "基本のbe動詞です。"
+  const rows = [];
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    rows.push([
+      r.timestamp, 
+      r.userId, 
+      r.questionId, 
+      r.subject, 
+      r.unit, 
+      r.isCorrect, 
+      r.mode
     ]);
-    sheet.appendRow([
-      "Q002", "4択", "彼は忙しいです。", "", "", "He [   ] busy.", "is", 
-      "無作為", "", "", "", "", "are", "am", "be", "主語がHeなのでisを使います。"
-    ]);
-    sheet.appendRow([
-      "Q003", "英訳", "これはペンですか？", "", "", "", "Is this a pen?", 
-      "", "", "", "", "", "", "", "", "疑問文はbe動詞を前に出します。"
-    ]);
-    Logger.log("サンプル教材ブック（中学1年 英語）を作成しました。");
+  }
+  const startRow = sheet.getLastRow() + 1;
+  sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+
+  return sendResponse({ status: "success", message: "成績を保存しました" });
+}
+
+// =========================================================
+// ② 汎用データ保存処理（どんなアプリからでも使える）
+// =========================================================
+function handleSave(requestData) {
+  const sheetName = requestData.sheetName; // アプリ側から「保存先シート名」を指定させる
+  const record = requestData.record;       // 保存したいデータ本体（オブジェクト）
+
+  if (!sheetName || !record) return sendResponse({ status: "error", message: "sheetNameとrecordが必要です" });
+
+  const ss = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID'));
+  let sheet = ss.getSheetByName(sheetName);
+
+  // もしそのアプリ用のシートがまだ無ければ、自動で作る（超・汎用設計）
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+    // recordのキー（プロパティ名）をそのまま1行目の見出しにする
+    const newHeaders = Object.keys(record);
+    sheet.appendRow(newHeaders);
   }
 
-  Logger.log("初期セットアップがすべて完了しました！");
+  // 見出しに合わせてデータを配列化して追記する
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const rowData = headers.map(header => {
+    return record[header] !== undefined ? record[header] : ""; // データが無ければ空欄
+  });
+
+  sheet.appendRow(rowData);
+  return sendResponse({ status: "success", message: "データを保存しました" });
+}
+
+// =========================================================
+// ③ 汎用データ取得処理（CSV等用・自分のデータだけを抽出）
+// =========================================================
+function handleGetData(requestData) {
+  const sheetName = requestData.sheetName;
+  const targetEmail = requestData.userEmail;
+
+  if (!sheetName || !targetEmail) return sendResponse({ status: "error", message: "sheetNameとuserEmailが必要です" });
+
+  const ss = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID'));
+  const sheet = ss.getSheetByName(sheetName);
+  
+  if (!sheet) return sendResponse({ status: "success", data: [], message: "まだ記録がありません" });
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf('account'); // データの中に 'account' という見出しがある前提
+
+  if (emailIdx === -1) return sendResponse({ status: "error", message: "データ内にaccount列がありません" });
+
+  // 自分のメールアドレスと一致する行だけを抽出し、オブジェクトの配列に変換して返す
+  const userRecords = [];
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][emailIdx] === targetEmail) {
+      let obj = {};
+      for (let j = 0; j < headers.length; j++) {
+        if (headers[j]) obj[headers[j]] = data[i][j];
+      }
+      userRecords.push(obj);
+    }
+  }
+
+  return sendResponse({ status: "success", data: userRecords });
 }
