@@ -1,7 +1,7 @@
 // app.js
 // データと画面遷移の管理
 
-const API_URL = "https://script.google.com/a/macros/yamagataps.jp/s/AKfycbyHY4tst-GHOj2Wv8jYuh5qcFAlBQcXICDiewks1kEG6KCG5_BHSzqVUtaoXw51DjHu/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbxekok6FhAiXnkCfCKo5iCS9YMeoKIVdUARbzaRG94bOVVQEKcxsStegXvVSevrQ_-A/exec";
 let currentQuestionDataList = [];
 let currentQuestionIndex = 0;
 let totalQuestionsCount = 0;
