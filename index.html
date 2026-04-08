@@ -40,9 +40,15 @@
   <div id="settings-screen" style="display: none;">
     <div class="header-title">BrightStage 学習設定</div>
 
-    <div class="setting-section">
+    <div class="setting-section" id="profile-container">
       <div class="section-title">0. ユーザー情報（認証済み）</div>
-      <input type="text" id="username-input" style="width:100%; padding: 10px; font-size: 1.1em; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; background-color: #f5f5f5;" disabled>
+      <div style="background-color: #f5f5f5; border: 1px solid #ccc; border-radius: 6px; padding: 10px; font-size: 1.1em; text-align: left;">
+        <div style="margin-bottom: 5px;"><strong>氏名: </strong><span id="profile-name"></span></div>
+        <div style="margin-bottom: 5px;"><strong>学年: </strong><span id="profile-grade"></span></div>
+        <div style="margin-bottom: 5px;"><strong>クラス: </strong><span id="profile-class"></span></div>
+        <div style="font-size: 0.9em; color: #666; margin-top: 8px;"><strong>アカウント: </strong><span id="profile-account"></span></div>
+      </div>
+      <input type="hidden" id="username-input">
     </div>
     
     <div class="setting-section">
@@ -147,6 +153,7 @@
   <script src="typing.js"></script>
   <script src="sorting.js"></script>
   <script src="keyboard.js"></script>
+  <script src="authService.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

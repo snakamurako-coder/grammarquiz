@@ -2,6 +2,8 @@
 // データと画面遷移の管理
 
 const API_URL = "https://script.google.com/macros/s/AKfycbxekok6FhAiXnkCfCKo5iCS9YMeoKIVdUARbzaRG94bOVVQEKcxsStegXvVSevrQ_-A/exec";
+window.API_URL = API_URL;
+
 let currentQuestionDataList = [];
 let currentQuestionIndex = 0;
 let totalQuestionsCount = 0;
@@ -193,9 +195,14 @@ window.onQuestionCompleted = (isCorrect) => {
   const modeRadio = document.querySelector('input[name="play-mode"]:checked');
   if (modeRadio) modeDesc = modeRadio.value;
   
+  const user = window.AuthService && window.AuthService.currentUser ? window.AuthService.currentUser : {};
+  
   sessionResults.push({
     timestamp: new Date().toISOString(),
     userId: currentUserId,
+    userName: user.name || "",
+    grade: user.grade || "",
+    userClass: user.class || "",
     questionId: currentQ.id,
     subject: elements.subject.options[elements.subject.selectedIndex].text,
     unit: currentQ.unit || "",
@@ -254,45 +261,29 @@ document.getElementById('return-settings-btn').addEventListener('click', () => {
   screens.settings.style.display = 'block';
 });
 
-// ======= Google認証 (Phase 6) =======
-async function handleCredentialResponse(response) {
-  const msgEl = document.getElementById('login-msg');
-  msgEl.textContent = "認証中...";
-  msgEl.style.color = "#555";
+// ======= AuthService連携 =======
+window.onLoginSuccess = function(user) {
+  currentUserId = user.account;
+  const unInput = document.getElementById('username-input');
+  if (unInput) unInput.value = currentUserId;
+  localStorage.setItem('brightstage_username', currentUserId);
+
+  // プロフィールUIへの反映
+  const elName = document.getElementById('profile-name');
+  const elGrade = document.getElementById('profile-grade');
+  const elClass = document.getElementById('profile-class');
+  const elAccount = document.getElementById('profile-account');
+
+  if(elName) elName.textContent = user.name || "未設定";
+  if(elGrade) elGrade.textContent = user.grade || "未設定";
+  if(elClass) elClass.textContent = user.class || "未設定";
+  if(elAccount) elAccount.textContent = user.account || currentUserId;
+
+  screens.login.style.display = 'none';
+  screens.settings.style.display = 'block';
   
-  try {
-    const res = await fetch(API_URL, {
-      method: "POST",
-      body: JSON.stringify({
-        action: "login",
-        idToken: response.credential
-      })
-    });
-    
-    const data = await res.json();
-    if (data.status === "success") {
-      // 認証成功
-      currentUserId = data.user.account; // whitelistのaccountとする
-      
-      const unInput = document.getElementById('username-input');
-      if (unInput) unInput.value = currentUserId;
-      localStorage.setItem('brightstage_username', currentUserId);
-      
-      screens.login.style.display = 'none';
-      screens.settings.style.display = 'block';
-      msgEl.textContent = "";
-      
-      renderUnits(getSelectedSubjectName());
-    } else {
-      msgEl.textContent = "エラー: " + data.message;
-      msgEl.style.color = "#f44336";
-    }
-  } catch (error) {
-    msgEl.textContent = "通信エラーが発生しました。";
-    msgEl.style.color = "#f44336";
-  }
-}
-window.handleCredentialResponse = handleCredentialResponse;
+  renderUnits(getSelectedSubjectName());
+};
 
 // 初期化実行
 document.addEventListener('DOMContentLoaded', () => {
