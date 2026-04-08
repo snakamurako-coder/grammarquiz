@@ -30,6 +30,15 @@
         <label class="check-item"><input type="checkbox" id="dummy-option" checked> [上級] ダミー（不要語）を混入する</label>
       </div>
     </div>
+    <div class="setting-section">
+      <div class="section-title">4. 出題モード</div>
+      <div class="check-list">
+        <label class="check-item"><input type="radio" name="play-mode" value="normal" checked> 順番通り（選択した全問）</label>
+        <label class="check-item"><input type="radio" name="play-mode" value="random10"> ランダム演習（10問）</label>
+        <label class="check-item"><input type="radio" name="play-mode" value="weakness"> 苦手克服優先（10問）</label>
+        <label class="check-item"><input type="radio" name="play-mode" value="unseen"> 未定着優先（10問）</label>
+      </div>
+    </div>
     <button id="start-btn" class="btn-primary">学習を開始する</button>
   </div>
 
@@ -83,11 +92,23 @@
     </div>
 
     <div id="result-msg"></div>
+    <button id="next-btn" class="btn-primary" style="display: none; margin-top: 15px;">次の問題へ進む</button>
+  </div>
+
+  <!-- Result Screen -->
+  <div id="result-screen" style="display: none; text-align: center;">
+    <div class="header-title">リザルト</div>
+    <div class="setting-section">
+      <h2 id="result-score" style="font-size: 2em; color: #2196f3; margin-bottom: 20px;"></h2>
+      <p id="result-details" style="font-size: 1.1em; color: #555; margin-bottom: 20px;"></p>
+    </div>
+    <button id="return-settings-btn" class="btn-primary">学習設定に戻る</button>
   </div>
 
   <div id="keyboard-container"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+  <script src="algorithm.js"></script>
   <script src="choice.js"></script>
   <script src="typing.js"></script>
   <script src="sorting.js"></script>

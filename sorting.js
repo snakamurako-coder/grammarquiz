@@ -102,11 +102,14 @@ const SortingModule = (() => {
     if (!qData) return;
     const userAnswer = Array.from(answerSlot.children).map(c => c.textContent).join(' ');
     if (userAnswer === qData.correct_answer) {
-      resultMsg.textContent = "⭕️ 正解！"; 
+      resultMsg.textContent = "⭕️ 正解！";
       resultMsg.style.color = "#4caf50";
+      submitBtn.style.display = 'none'; // 正解したら消す
+      if(window.onQuestionCompleted) window.onQuestionCompleted(true);
     } else {
-      resultMsg.textContent = "❌ 惜しい！並び順や入力した語句を確認。"; 
+      resultMsg.textContent = "❌ 不正解...";
       resultMsg.style.color = "#f44336";
+      if(window.onQuestionCompleted) window.onQuestionCompleted(false);
     }
   });
 

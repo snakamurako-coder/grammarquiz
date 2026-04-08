@@ -1,9 +1,11 @@
 // app.js
 // データと画面遷移の管理
 
-const API_URL = "https://script.google.com/a/macros/yamagataps.jp/s/AKfycbxvpbCWJ5wYcyfx2ui6XMYbERITn3oMieSeNsgtbj9Igwxmi4BmqYKpiN6QmLhV9xaU/exec";
+const API_URL = "https://script.google.com/a/macros/yamagataps.jp/s/AKfycbwiHme_rEG4CbR_8Y8nixIPu69Hcz9NxFELkN3RiphedCydx6Jze4s7zELVWyWLnN5G/exec";
 let currentQuestionDataList = [];
 let currentQuestionIndex = 0;
+let totalQuestionsCount = 0;
+let currentScore = 0;
 
 // GASへ送信するテキスト値
 const unitData = { 
@@ -67,14 +69,21 @@ elements.startBtn.addEventListener('click', async () => {
   elements.startBtn.textContent = "問題を読み込み中...";
 
   try {
-    const unitName = checkedUnits[0]; // TODO: 複数単元混合への対応はPhase 4
-    const questions = await fetchQuestionsFromGAS(subjectName, unitName);
+    const unitParam = checkedUnits.join(",");
+    const rawQuestions = await fetchQuestionsFromGAS(subjectName, unitParam);
+    const mode = document.querySelector('input[name="play-mode"]:checked').value;
+    
+    // アルゴリズムモジュールを通す
+    const questions = window.AlgorithmModule ? window.AlgorithmModule.buildQuestionSet(rawQuestions, mode) : rawQuestions;
     
     if (questions && questions.length > 0) {
       currentQuestionDataList = questions;
+      totalQuestionsCount = questions.length;
       currentQuestionIndex = 0;
+      currentScore = 0;
       loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
       screens.settings.style.display = 'none';
+      document.getElementById('result-screen').style.display = 'none';
       screens.game.style.display = 'block';
     } else {
       alert("問題が見つからない、またはシートに有効なデータがありません。");
@@ -156,6 +165,40 @@ function loadQuestionToGame(qData) {
     }
   }
 }
+
+// モジュールからのコールバック
+window.onQuestionCompleted = (isCorrect) => {
+  const currentQ = currentQuestionDataList[currentQuestionIndex];
+  if (window.AlgorithmModule) {
+    window.AlgorithmModule.recordResult(currentQ.id, isCorrect);
+  }
+  if (isCorrect) currentScore++;
+  document.getElementById('next-btn').style.display = 'block';
+};
+
+document.getElementById('next-btn').addEventListener('click', () => {
+  document.getElementById('next-btn').style.display = 'none';
+  currentQuestionIndex++;
+  if (currentQuestionIndex < currentQuestionDataList.length) {
+    loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
+  } else {
+    showResultScreen();
+  }
+});
+
+function showResultScreen() {
+  screens.game.style.display = 'none';
+  const resultScreen = document.getElementById('result-screen');
+  resultScreen.style.display = 'block';
+  
+  document.getElementById('result-score').textContent = `スコア: ${currentScore} / ${totalQuestionsCount}`;
+  document.getElementById('result-details').textContent = "演習が終了しました。";
+}
+
+document.getElementById('return-settings-btn').addEventListener('click', () => {
+  document.getElementById('result-screen').style.display = 'none';
+  screens.settings.style.display = 'block';
+});
 
 // 初期化実行
 document.addEventListener('DOMContentLoaded', () => {
