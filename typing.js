@@ -70,9 +70,11 @@ const TypingModule = (() => {
     if (userAnswer.trim().toLowerCase() === qData.correct_answer.trim().toLowerCase()) {
       resultMsg.textContent = "⭕️ 正解！";
       resultMsg.style.color = "#4caf50";
+      if(window.onQuestionCompleted) window.onQuestionCompleted(true);
     } else {
       resultMsg.textContent = "❌ 惜しい！ 正答: " + qData.correct_answer;
       resultMsg.style.color = "#f44336";
+      if(window.onQuestionCompleted) window.onQuestionCompleted(false);
     }
     if (window.KeyboardModule) window.KeyboardModule.hide();
     submitBtn.style.display = 'none';

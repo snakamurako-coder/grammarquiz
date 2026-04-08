@@ -62,73 +62,69 @@ function fetchQuestionsFromSheet(params) {
   const spreadsheetFile = files.next();
   const ss = SpreadsheetApp.open(spreadsheetFile);
   
-  // 対象のシートを探す
-  const sheet = ss.getSheetByName(unit);
-  if (!sheet) {
-    throw new Error("シートが見つかりません: " + unit);
-  }
-  
-  const data = sheet.getDataRange().getValues();
-  if (data.length <= 1) {
-    return []; // データ行がない場合は空配列
-  }
-  
-  const headers = data[0];
+  const unitList = unit.split(',').map(u => u.trim());
   const questions = [];
-  
-  for (let r = 1; r < data.length; r++) {
-    const row = data[r];
+
+  for (let u = 0; u < unitList.length; u++) {
+    const sheetName = unitList[u];
+    if (!sheetName) continue;
     
-    // ヘッダーに対応する値を取得するヘルパー関数
-    function getValue(headerName) {
-      const idx = headers.indexOf(headerName);
-      return idx !== -1 ? row[idx] : "";
-    }
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) continue; // 見つからない単元はスキップ
     
-    const id = getValue("通し番号");
-    const format = getValue("問題形式");
+    const data = sheet.getDataRange().getValues();
+    if (data.length <= 1) continue;
     
-    // 必須項目のチェック
-    if (id === "" || format === "") {
-      continue; // 無視する行
-    }
+    const headers = data[0];
     
-    const japanese = getValue("日本語訳・和文") || getValue("和文（空所有）");
-    const sentence_template = getValue("並び替え用英文") || getValue("英文（空所有）");
-    const correct_answer = getValue("正答") || getValue("英文");
-    const dummy_selection_method = getValue("ダミー選出方法");
-    
-    const poolWords = [];
-    const dummies = [];
-    
-    // 変動列の取得
-    for (let c = 0; c < headers.length; c++) {
-      const h = headers[c] ? headers[c].toString() : "";
-      // 並び替え語句ダミーやダミー回答と被らないように
-      if (h.startsWith("並び替え語句") && !h.includes("ダミー")) {
-        if (row[c] !== "") poolWords.push(row[c]);
-      } else if (h.includes("ダミー")) {
-        if (row[c] !== "") dummies.push(row[c]);
+    for (let r = 1; r < data.length; r++) {
+      const row = data[r];
+      
+      function getValue(headerName) {
+        const idx = headers.indexOf(headerName);
+        return idx !== -1 ? row[idx] : "";
       }
+      
+      const id = getValue("通し番号");
+      const format = getValue("問題形式");
+      
+      if (id === "" || format === "") continue;
+      
+      const japanese = getValue("日本語訳・和文") || getValue("和文（空所有）");
+      const sentence_template = getValue("並び替え用英文") || getValue("英文（空所有）");
+      const correct_answer = getValue("正答") || getValue("英文");
+      const dummy_selection_method = getValue("ダミー選出方法");
+      
+      const poolWords = [];
+      const dummies = [];
+      
+      for (let c = 0; c < headers.length; c++) {
+        const h = headers[c] ? headers[c].toString() : "";
+        if (h.startsWith("並び替え語句") && !h.includes("ダミー")) {
+          if (row[c] !== "") poolWords.push(row[c]);
+        } else if (h.includes("ダミー")) {
+          if (row[c] !== "") dummies.push(row[c]);
+        }
+      }
+      
+      const assembledCorrectWords = correct_answer ? correct_answer.toString().split(' ') : [];
+      
+      const q = {
+        id: id,
+        unit: sheetName,
+        format: format,
+        japanese: japanese,
+        sentence_template: sentence_template,
+        correct_answer: correct_answer,
+        all_correct_words: poolWords.length > 0 ? assembledCorrectWords : assembledCorrectWords, 
+        pool_words: poolWords.length > 0 ? poolWords : assembledCorrectWords,
+        dummies: dummies,
+        dummy_selection_method: dummy_selection_method,
+        explanation: getValue("その他説明やヒント")
+      };
+      
+      questions.push(q);
     }
-    
-    // 問題データの組み立て
-    const assembledCorrectWords = correct_answer ? correct_answer.toString().split(' ') : [];
-    
-    const q = {
-      id: id,
-      format: format,
-      japanese: japanese,
-      sentence_template: sentence_template,
-      correct_answer: correct_answer,
-      all_correct_words: poolWords.length > 0 ? assembledCorrectWords : assembledCorrectWords, 
-      pool_words: poolWords.length > 0 ? poolWords : assembledCorrectWords, // シートに未指定なら正答を分割して代用
-      dummies: dummies,
-      dummy_selection_method: dummy_selection_method,
-      explanation: getValue("その他説明やヒント")
-    };
-    
-    questions.push(q);
   }
   
   return questions;
@@ -149,4 +145,91 @@ function doPost(e) {
     output.setContent(JSON.stringify({ status: "error", message: error.toString() }));
   }
   return output;
+}
+
+// ＝＝＝＝＝ 初期セットアップ用関数 ＝＝＝＝＝
+// ※ Google Apps Script のエディタ上で「setupEnvironment」を選択し「実行」を押してください。
+function setupEnvironment() {
+  const scriptId = ScriptApp.getScriptId();
+  const scriptFile = DriveApp.getFileById(scriptId);
+  const parents = scriptFile.getParents();
+  let parentFolder;
+  if (parents.hasNext()) {
+    parentFolder = parents.next();
+  } else {
+    parentFolder = DriveApp.getRootFolder();
+  }
+
+  // 1. materials (教材格納) フォルダの作成
+  let materialsFolder;
+  const mFolders = parentFolder.getFoldersByName("materials");
+  if (mFolders.hasNext()) {
+    materialsFolder = mFolders.next();
+    Logger.log("既存の materials フォルダを見つけました。");
+  } else {
+    materialsFolder = parentFolder.createFolder("materials");
+    Logger.log("新規に materials フォルダを作成しました。");
+  }
+
+  // 2. config (管理・成績蓄積用) フォルダの作成
+  let configFolder;
+  const cFolders = parentFolder.getFoldersByName("config");
+  if (cFolders.hasNext()) {
+    configFolder = cFolders.next();
+    Logger.log("既存の config フォルダを見つけました。");
+  } else {
+    configFolder = parentFolder.createFolder("config");
+    Logger.log("新規に config フォルダを作成しました。");
+  }
+
+  // 3. ログ・成績管理ブックのセットアップ (configフォルダ内)
+  const adminBookName = "管理ブック";
+  const aFiles = configFolder.getFilesByName(adminBookName);
+  if (!aFiles.hasNext()) {
+    const ss = SpreadsheetApp.create(adminBookName);
+    const file = DriveApp.getFileById(ss.getId());
+    file.moveTo(configFolder);
+    
+    const logSheet = ss.getSheets()[0];
+    logSheet.setName("成績記録");
+    logSheet.appendRow(["タイムスタンプ", "ユーザーID", "問題ID", "学年科目", "単元", "正誤判定", "出題モード"]);
+    Logger.log("管理ブック（成績記録用）を作成しました。");
+  }
+
+  // 4. サンプル教材ブックのセットアップ (materialsフォルダ内)
+  const sampleBookName = "中学1年 英語";
+  const sFiles = materialsFolder.getFilesByName(sampleBookName);
+  if (!sFiles.hasNext()) {
+    const ss = SpreadsheetApp.create(sampleBookName);
+    const file = DriveApp.getFileById(ss.getId());
+    file.moveTo(materialsFolder);
+    
+    const sheet = ss.getSheets()[0];
+    sheet.setName("be動詞");
+    
+    // 見出し追加
+    const headers = [
+      "通し番号", "問題形式", "日本語訳・和文", "和文（空所有）", "並び替え用英文", "英文（空所有）",
+      "正答", "ダミー選出方法", "並び替え語句1", "並び替え語句2", "並び替え語句3", "並び替え語句ダミー1",
+      "ダミー回答1", "ダミー回答2", "ダミー回答3", "その他説明やヒント"
+    ];
+    sheet.appendRow(headers);
+    
+    // サンプルデータ追加
+    sheet.appendRow([
+      "Q001", "並び替え", "私は学生です。", "", "I am a student.", "", "I am a student.", 
+      "", "I", "am", "a", "student", "teacher", "", "", "基本のbe動詞です。"
+    ]);
+    sheet.appendRow([
+      "Q002", "4択", "彼は忙しいです。", "", "", "He [   ] busy.", "is", 
+      "無作為", "", "", "", "", "are", "am", "be", "主語がHeなのでisを使います。"
+    ]);
+    sheet.appendRow([
+      "Q003", "英訳", "これはペンですか？", "", "", "", "Is this a pen?", 
+      "", "", "", "", "", "", "", "", "疑問文はbe動詞を前に出します。"
+    ]);
+    Logger.log("サンプル教材ブック（中学1年 英語）を作成しました。");
+  }
+
+  Logger.log("初期セットアップがすべて完了しました！");
 }

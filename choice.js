@@ -62,12 +62,15 @@ const ChoiceModule = (() => {
     if (selectedText === qData.correct_answer) {
       resultMsg.textContent = "⭕️ 正解！";
       resultMsg.style.color = "#4caf50";
+      if(window.onQuestionCompleted) window.onQuestionCompleted(true);
     } else if (selectedText === "わからない・自信がない") {
       resultMsg.textContent = "復習しましょう。正答: " + qData.correct_answer;
       resultMsg.style.color = "#ff9800";
+      if(window.onQuestionCompleted) window.onQuestionCompleted(false);
     } else {
       resultMsg.textContent = "❌ 不正解...";
       resultMsg.style.color = "#f44336";
+      if(window.onQuestionCompleted) window.onQuestionCompleted(false);
     }
   }
 
