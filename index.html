@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BrightStage - プロトタイプ</title>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+  <style>
+    /* =========================================
+       共通スタイル & 設定画面
+       ========================================= */
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f7f6; padding: 20px; padding-bottom: 300px; color: #333; max-width: 600px; margin: 0 auto; }
+    #settings-screen { display: block; }
+    #game-screen { display: none; }
+    .header-title { font-size: 1.8em; font-weight: bold; color: #2c3e50; text-align: center; margin-bottom: 20px; }
+    .setting-section { background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
+    .section-title { font-size: 1.1em; font-weight: bold; color: #455a64; margin-bottom: 15px; border-bottom: 2px solid #eceff1; padding-bottom: 5px; }
+    .form-group { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; color: #666; }
+    select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 1em; background-color: #f9f9f9; }
+    .check-list { display: flex; flex-direction: column; gap: 10px; }
+    .check-item { display: flex; align-items: center; gap: 8px; font-size: 1em; cursor: pointer; }
+    .unit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .unit-card { border: 1px solid #cfd8dc; padding: 10px; border-radius: 8px; cursor: pointer; background-color: #fff; display: flex; align-items: center; gap: 8px; font-size: 0.9em; }
+    .unit-card.selected { background-color: #e3f2fd; border-color: #2196f3; font-weight: bold; }
+    .btn-primary { width: 100%; padding: 15px; font-size: 1.2em; font-weight: bold; background-color: #2196f3; color: white; border: none; border-radius: 8px; cursor: pointer; }
+
+    /* =========================================
+       ゲーム画面（並び替えUI v5）
+       ========================================= */
+    .question-box { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 15px; }
+    .question-ja { font-size: 1.2em; font-weight: bold; color: #333; }
+    .area-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 5px; }
+    .area-label { font-size: 0.85em; font-weight: bold; color: #666; }
+    #sentence-container { display: flex; flex-wrap: wrap; align-items: center; background: #fff; padding: 15px; border-radius: 12px; margin-bottom: 20px; gap: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .fixed-text { font-size: 1.3em; font-weight: bold; color: #444; }
+    .sortable-area { padding: 10px; border-radius: 12px; display: flex; flex-wrap: wrap; gap: 8px; transition: background-color 0.2s; }
+    #answer-slot { background-color: #e3f2fd; border: 2px dashed #90caf9; min-height: 46px; min-width: 150px; padding: 6px; }
+    #word-pool, #trash-slot { background-color: #eceff1; border: 2px dashed #b0bec5; margin-bottom: 15px; min-height: 50px; }
+    .word-card { background-color: white; border: 1px solid #d1d5db; padding: 10px 16px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor: grab; font-size: 1.1em; color: #333; user-select: none; }
+    .sortable-ghost { opacity: 0.3; }
+    .btn-small { padding: 4px 10px; font-size: 0.8em; background-color: #607d8b; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    #submit-btn { display: none; width: 100%; padding: 15px; font-size: 1.2em; background-color: #4caf50; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px;}
+    
+    /* 不足語入力 & キーボード */
+    #missing-word-input-area { background: #fff; padding: 15px; border-radius: 8px; border: 2px solid #ff9800; margin-bottom: 15px; display: flex; gap: 10px; align-items: center; }
+    #missing-word-display { flex-grow: 1; padding: 10px; font-size: 1.2em; border: 2px solid #ccc; border-radius: 4px; background-color: #f9f9f9; min-height: 1.2em; cursor: pointer;}
+    #create-card-btn { padding: 10px 15px; background-color: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    #keyboard-container { position: fixed; bottom: 0; left: 0; width: 100%; background-color: #d2d6da; padding: 8px 0; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); z-index: 1000; display: none; user-select: none; touch-action: manipulation;}
+    .keyboard-row { display: flex; justify-content: center; gap: 4px; margin-bottom: 6px; padding: 0 4px; }
+    .key { background-color: #fff; border: none; border-radius: 5px; height: 42px; flex-grow: 1; max-width: 45px; font-size: 1.1em; color: #000; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 1px 0 rgba(0,0,0,0.2); }
+    .key.wide { max-width: 70px; font-size: 0.9em; background-color: #adb5bd; }
+    .key.space { max-width: 250px; } 
+    .key.enter { max-width: 100px; background-color: #ff9800; color: white; font-weight: bold; } 
+    .key.activated { background-color: #333 !important; color: #fff; } 
+  </style>
+</head>
+<body>
+
+  <div id="settings-screen">
+    <div class="header-title">BrightStage</div>
+    <div class="setting-section">
+      <div class="section-title">1. 学年・科目を選択</div>
+      <div class="form-group">
+        <select id="subject-select">
+          <option value="jhs1">中学1年 英語</option>
+          <option value="jhs2">中学2年 英語</option>
+        </select>
+      </div>
+    </div>
+    <div class="setting-section">
+      <div class="section-title">2. 単元を選択</div>
+      <div class="unit-grid" id="unit-container"></div>
+    </div>
+    <div class="setting-section">
+      <div class="section-title">3. 詳細オプション</div>
+      <div class="check-list">
+        <label class="check-item"><input type="checkbox" id="dummy-option" checked> [上級] ダミー（不要語）を混入する</label>
+      </div>
+    </div>
+    <button id="start-btn" class="btn-primary">学習を開始する</button>
+  </div>
+
+  <div id="game-screen">
+    <button id="back-btn" class="btn-small" style="margin-bottom: 10px;">← 設定に戻る</button>
+    <div class="question-box">
+      <div class="question-ja" id="question-ja"></div>
+    </div>
+
+    <div id="missing-word-input-area">
+      <div style="font-weight: bold; color: #ff9800;">不足語:</div>
+      <div id="missing-word-display"></div>
+      <button id="create-card-btn" disabled>カードを作成</button>
+    </div>
+
+    <div class="area-header"><div class="area-label">▼ 回答欄</div></div>
+    <div id="sentence-container">
+      <span id="prefix-text" class="fixed-text"></span>
+      <div id="answer-slot" class="sortable-area"></div>
+      <span id="suffix-text" class="fixed-text"></span>
+    </div>
+
+    <div class="area-header">
+      <div class="area-label">▼ 仮置き場</div>
+      <button id="move-all-btn" class="btn-small">↑ 流し込む</button>
+    </div>
+    <div id="word-pool" class="sortable-area"></div>
+
+    <div class="area-header"><div class="area-label">▼ 除外置き場</div></div>
+    <div id="trash-slot" class="sortable-area"></div>
+
+    <button id="submit-btn">これで回答する</button>
+    <div id="result-msg" style="margin-top: 10px; font-weight: bold; text-align: center;"></div>
+  </div>
+
+  <div id="keyboard-container"></div>
+
+  <script>
+    // -----------------------------------------
+    // アプリ状態・データ管理
+    // -----------------------------------------
+    const API_URL = "ここにGASのデプロイURLを後で設定します"; // GAS連携時に使用
+    let currentQuestionData = null;
+
+    // 単元モックデータ
+    const unitData = { "jhs1": ["be動詞", "一般動詞"], "jhs2": ["過去形", "助動詞"] };
+    
+    // UI要素の取得
+    const screens = { settings: document.getElementById('settings-screen'), game: document.getElementById('game-screen') };
+    const elements = {
+      subject: document.getElementById('subject-select'),
+      units: document.getElementById('unit-container'),
+      startBtn: document.getElementById('start-btn'),
+      backBtn: document.getElementById('back-btn'),
+      // ゲームUI
+      qJa: document.getElementById('question-ja'),
+      prefix: document.getElementById('prefix-text'),
+      suffix: document.getElementById('suffix-text'),
+      answer: document.getElementById('answer-slot'),
+      pool: document.getElementById('word-pool'),
+      trash: document.getElementById('trash-slot'),
+      submit: document.getElementById('submit-btn'),
+      result: document.getElementById('result-msg'),
+      // キーボード関連
+      missDisplay: document.getElementById('missing-word-display'),
+      createBtn: document.getElementById('create-card-btn'),
+      kb: document.getElementById('keyboard-container')
+    };
+
+    // -----------------------------------------
+    // 設定画面ロジック
+    // -----------------------------------------
+    function renderUnits(subject) {
+      elements.units.innerHTML = '';
+      unitData[subject].forEach(unit => {
+        const lbl = document.createElement('label');
+        lbl.className = 'unit-card selected';
+        lbl.innerHTML = `<input type="checkbox" value="${unit}" checked style="display:none;"> ${unit}`;
+        lbl.querySelector('input').addEventListener('change', e => lbl.classList.toggle('selected', e.target.checked));
+        elements.units.appendChild(lbl);
+      });
+    }
+    elements.subject.addEventListener('change', e => renderUnits(e.target.value));
+    renderUnits(elements.subject.value);
+
+    elements.startBtn.addEventListener('click', () => {
+      // 本来はここで fetch(API_URL, { method: 'POST', body: settings }) を行い問題を取得する
+      // 今回はモックデータを直接ロード
+      loadMockQuestion();
+      screens.settings.style.display = 'none';
+      screens.game.style.display = 'block';
+    });
+    elements.backBtn.addEventListener('click', () => {
+      screens.game.style.display = 'none';
+      screens.settings.style.display = 'block';
+    });
+
+    // -----------------------------------------
+    // ゲーム画面（並び替え）ロジック
+    // -----------------------------------------
+    function loadMockQuestion() {
+      currentQuestionData = {
+        japanese: "私が議長に最適だと思うのはジョンです。(欠損: think)",
+        sentence_template: "I ＜並び替え入力箇所＞ is John.",
+        correct_answer: "think the best person for chairperson",
+        all_correct_words: ["think", "the", "best", "person", "for", "chairperson"],
+        pool_words: ["chairperson", "person", "best", "the", "for"], // thinkが欠損
+        dummies: document.getElementById('dummy-option').checked ? ["a"] : []
+      };
+      
+      elements.qJa.textContent = currentQuestionData.japanese;
+      const match = currentQuestionData.sentence_template.match(/[(\[（［<＜][^)\]）］>＞]*[)\]）］>＞]/);
+      elements.prefix.textContent = match ? currentQuestionData.sentence_template.substring(0, match.index).trim() : "";
+      elements.suffix.textContent = match ? currentQuestionData.sentence_template.substring(match.index + match[0].length).trim() : "";
+
+      elements.answer.innerHTML = ''; elements.pool.innerHTML = ''; elements.trash.innerHTML = '';
+      let initialPool = [...currentQuestionData.pool_words, ...currentQuestionData.dummies];
+      initialPool.sort(() => Math.random() - 0.5);
+      initialPool.forEach(w => createCard(w, elements.pool));
+      checkSubmitVisibility();
+    }
+
+    function createCard(text, container) {
+      const card = document.createElement('div');
+      card.className = 'word-card'; card.textContent = text;
+      container.appendChild(card);
+    }
+
+    const sortOptions = { group: 'shared', animation: 150, ghostClass: 'sortable-ghost', onSort: checkSubmitVisibility };
+    new Sortable(elements.answer, sortOptions);
+    new Sortable(elements.pool, sortOptions);
+    new Sortable(elements.trash, sortOptions);
+
+    function checkSubmitVisibility() {
+      elements.submit.style.display = (elements.answer.children.length === currentQuestionData.all_correct_words.length) ? 'block' : 'none';
+      elements.result.textContent = "";
+    }
+
+    document.getElementById('move-all-btn').addEventListener('click', () => {
+      Array.from(elements.pool.children).forEach(c => elements.answer.appendChild(c));
+      checkSubmitVisibility();
+    });
+
+    elements.submit.addEventListener('click', () => {
+      const userAns = Array.from(elements.answer.children).map(c => c.textContent).join(' ');
+      if (userAns === currentQuestionData.correct_answer) {
+        elements.result.textContent = "⭕️ 正解！"; elements.result.style.color = "#4caf50";
+      } else {
+        elements.result.textContent = "❌ 惜しい！"; elements.result.style.color = "#f44336";
+      }
+    });
+
+    // -----------------------------------------
+    // キーボードロジック（簡略化）
+    // -----------------------------------------
+    let currentInput = "";
+    elements.missDisplay.addEventListener('click', e => { elements.kb.style.display = 'block'; e.stopPropagation(); });
+    document.body.addEventListener('click', e => {
+      if (!e.target.closest('#missing-word-input-area') && !e.target.closest('#keyboard-container')) elements.kb.style.display = 'none';
+    });
+    
+    elements.createBtn.addEventListener('click', () => {
+      if (!currentInput) return;
+      createCard(currentInput, elements.pool);
+      currentInput = ""; elements.missDisplay.textContent = ""; elements.createBtn.disabled = true;
+      elements.kb.style.display = 'none'; checkSubmitVisibility();
+    });
+
+    // キーボード描画処理等（長くなるため詳細はCursor等で前回のv5を展開してください）
+    // Cursor移行後、キーボード描画ロジックは別ファイル (keyboard.js) に切り出すと綺麗です。
+    // ※今回はプロトタイプ統合のため、枠組みだけ設置しています。前回のコードをそのまま挿入可能です。
+
+  </script>
+</body>
+</html>
