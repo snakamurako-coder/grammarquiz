@@ -1,11 +1,13 @@
 // app.js
 // データと画面遷移の管理
 
-const API_URL = "https://script.google.com/a/macros/yamagataps.jp/s/AKfycbwiHme_rEG4CbR_8Y8nixIPu69Hcz9NxFELkN3RiphedCydx6Jze4s7zELVWyWLnN5G/exec";
+const API_URL = "https://script.google.com/a/macros/yamagataps.jp/s/AKfycbyHY4tst-GHOj2Wv8jYuh5qcFAlBQcXICDiewks1kEG6KCG5_BHSzqVUtaoXw51DjHu/exec";
 let currentQuestionDataList = [];
 let currentQuestionIndex = 0;
 let totalQuestionsCount = 0;
 let currentScore = 0;
+let sessionResults = [];
+let currentUserId = "Guest";
 
 // GASへ送信するテキスト値
 const unitData = { 
@@ -62,6 +64,18 @@ elements.startBtn.addEventListener('click', async () => {
     alert("単元を1つ以上選択してください。");
     return;
   }
+
+  // ユーザー名の保存・取得
+  const unInput = document.getElementById('username-input');
+  if (unInput && unInput.value.trim() !== '') {
+    currentUserId = unInput.value.trim();
+    localStorage.setItem('brightstage_username', currentUserId);
+  } else {
+    currentUserId = localStorage.getItem('brightstage_username') || "Guest";
+    if (unInput && currentUserId !== "Guest") unInput.value = currentUserId;
+  }
+  
+  sessionResults = [];
   
   // UX：ロード中の表現
   elements.startBtn.disabled = true;
@@ -173,8 +187,41 @@ window.onQuestionCompleted = (isCorrect) => {
     window.AlgorithmModule.recordResult(currentQ.id, isCorrect);
   }
   if (isCorrect) currentScore++;
+  
+  let modeDesc = "通常";
+  const modeRadio = document.querySelector('input[name="play-mode"]:checked');
+  if (modeRadio) modeDesc = modeRadio.value;
+  
+  sessionResults.push({
+    timestamp: new Date().toISOString(),
+    userId: currentUserId,
+    questionId: currentQ.id,
+    subject: elements.subject.options[elements.subject.selectedIndex].text,
+    unit: currentQ.unit || "",
+    isCorrect: isCorrect ? "正解" : "不正解",
+    mode: modeDesc
+  });
+  
   document.getElementById('next-btn').style.display = 'block';
 };
+
+async function sendResultsToGAS() {
+  if (sessionResults.length === 0) return;
+  const payload = {
+    action: "saveResult",
+    results: sessionResults
+  };
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    console.log("Save Response:", data);
+  } catch(e) {
+    console.error("Save Error:", e);
+  }
+}
 
 document.getElementById('next-btn').addEventListener('click', () => {
   document.getElementById('next-btn').style.display = 'none';
@@ -192,7 +239,13 @@ function showResultScreen() {
   resultScreen.style.display = 'block';
   
   document.getElementById('result-score').textContent = `スコア: ${currentScore} / ${totalQuestionsCount}`;
-  document.getElementById('result-details').textContent = "演習が終了しました。";
+  document.getElementById('result-details').textContent = "成績データを保存しています...";
+  
+  sendResultsToGAS().then(() => {
+    document.getElementById('result-details').textContent = "演習が終了し、成績が保存されました。";
+  }).catch(() => {
+    document.getElementById('result-details').textContent = "演習が終了しました。(一部通信エラーあり)";
+  });
 }
 
 document.getElementById('return-settings-btn').addEventListener('click', () => {
@@ -202,5 +255,13 @@ document.getElementById('return-settings-btn').addEventListener('click', () => {
 
 // 初期化実行
 document.addEventListener('DOMContentLoaded', () => {
+  const unInput = document.getElementById('username-input');
+  if (unInput) {
+    const savedName = localStorage.getItem('brightstage_username');
+    if (savedName && savedName !== "Guest") {
+      unInput.value = savedName;
+      currentUserId = savedName;
+    }
+  }
   renderUnits(getSelectedSubjectName());
 });

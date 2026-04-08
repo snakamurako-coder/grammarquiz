@@ -130,7 +130,7 @@ function fetchQuestionsFromSheet(params) {
   return questions;
 }
 
-// POSTリクエストを受け取った時（学習結果の保存などに使用）
+// POSTリクエストを受け取った時（学習結果の保存に使用）
 function doPost(e) {
   const output = ContentService.createTextOutput();
   output.setMimeType(ContentService.MimeType.JSON);
@@ -138,8 +138,54 @@ function doPost(e) {
   try {
     const postData = JSON.parse(e.postData.contents);
     if (postData.action === 'saveResult') {
-      // 例：結果をスプレッドシートに書き込む処理（Phase 5以降）
+      const results = postData.results;
+      if (results && results.length > 0) {
+        
+        let configFolder = null;
+        try {
+          const scriptId = ScriptApp.getScriptId();
+          const parents = DriveApp.getFileById(scriptId).getParents();
+          let parentFolder = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+          const cFolders = parentFolder.getFoldersByName("config");
+          if (cFolders.hasNext()) configFolder = cFolders.next();
+        } catch (err) {}
+
+        if (!configFolder) {
+          const cFolders = DriveApp.getFoldersByName("config");
+          if (cFolders.hasNext()) configFolder = cFolders.next();
+        }
+        
+        if (configFolder) {
+          const aFiles = configFolder.getFilesByName("管理ブック");
+          if (aFiles.hasNext()) {
+            const ss = SpreadsheetApp.open(aFiles.next());
+            const sheet = ss.getSheetByName("成績記録");
+            if (sheet) {
+              // 排他制御や高速化のためには2次元配列にしてまとめて書き込む手法もありますが、
+              // フェーズ5の初期実装としてループでのappendRowにて確実に行を追加します。
+              const rows = [];
+              for (let i = 0; i < results.length; i++) {
+                const r = results[i];
+                rows.push([
+                  r.timestamp, 
+                  r.userId, 
+                  r.questionId, 
+                  r.subject, 
+                  r.unit, 
+                  r.isCorrect, 
+                  r.mode
+                ]);
+              }
+              // まとめて書き込み（高速化）
+              const startRow = sheet.getLastRow() + 1;
+              sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+            }
+          }
+        }
+      }
       output.setContent(JSON.stringify({ status: "success" }));
+    } else {
+      output.setContent(JSON.stringify({ status: "error", message: "Invalid action" }));
     }
   } catch (error) {
     output.setContent(JSON.stringify({ status: "error", message: error.toString() }));
