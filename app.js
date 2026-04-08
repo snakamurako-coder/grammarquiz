@@ -1,11 +1,15 @@
 // app.js
 // データと画面遷移の管理
 
-const API_URL = "ここにGASのデプロイURLを後で設定します"; 
-let currentQuestionData = null;
+const API_URL = "https://script.google.com/a/macros/yamagataps.jp/s/AKfycbxvpbCWJ5wYcyfx2ui6XMYbERITn3oMieSeNsgtbj9Igwxmi4BmqYKpiN6QmLhV9xaU/exec";
+let currentQuestionDataList = [];
+let currentQuestionIndex = 0;
 
-// モックデータ
-const unitData = { "jhs1": ["be動詞", "一般動詞"], "jhs2": ["過去形", "助動詞"] };
+// GASへ送信するテキスト値
+const unitData = { 
+  "中学1年 英語": ["単元A", "単元B", "be動詞", "一般動詞"], 
+  "中学2年 英語": ["単元A", "単元B", "過去形", "助動詞"] 
+};
 
 // UI要素
 const screens = { 
@@ -22,9 +26,18 @@ const elements = {
   suffix: document.getElementById('suffix-text')
 };
 
-function renderUnits(subject) {
+// セレクトボックスの表示テキスト（実際のスプレッドシート名として使われるもの）を取得
+function getSelectedSubjectName() {
+  const select = elements.subject;
+  return select.options[select.selectedIndex].text;
+}
+
+function renderUnits(subjectText) {
   elements.units.innerHTML = '';
-  unitData[subject].forEach(unit => {
+  // フォールバック付きで単元リストを取得
+  const units = unitData[subjectText] || ["単元A", "単元B"];
+  
+  units.forEach(unit => {
     const lbl = document.createElement('label');
     lbl.className = 'unit-card selected';
     lbl.innerHTML = `<input type="checkbox" value="${unit}" checked style="display:none;"> ${unit}`;
@@ -35,12 +48,44 @@ function renderUnits(subject) {
   });
 }
 
-elements.subject.addEventListener('change', e => renderUnits(e.target.value));
+elements.subject.addEventListener('change', e => {
+  renderUnits(getSelectedSubjectName());
+});
 
-elements.startBtn.addEventListener('click', () => {
-  loadMockQuestion();
-  screens.settings.style.display = 'none';
-  screens.game.style.display = 'block';
+elements.startBtn.addEventListener('click', async () => {
+  const subjectName = getSelectedSubjectName();
+  const checkedUnits = Array.from(elements.units.querySelectorAll('input:checked')).map(el => el.value);
+  
+  if (checkedUnits.length === 0) {
+    alert("単元を1つ以上選択してください。");
+    return;
+  }
+  
+  // UX：ロード中の表現
+  elements.startBtn.disabled = true;
+  const originalText = elements.startBtn.textContent;
+  elements.startBtn.textContent = "問題を読み込み中...";
+
+  try {
+    const unitName = checkedUnits[0]; // TODO: 複数単元混合への対応はPhase 4
+    const questions = await fetchQuestionsFromGAS(subjectName, unitName);
+    
+    if (questions && questions.length > 0) {
+      currentQuestionDataList = questions;
+      currentQuestionIndex = 0;
+      loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
+      screens.settings.style.display = 'none';
+      screens.game.style.display = 'block';
+    } else {
+      alert("問題が見つからない、またはシートに有効なデータがありません。");
+    }
+  } catch (error) {
+    console.error(error);
+    alert("通信エラーが発生しました: " + error.message);
+  } finally {
+    elements.startBtn.disabled = false;
+    elements.startBtn.textContent = originalText;
+  }
 });
 
 elements.backBtn.addEventListener('click', () => {
@@ -48,28 +93,71 @@ elements.backBtn.addEventListener('click', () => {
   screens.settings.style.display = 'block';
 });
 
-function loadMockQuestion() {
-  currentQuestionData = {
-    japanese: "私が議長に最適だと思うのはジョンです。(欠損: think)",
-    sentence_template: "I ＜並び替え入力箇所＞ is John.",
-    correct_answer: "think the best person for chairperson",
-    all_correct_words: ["think", "the", "best", "person", "for", "chairperson"],
-    pool_words: ["chairperson", "person", "best", "the", "for"], // thinkが欠損
-    dummies: document.getElementById('dummy-option').checked ? ["a"] : []
-  };
+async function fetchQuestionsFromGAS(subject, unit) {
+  const url = `${API_URL}?action=getQuestions&subject=${encodeURIComponent(subject)}&unit=${encodeURIComponent(unit)}`;
+  const response = await fetch(url, { redirect: "follow" });
+  if (!response.ok) {
+    throw new Error("HTTP error " + response.status);
+  }
+  const result = await response.json();
+  if (result.status === "success") {
+    return result.data;
+  } else {
+    throw new Error(result.message);
+  }
+}
+
+function loadQuestionToGame(qData) {
+  elements.qJa.textContent = qData.japanese;
   
-  elements.qJa.textContent = currentQuestionData.japanese;
-  const match = currentQuestionData.sentence_template.match(/[(\[（［<＜][^)\]）］>＞]*[)\]）］>＞]/);
-  elements.prefix.textContent = match ? currentQuestionData.sentence_template.substring(0, match.index).trim() : "";
-  elements.suffix.textContent = match ? currentQuestionData.sentence_template.substring(match.index + match[0].length).trim() : "";
-  
-  // Initialize sorting game state via sorting.js
-  if (window.SortingModule) {
-    window.SortingModule.initGame(currentQuestionData);
+  // UIの初期化・非表示化
+  document.getElementById('sort-ui').style.display = 'none';
+  document.getElementById('choice-ui').style.display = 'none';
+  document.getElementById('typing-ui').style.display = 'none';
+  const missingWordArea = document.getElementById('missing-word-input-area');
+  if (missingWordArea) missingWordArea.style.display = 'none';
+  document.getElementById('result-msg').textContent = '';
+
+  const format = qData.format || "並び替え";
+
+  if (format.includes("4択") || format.includes("４択")) {
+    // 4択問題
+    document.getElementById('choice-ui').style.display = 'block';
+    if (window.ChoiceModule) window.ChoiceModule.initGame(qData);
+  } else if (format.includes("英訳") || format.includes("空所")) {
+    // 和文英訳・空所入力
+    document.getElementById('typing-ui').style.display = 'block';
+    if (window.TypingModule) window.TypingModule.initGame(qData);
+  } else {
+    // 並び替え問題
+    document.getElementById('sort-ui').style.display = 'block';
+    if (missingWordArea) missingWordArea.style.display = 'flex';
+
+    if (qData.sentence_template) {
+      const match = qData.sentence_template.match(/[(\[（［<＜][^)\]）］>＞]*[)\]）］>＞]/);
+      if (match) {
+        elements.prefix.textContent = qData.sentence_template.substring(0, match.index).trim();
+        elements.suffix.textContent = qData.sentence_template.substring(match.index + match[0].length).trim();
+      } else {
+        elements.prefix.textContent = qData.sentence_template;
+        elements.suffix.textContent = "";
+      }
+    } else {
+      elements.prefix.textContent = "";
+      elements.suffix.textContent = "";
+    }
+    
+    if (!document.getElementById('dummy-option').checked) {
+      qData.dummies = [];
+    }
+    
+    if (window.SortingModule) {
+      window.SortingModule.initGame(qData);
+    }
   }
 }
 
 // 初期化実行
 document.addEventListener('DOMContentLoaded', () => {
-  renderUnits(elements.subject.value);
+  renderUnits(getSelectedSubjectName());
 });
