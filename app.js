@@ -10,6 +10,7 @@ let totalQuestionsCount = 0;
 let currentScore = 0;
 let sessionResults = [];
 let currentUserId = "Guest";
+let sessionStartTime = null;
 
 // GASへ送信するテキスト値
 const unitData = { 
@@ -98,6 +99,7 @@ elements.startBtn.addEventListener('click', async () => {
       totalQuestionsCount = questions.length;
       currentQuestionIndex = 0;
       currentScore = 0;
+      sessionStartTime = Date.now();
       loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
       screens.settings.style.display = 'none';
       document.getElementById('result-screen').style.display = 'none';
@@ -231,6 +233,28 @@ async function sendResultsToGAS() {
   }
 }
 
+async function sendSessionLogToGAS() {
+  const timeTaken = sessionStartTime ? Math.round((Date.now() - sessionStartTime) / 1000) : 0;
+  const correctRate = totalQuestionsCount > 0 ? Math.round((currentScore / totalQuestionsCount) * 100) : 0;
+  const checkedUnits = Array.from(elements.units.querySelectorAll('input:checked')).map(el => el.value);
+  const setName = `${getSelectedSubjectName()} - ${checkedUnits.join(',')}`;
+  
+  const payload = {
+    action: "saveSessionLog",
+    email: currentUserId,
+    setName: setName,
+    correctRate: correctRate,
+    timeTaken: timeTaken
+  };
+  try {
+    const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
+    const data = await res.json();
+    console.log("Session Log Response:", data);
+  } catch(e) {
+    console.error("Session Log Error:", e);
+  }
+}
+
 document.getElementById('next-btn').addEventListener('click', () => {
   document.getElementById('next-btn').style.display = 'none';
   currentQuestionIndex++;
@@ -249,7 +273,7 @@ function showResultScreen() {
   document.getElementById('result-score').textContent = `スコア: ${currentScore} / ${totalQuestionsCount}`;
   document.getElementById('result-details').textContent = "成績データを保存しています...";
   
-  sendResultsToGAS().then(() => {
+  Promise.all([sendResultsToGAS(), sendSessionLogToGAS()]).then(() => {
     document.getElementById('result-details').textContent = "演習が終了し、成績が保存されました。";
   }).catch(() => {
     document.getElementById('result-details').textContent = "演習が終了しました。(一部通信エラーあり)";
@@ -283,7 +307,111 @@ window.onLoginSuccess = function(user) {
   screens.settings.style.display = 'block';
   
   renderUnits(getSelectedSubjectName());
+  fetchUserLogs(currentUserId);
 };
+
+// ログ取得とマイページ描画
+async function fetchUserLogs(email) {
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "getUserLogs", email: email })
+    });
+    const data = await res.json();
+    if (data.status === "success") {
+      renderMyPage(data.data);
+    }
+  } catch (e) {
+    console.error("fetchUserLogs error:", e);
+  }
+}
+
+function renderMyPage(logs) {
+  const container = document.getElementById('mypage-container');
+  if (container) container.style.display = 'block';
+  
+  if (!logs || logs.length === 0) {
+    document.getElementById('recent-history-list').innerHTML = "<p>まだ学習記録がありません。</p>";
+    document.getElementById('set-progress-list').innerHTML = "<p>まだ学習記録がありません。</p>";
+    document.getElementById('weakness-list').innerHTML = "<p>まだ学習記録がありません。</p>";
+    return;
+  }
+
+  // 1. 最近の学習履歴 (直近5件)
+  const recentLogs = [...logs].reverse().slice(0, 5);
+  let recentHtml = '';
+  recentLogs.forEach(log => {
+    const rate = parseInt(log['正答率']) || 0;
+    const scoreClass = rate >= 80 ? 'score-perfect' : rate >= 60 ? 'score-good' : rate >= 40 ? 'score-warn' : 'score-poor';
+    recentHtml += `
+      <div class="log-item">
+        <div>
+          <div class="log-title">${log['学習セット名']}</div>
+          <div class="log-meta">${log['タイムスタンプ']} - ${log['解答時間']}秒</div>
+        </div>
+        <div class="log-score ${scoreClass}">${rate}%</div>
+      </div>
+    `;
+  });
+  document.getElementById('recent-history-list').innerHTML = recentHtml;
+
+  // 2. セット別進捗 & 弱点分析
+  const setMap = {};
+  logs.forEach(log => {
+    const setName = log['学習セット名'];
+    const rate = parseInt(log['正答率']) || 0;
+    if (!setMap[setName]) {
+      setMap[setName] = { playCount: 0, maxRate: 0, recentRate: rate };
+    }
+    setMap[setName].playCount++;
+    if (rate > setMap[setName].maxRate) setMap[setName].maxRate = rate;
+    setMap[setName].recentRate = rate; // keep last
+  });
+
+  let progressHtml = '';
+  const weaknessList = [];
+  
+  for (const setName in setMap) {
+    const stat = setMap[setName];
+    const rate = stat.maxRate;
+    const barColor = rate >= 80 ? '#4caf50' : rate >= 60 ? '#2196f3' : rate >= 40 ? '#ff9800' : '#f44336';
+    
+    progressHtml += `
+      <div style="margin-bottom: 12px;">
+        <div style="display:flex; justify-content:space-between; font-size: 0.9em; margin-bottom: 4px;">
+          <strong>${setName}</strong>
+          <span>最高 ${rate}% (計${stat.playCount}回)</span>
+        </div>
+        <div class="progress-bar-container">
+          <div class="progress-bar-fill" style="width: ${rate}%; background-color: ${barColor};"></div>
+        </div>
+      </div>
+    `;
+
+    if (stat.recentRate < 60) {
+      weaknessList.push({ name: setName, rate: stat.recentRate });
+    }
+  }
+  document.getElementById('set-progress-list').innerHTML = progressHtml;
+
+  let weaknessHtml = '';
+  if (weaknessList.length > 0) {
+    weaknessList.sort((a,b) => a.rate - b.rate);
+    weaknessList.slice(0, 3).forEach(w => {
+      weaknessHtml += `
+        <div class="log-item" style="background-color: #fff8e1; border-left: 4px solid #f44336; padding: 10px; margin-bottom: 8px;">
+          <div>
+            <div class="log-title" style="color: #c62828;">${w.name}</div>
+            <div class="log-meta">直近の正答率が <strong>${w.rate}%</strong> です！復習しましょう。</div>
+          </div>
+        </div>
+      `;
+    });
+  } else {
+    weaknessHtml = "<p>現在、目立った弱点はありません。すばらしい！</p>";
+  }
+  document.getElementById('weakness-list').innerHTML = weaknessHtml;
+}
 
 // ログアウト機能
 document.addEventListener('DOMContentLoaded', () => {

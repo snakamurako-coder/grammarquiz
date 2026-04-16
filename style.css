@@ -59,3 +59,28 @@ select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px;
 .key.space { max-width: 250px; }
 .key.enter { max-width: 100px; background-color: #ff9800; color: white; font-weight: bold; }
 .key.activated { background-color: #333 !important; color: #fff; }
+
+/* =========================================
+   ダッシュボード（マイページ）
+   ========================================= */
+.dashboard-grid { display: flex; flex-direction: column; gap: 15px; }
+.dashboard-card { background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+.card-title { font-weight: bold; font-size: 1.05em; margin-bottom: 15px; border-bottom: 2px solid #f0f0f0; padding-bottom: 8px; }
+.weakness-card .card-title { color: #d32f2f; border-bottom-color: #ffebee; }
+.recent-card .card-title { color: #1976d2; border-bottom-color: #e3f2fd; }
+.progress-card .card-title { color: #388e3c; border-bottom-color: #e8f5e9; }
+
+.dashboard-content { font-size: 0.9em; color: #555; }
+.log-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f5f5f5; }
+.log-item:last-child { border-bottom: none; }
+.log-title { font-weight: bold; color: #333; margin-bottom: 4px; }
+.log-meta { font-size: 0.8em; color: #888; }
+.log-score { font-weight: bold; font-size: 1.1em; padding: 4px 8px; border-radius: 4px; }
+
+.score-perfect { background-color: #e8f5e9; color: #2e7d32; }
+.score-good { background-color: #e3f2fd; color: #1565c0; }
+.score-warn { background-color: #fff8e1; color: #f57f17; }
+.score-poor { background-color: #ffebee; color: #c62828; }
+
+.progress-bar-container { width: 100%; background-color: #eee; border-radius: 4px; height: 10px; margin-top: 5px; overflow: hidden; }
+.progress-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }

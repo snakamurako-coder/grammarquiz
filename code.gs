@@ -145,6 +145,10 @@ function doPost(e) {
       return handleLogin(requestData);
     } else if (action === "saveResult") {
       return handleSaveResult(requestData); // アプリ側成績用
+    } else if (action === "saveSessionLog") {
+      return handleSaveSessionLog(requestData); // セッションサマリー用
+    } else if (action === "getUserLogs") {
+      return handleGetUserLogs(requestData); // マイページ情報取得用
     } else if (action === "save") {
       return handleSave(requestData);       // 既存利用用
     } else if (action === "get_csv_data") {
@@ -308,4 +312,73 @@ function handleGetData(requestData) {
   }
 
   return sendResponse({ status: "success", data: userRecords });
+}
+
+// =========================================================
+// ④ セッションログ保存処理（マイページ用）
+// =========================================================
+function handleSaveSessionLog(requestData) {
+  const { email, setName, correctRate, timeTaken } = requestData;
+  if (!email || !setName) return sendResponse({ status: "error", message: "必須パラメータがありません" });
+
+  const spreadId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  if (!spreadId) return sendResponse({ status: "error", message: "SPREADSHEET_IDが設定されていません。" });
+
+  const ss = SpreadsheetApp.openById(spreadId);
+  let sheet = ss.getSheetByName("ログ");
+  
+  if (!sheet) {
+    sheet = ss.insertSheet("ログ");
+    sheet.appendRow(["タイムスタンプ", "メールアドレス", "学習セット名", "実施回数", "正答率", "解答時間"]);
+  }
+
+  const data = sheet.getDataRange().getValues();
+  let count = 0;
+  for (let i = 1; i < data.length; i++) {
+    // data[i][1] はメールアドレス, data[i][2] は学習セット名
+    if (data[i][1] === email && data[i][2] === setName) {
+      count++;
+    }
+  }
+
+  const execCount = count + 1;
+  const timeStr = Utilities.formatDate(new Date(), "JST", "yyyy/MM/dd HH:mm:ss");
+
+  sheet.appendRow([timeStr, email, setName, execCount, correctRate, timeTaken]);
+  return sendResponse({ status: "success", message: "セッションログを保存しました", execCount: execCount });
+}
+
+// =========================================================
+// ⑤ マイページ用ログ取得処理
+// =========================================================
+function handleGetUserLogs(requestData) {
+  const email = requestData.email;
+  if (!email) return sendResponse({ status: "error", message: "emailが必要です" });
+
+  const spreadId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  if (!spreadId) return sendResponse({ status: "error", message: "SPREADSHEET_IDが設定されていません。" });
+
+  const ss = SpreadsheetApp.openById(spreadId);
+  const sheet = ss.getSheetByName("ログ");
+  
+  if (!sheet) return sendResponse({ status: "success", data: [], message: "ログがありません" });
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf('メールアドレス');
+
+  if (emailIdx === -1) return sendResponse({ status: "error", message: "ログ内にメールアドレス列がありません" });
+
+  const userLogs = [];
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][emailIdx] === email) {
+      let obj = {};
+      for (let j = 0; j < headers.length; j++) {
+        if (headers[j]) obj[headers[j]] = data[i][j];
+      }
+      userLogs.push(obj);
+    }
+  }
+
+  return sendResponse({ status: "success", data: userLogs });
 }
