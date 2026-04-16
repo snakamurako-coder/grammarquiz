@@ -52,6 +52,28 @@
       <input type="hidden" id="username-input">
     </div>
     
+    <!-- 新設：マイページ（ダッシュボード） -->
+    <div class="setting-section" id="mypage-container" style="display: none;">
+      <div class="section-title">📊 マイページ（学習記録）</div>
+      <div class="dashboard-grid">
+        <!-- 弱点分析 -->
+        <div class="dashboard-card weakness-card">
+          <div class="card-title">🚨 優先して復習すべきセット</div>
+          <div id="weakness-list" class="dashboard-content">読込中...</div>
+        </div>
+        <!-- 最近の学習履歴 -->
+        <div class="dashboard-card recent-card">
+          <div class="card-title">🕒 最近の学習履歴 (直近5回)</div>
+          <div id="recent-history-list" class="dashboard-content">読込中...</div>
+        </div>
+        <!-- セット別進捗 -->
+        <div class="dashboard-card progress-card">
+          <div class="card-title">📈 学習セット別の進捗</div>
+          <div id="set-progress-list" class="dashboard-content">読込中...</div>
+        </div>
+      </div>
+    </div>
+    
     <div class="setting-section">
       <div class="section-title">1. 学年・科目</div>
       <div class="form-group">
