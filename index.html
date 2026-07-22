@@ -257,8 +257,19 @@ select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px;
   <div id="keyboard-container"></div>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script>
-window.API_URL = "<?= ScriptApp.getService().getUrl() ?>";
-const API_URL = window.API_URL;
+/** GAS サーバー呼び出し（HtmlService 内では fetch より確実） */
+function gasRun(fnName) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  return new Promise(function(resolve, reject) {
+    var runner = google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(function(err) {
+        reject(new Error(typeof err === 'object' && err.message ? err.message : String(err)));
+      });
+    runner[fnName].apply(runner, args);
+  });
+}
+
 // algorithm.js
 // 出題アルゴリズム・成績記録モジュール
 
@@ -517,20 +528,7 @@ const AuthService = {
 
     async loginWithToken(idToken) {
         try {
-            const apiUrl = window.API_URL;
-            if (!apiUrl) {
-                throw new Error("API_URLが設定されていません。");
-            }
-
-            const response = await fetch(apiUrl, {
-                method: "POST",
-                body: JSON.stringify({
-                    action: "login",
-                    idToken: idToken
-                })
-            });
-
-            const data = await response.json();
+            const data = await gasRun('apiLogin', idToken);
             
             if (data.status === "success") {
                 this.currentUser = data.user;
@@ -1026,17 +1024,11 @@ elements.backBtn.addEventListener('click', () => {
 });
 
 async function fetchQuestionsFromGAS(subject, unit) {
-  const url = `${API_URL}?action=getQuestions&subject=${encodeURIComponent(subject)}&unit=${encodeURIComponent(unit)}`;
-  const response = await fetch(url, { redirect: "follow" });
-  if (!response.ok) {
-    throw new Error("HTTP error " + response.status);
-  }
-  const result = await response.json();
+  const result = await gasRun('apiGetQuestions', subject, unit);
   if (result.status === "success") {
     return result.data;
-  } else {
-    throw new Error(result.message);
   }
+  throw new Error(result.message || "問題の取得に失敗しました");
 }
 
 function loadQuestionToGame(qData) {
@@ -1121,16 +1113,8 @@ window.onQuestionCompleted = (isCorrect) => {
 
 async function sendResultsToGAS() {
   if (sessionResults.length === 0) return;
-  const payload = {
-    action: "saveResult",
-    results: sessionResults
-  };
   try {
-    const res = await fetch(API_URL, {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
+    const data = await gasRun('apiSaveResult', sessionResults);
     console.log("Save Response:", data);
   } catch(e) {
     console.error("Save Error:", e);
@@ -1142,17 +1126,9 @@ async function sendSessionLogToGAS() {
   const correctRate = totalQuestionsCount > 0 ? Math.round((currentScore / totalQuestionsCount) * 100) : 0;
   const checkedUnits = Array.from(elements.units.querySelectorAll('input:checked')).map(el => el.value);
   const setName = `${getSelectedSubjectName()} - ${checkedUnits.join(',')}`;
-  
-  const payload = {
-    action: "saveSessionLog",
-    email: currentUserId,
-    setName: setName,
-    correctRate: correctRate,
-    timeTaken: timeTaken
-  };
+
   try {
-    const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
-    const data = await res.json();
+    const data = await gasRun('apiSaveSessionLog', currentUserId, setName, correctRate, timeTaken);
     console.log("Session Log Response:", data);
   } catch(e) {
     console.error("Session Log Error:", e);
@@ -1217,11 +1193,7 @@ window.onLoginSuccess = function(user) {
 // ログ取得とマイページ描画
 async function fetchUserLogs(email) {
   try {
-    const res = await fetch(API_URL, {
-      method: "POST",
-      body: JSON.stringify({ action: "getUserLogs", email: email })
-    });
-    const data = await res.json();
+    const data = await gasRun('apiGetUserLogs', email);
     if (data.status === "success") {
       renderMyPage(data.data);
     }
