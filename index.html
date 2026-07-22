@@ -260,17 +260,84 @@ select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px;
 /** false: 認証なしでゲスト利用 / true: Google ログイン必須（AuthService コードはそのまま残す） */
 const AUTH_ENABLED = false;
 
-/** GAS サーバー呼び出し（HtmlService 内では fetch より確実） */
+/** Webアプリ URL（テンプレート評価時に GAS が注入。fetch フォールバック用） */
+window.API_URL = "<?= ScriptApp.getService().getUrl() ?>";
+
+/** GAS サーバー呼び出し（google.script.run 優先、不可時は fetch） */
 function gasRun(fnName) {
   var args = Array.prototype.slice.call(arguments, 1);
-  return new Promise(function(resolve, reject) {
-    var runner = google.script.run
-      .withSuccessHandler(resolve)
-      .withFailureHandler(function(err) {
-        reject(new Error(typeof err === 'object' && err.message ? err.message : String(err)));
-      });
-    runner[fnName].apply(runner, args);
-  });
+  if (typeof google !== 'undefined' && google.script && google.script.run) {
+    return new Promise(function(resolve, reject) {
+      var runner = google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(function(err) {
+          reject(new Error(typeof err === 'object' && err.message ? err.message : String(err)));
+        });
+      if (typeof runner[fnName] !== 'function') {
+        reject(new Error('サーバー関数が見つかりません: ' + fnName));
+        return;
+      }
+      runner[fnName].apply(runner, args);
+    });
+  }
+  return gasFetch_(fnName, args);
+}
+
+async function parseGasJson_(res) {
+  if (!res.ok) throw new Error('HTTP error ' + res.status);
+  var text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error('サーバー応答の解析に失敗しました');
+  }
+}
+
+async function gasFetch_(fnName, args) {
+  var url = window.API_URL;
+  if (!url) {
+    throw new Error('API URL が取得できません。GAS の Webアプリ URL（/exec）から開いてください。');
+  }
+
+  if (fnName === 'apiGetQuestions') {
+    var qUrl = url + '?action=getQuestions&subject=' + encodeURIComponent(args[0]) + '&unit=' + encodeURIComponent(args[1]);
+    return parseGasJson_(await fetch(qUrl, { redirect: 'follow' }));
+  }
+  if (fnName === 'apiLogin') {
+    return parseGasJson_(await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'login', idToken: args[0] })
+    }));
+  }
+  if (fnName === 'apiSaveResult') {
+    return parseGasJson_(await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'saveResult', results: args[0] })
+    }));
+  }
+  if (fnName === 'apiSaveSessionLog') {
+    return parseGasJson_(await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'saveSessionLog',
+        email: args[0],
+        setName: args[1],
+        correctRate: args[2],
+        timeTaken: args[3]
+      })
+    }));
+  }
+  if (fnName === 'apiGetUserLogs') {
+    return parseGasJson_(await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'getUserLogs', email: args[0] })
+    }));
+  }
+  throw new Error('未対応のAPI: ' + fnName);
 }
 
 // algorithm.js
