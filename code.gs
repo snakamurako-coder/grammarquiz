@@ -46,7 +46,7 @@ function doGet(e) {
   } else if (action === 'setup') {
     try {
       const force = String(e.parameter.force || '') === '1';
-      const result = setupEnvironment(force);
+      const result = setupEnvironmentWithLock_(force);
       return sendResponse({ status: "success", data: result });
     } catch (error) {
       return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
@@ -411,17 +411,49 @@ function handleGetUserLogs(requestData) {
 
 /**
  * 未セットアップ時のみ自動実行。doGet/doPost から呼ばれる。
- * エディタから再実行したい場合は setupEnvironment(true) を使う。
+ * 並行リクエストによる二重生成を LockService で防止。
  */
 function ensureEnvironment() {
   const props = PropertiesService.getScriptProperties();
-  const done = props.getProperty(PROP.SETUP_COMPLETED) === 'true';
-  const hasMgmt = !!props.getProperty(PROP.SPREADSHEET_ID);
-  const hasMaterials = !!props.getProperty(PROP.MATERIALS_FOLDER_ID);
-  if (done && hasMgmt && hasMaterials) {
+  if (isEnvironmentReady_(props)) {
     return props.getProperties();
   }
-  return setupEnvironment(false);
+  return setupEnvironmentWithLock_(false);
+}
+
+/** セットアップ済みか（プロパティ + 実リソース存在を確認） */
+function isEnvironmentReady_(props) {
+  if (props.getProperty(PROP.SETUP_COMPLETED) !== 'true') return false;
+  const spreadId = props.getProperty(PROP.SPREADSHEET_ID);
+  const folderId = props.getProperty(PROP.MATERIALS_FOLDER_ID);
+  if (!spreadId || !folderId) return false;
+  try {
+    DriveApp.getFolderById(folderId);
+    SpreadsheetApp.openById(spreadId);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/** ロック付きセットアップ（手動実行・API からもこちらを使う） */
+function setupEnvironmentWithLock_(force) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const props = PropertiesService.getScriptProperties();
+    if (!force && isEnvironmentReady_(props)) {
+      return props.getProperties();
+    }
+    return setupEnvironment_(force);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** @deprecated 互換用。setupEnvironmentWithLock_ を使うこと */
+function setupEnvironment(force) {
+  return setupEnvironmentWithLock_(!!force);
 }
 
 /**
@@ -429,7 +461,7 @@ function ensureEnvironment() {
  * @param {boolean} force true のとき、欠落リソースを再生成してプロパティを上書き
  * @return {Object} 作成・参照したリソース情報
  */
-function setupEnvironment(force) {
+function setupEnvironment_(force) {
   const props = PropertiesService.getScriptProperties();
   const created = [];
   const reused = [];
@@ -470,7 +502,7 @@ function setupEnvironment(force) {
   return result;
 }
 
-/** materials フォルダを Script Properties 優先で取得 */
+/** materials フォルダを Script Properties 優先で取得（親フォルダ内のみ探索） */
 function getMaterialsFolder() {
   const props = PropertiesService.getScriptProperties();
   const folderId = props.getProperty(PROP.MATERIALS_FOLDER_ID);
@@ -482,25 +514,11 @@ function getMaterialsFolder() {
     }
   }
 
-  const parentId = props.getProperty(PROP.PARENT_FOLDER_ID);
-  if (parentId) {
-    try {
-      const parent = DriveApp.getFolderById(parentId);
-      const folders = parent.getFoldersByName(MATERIALS_FOLDER_NAME);
-      if (folders.hasNext()) {
-        const folder = folders.next();
-        props.setProperty(PROP.MATERIALS_FOLDER_ID, folder.getId());
-        return folder;
-      }
-    } catch (e) {
-      // fall through
-    }
-  }
-
-  const mFolders = DriveApp.getFoldersByName(MATERIALS_FOLDER_NAME);
-  if (mFolders.hasNext()) {
-    const folder = mFolders.next();
+  const parentFolder = getScriptParentFolder_();
+  const folder = findChildFolderByName_(parentFolder, MATERIALS_FOLDER_NAME);
+  if (folder) {
     props.setProperty(PROP.MATERIALS_FOLDER_ID, folder.getId());
+    props.setProperty(PROP.PARENT_FOLDER_ID, parentFolder.getId());
     return folder;
   }
 
@@ -538,49 +556,57 @@ function createSpreadsheetInFolder_(name, folder) {
 
 function getOrCreateMaterialsFolder_(parentFolder, force, created, reused) {
   const props = PropertiesService.getScriptProperties();
-  const existingId = props.getProperty(PROP.MATERIALS_FOLDER_ID);
 
-  if (!force && existingId) {
-    try {
-      const folder = DriveApp.getFolderById(existingId);
+  if (!force) {
+    const existingId = props.getProperty(PROP.MATERIALS_FOLDER_ID);
+    if (existingId) {
+      try {
+        const folder = DriveApp.getFolderById(existingId);
+        reused.push(MATERIALS_FOLDER_NAME);
+        return folder;
+      } catch (e) {
+        // ID が無効な場合は名前検索へ
+      }
+    }
+
+    const folder = findChildFolderByName_(parentFolder, MATERIALS_FOLDER_NAME);
+    if (folder) {
+      props.setProperty(PROP.MATERIALS_FOLDER_ID, folder.getId());
       reused.push(MATERIALS_FOLDER_NAME);
       return folder;
-    } catch (e) {
-      // recreate below
     }
   }
 
-  let folder = findChildFolderByName_(parentFolder, MATERIALS_FOLDER_NAME);
-  if (folder) {
-    reused.push(MATERIALS_FOLDER_NAME);
-    return folder;
-  }
-
-  folder = parentFolder.createFolder(MATERIALS_FOLDER_NAME);
+  const folder = parentFolder.createFolder(MATERIALS_FOLDER_NAME);
+  props.setProperty(PROP.MATERIALS_FOLDER_ID, folder.getId());
   created.push(MATERIALS_FOLDER_NAME);
   return folder;
 }
 
 function getOrCreateManagementBook_(parentFolder, force, created, reused) {
   const props = PropertiesService.getScriptProperties();
-  const existingId = props.getProperty(PROP.SPREADSHEET_ID);
 
-  if (!force && existingId) {
-    try {
+  if (!force) {
+    const existingId = props.getProperty(PROP.SPREADSHEET_ID);
+    if (existingId) {
+      try {
+        reused.push(MANAGEMENT_BOOK_NAME);
+        return SpreadsheetApp.openById(existingId);
+      } catch (e) {
+        // ID が無効な場合は名前検索へ
+      }
+    }
+
+    const existingFile = findChildSpreadsheetByName_(parentFolder, MANAGEMENT_BOOK_NAME);
+    if (existingFile) {
+      props.setProperty(PROP.SPREADSHEET_ID, existingFile.getId());
       reused.push(MANAGEMENT_BOOK_NAME);
-      return SpreadsheetApp.openById(existingId);
-    } catch (e) {
-      // recreate below
+      return SpreadsheetApp.open(existingFile);
     }
   }
 
-  const existingFile = findChildSpreadsheetByName_(parentFolder, MANAGEMENT_BOOK_NAME);
-  if (existingFile) {
-    reused.push(MANAGEMENT_BOOK_NAME);
-    return SpreadsheetApp.open(existingFile);
-  }
-
   const ss = createSpreadsheetInFolder_(MANAGEMENT_BOOK_NAME, parentFolder);
+  props.setProperty(PROP.SPREADSHEET_ID, ss.getId());
   created.push(MANAGEMENT_BOOK_NAME);
   return ss;
 }
@@ -775,4 +801,55 @@ function getSampleQuestionCatalog_() {
       ]
     }
   };
+}
+
+// =========================================================
+// ⑦ HtmlService クライアント用 API（google.script.run）
+// =========================================================
+
+function parseApiResponse_(output) {
+  if (output && typeof output.getContent === 'function') {
+    return JSON.parse(output.getContent());
+  }
+  return output;
+}
+
+function apiGetQuestions(subject, unit) {
+  ensureEnvironment();
+  try {
+    const data = fetchQuestionsFromSheet({ subject: subject, unit: unit });
+    return { status: 'success', data: data };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiLogin(idToken) {
+  ensureEnvironment();
+  return parseApiResponse_(handleLogin({ idToken: idToken }));
+}
+
+function apiSaveResult(results) {
+  ensureEnvironment();
+  return parseApiResponse_(handleSaveResult({ results: results }));
+}
+
+function apiSaveSessionLog(email, setName, correctRate, timeTaken) {
+  ensureEnvironment();
+  return parseApiResponse_(handleSaveSessionLog({ email: email, setName: setName, correctRate: correctRate, timeTaken: timeTaken }));
+}
+
+function apiGetUserLogs(email) {
+  ensureEnvironment();
+  return parseApiResponse_(handleGetUserLogs({ email: email }));
+}
+
+function apiGetCatalog() {
+  ensureEnvironment();
+  try {
+    const data = fetchCatalogFromDrive();
+    return { status: 'success', data: data };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
 }
