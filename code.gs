@@ -52,7 +52,8 @@ function doGet(e) {
       return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
     }
   }
-  return HtmlService.createHtmlOutputFromFile('index')
+  return HtmlService.createTemplateFromFile('index')
+    .evaluate()
     .setTitle('BrightStage')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
