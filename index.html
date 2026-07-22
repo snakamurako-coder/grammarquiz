@@ -257,6 +257,9 @@ select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px;
   <div id="keyboard-container"></div>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script>
+/** false: 認証なしでゲスト利用 / true: Google ログイン必須（AuthService コードはそのまま残す） */
+const AUTH_ENABLED = false;
+
 /** GAS サーバー呼び出し（HtmlService 内では fetch より確実） */
 function gasRun(fnName) {
   var args = Array.prototype.slice.call(arguments, 1);
@@ -586,6 +589,8 @@ window.AuthService = AuthService;
 
 // Google Identity Servicesが期待するグローバルコールバック
 window.handleCredentialResponse = async function(response) {
+    if (!AUTH_ENABLED) return;
+
     const msgEl = document.getElementById('login-msg');
     if (msgEl) {
         msgEl.textContent = "認証中...";
@@ -1166,7 +1171,36 @@ document.getElementById('return-settings-btn').addEventListener('click', () => {
 });
 
 // ======= AuthService連携 =======
+/** 認証なしモード: ログイン画面をスキップして学習設定へ */
+function enterAppAsGuest() {
+  currentUserId = "Guest";
+
+  const elName = document.getElementById('profile-name');
+  const elGrade = document.getElementById('profile-grade');
+  const elClass = document.getElementById('profile-class');
+  const elAccount = document.getElementById('profile-account');
+  const profileTitle = document.querySelector('#profile-container .section-title');
+  const logoutBtn = document.getElementById('logout-btn');
+  const mypage = document.getElementById('mypage-container');
+
+  if (elName) elName.textContent = "ゲスト";
+  if (elGrade) elGrade.textContent = "-";
+  if (elClass) elClass.textContent = "-";
+  if (elAccount) elAccount.textContent = "Guest";
+  if (profileTitle) profileTitle.textContent = "0. ユーザー情報";
+  if (logoutBtn) logoutBtn.style.display = 'none';
+  if (mypage) mypage.style.display = 'none';
+
+  screens.login.style.display = 'none';
+  screens.settings.style.display = 'block';
+  renderUnits(getSelectedSubjectName());
+}
+
 window.onLoginSuccess = function(user) {
+  if (!AUTH_ENABLED) {
+    enterAppAsGuest();
+    return;
+  }
   currentUserId = user.account;
   const unInput = document.getElementById('username-input');
   if (unInput) unInput.value = currentUserId;
@@ -1182,6 +1216,11 @@ window.onLoginSuccess = function(user) {
   if(elGrade) elGrade.textContent = user.grade || "未設定";
   if(elClass) elClass.textContent = user.class || "未設定";
   if(elAccount) elAccount.textContent = user.account || currentUserId;
+
+  const profileTitle = document.querySelector('#profile-container .section-title');
+  const logoutBtn = document.getElementById('logout-btn');
+  if (profileTitle) profileTitle.textContent = '0. ユーザー情報（認証済み）';
+  if (logoutBtn) logoutBtn.style.display = '';
 
   screens.login.style.display = 'none';
   screens.settings.style.display = 'block';
@@ -1294,16 +1333,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const logoutBtn = document.getElementById('logout-btn');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', () => {
+      if (!AUTH_ENABLED) return;
       if (window.AuthService) {
         window.AuthService.clearSession();
       }
-      location.reload(); // ページをリロードしてログイン画面に戻す
+      location.reload();
     });
   }
 });
 
 // 初期化実行
 document.addEventListener('DOMContentLoaded', () => {
+  if (!AUTH_ENABLED) {
+    enterAppAsGuest();
+    return;
+  }
   // 自動ログイン（セッション復元）の試行
   if (window.AuthService && window.AuthService.loadSession()) {
     console.log("前回ログインしたユーザー情報からセッションを復元中...", window.AuthService.currentUser);
