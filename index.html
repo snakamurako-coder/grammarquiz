@@ -4,12 +4,98 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BrightStage</title>
-  <link rel="stylesheet" href="style.css">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>/* =========================================
+   共通スタイル & 設定画面
+   ========================================= */
+body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f7f6; padding: 20px; padding-bottom: 300px; color: #333; max-width: 600px; margin: 0 auto; }
+.header-title { font-size: 1.8em; font-weight: bold; color: #2c3e50; text-align: center; margin-bottom: 20px; }
+.setting-section { background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
+.section-title { font-size: 1.1em; font-weight: bold; color: #455a64; margin-bottom: 15px; border-bottom: 2px solid #eceff1; padding-bottom: 5px; }
+.form-group { margin-bottom: 15px; }
+label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; color: #666; }
+select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 1em; background-color: #f9f9f9; }
+.check-list { display: flex; flex-direction: column; gap: 10px; }
+.check-item { display: flex; align-items: center; gap: 8px; font-size: 1em; cursor: pointer; }
+.unit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.unit-card { border: 1px solid #cfd8dc; padding: 10px; border-radius: 8px; cursor: pointer; background-color: #fff; display: flex; align-items: center; gap: 8px; font-size: 0.9em; }
+.unit-card.selected { background-color: #e3f2fd; border-color: #2196f3; font-weight: bold; }
+.btn-primary { width: 100%; padding: 15px; font-size: 1.2em; font-weight: bold; background-color: #2196f3; color: white; border: none; border-radius: 8px; cursor: pointer; }
+
+/* =========================================
+   ゲーム画面（並び替えUI & 不足語入力）
+   ========================================= */
+.question-box { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 15px; }
+.question-ja { font-size: 1.2em; font-weight: bold; color: #333; }
+.area-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 5px; }
+.area-label { font-size: 0.85em; font-weight: bold; color: #666; }
+
+/* 4択・タイピングUI用 */
+.choices-grid { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 15px; }
+.choice-btn { padding: 15px; font-size: 1.1em; background-color: white; border: 2px solid #2196f3; color: #2196f3; border-radius: 8px; cursor: pointer; text-align: left; transition: all 0.2s; }
+.choice-btn:active { background-color: #2196f3; color: white; }
+.choice-btn.selected { background-color: #2196f3; color: white; }
+.choice-btn.unknown { border-color: #9e9e9e; color: #757575; text-align: center; font-weight: bold; }
+
+#sentence-container { display: flex; flex-wrap: wrap; align-items: center; background: #fff; padding: 15px; border-radius: 12px; margin-bottom: 20px; gap: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+.fixed-text { font-size: 1.3em; font-weight: bold; color: #444; }
+.sortable-area { min-height: 50px; padding: 10px; border-radius: 12px; display: flex; flex-wrap: wrap; gap: 8px; transition: background-color 0.2s; margin-bottom: 15px; }
+#answer-slot { background-color: #e3f2fd; border: 2px dashed #90caf9; }
+#word-pool { background-color: #eceff1; border: 2px dashed #b0bec5; }
+#trash-slot { background-color: #ffebee; border: 2px dashed #ef9a9a; }
+.word-card { background-color: white; border: 1px solid #d1d5db; padding: 10px 16px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor: grab; font-size: 1.1em; color: #333; user-select: none; touch-action: manipulation; }
+.word-card:active { cursor: grabbing; transform: translateY(2px); }
+.sortable-ghost { opacity: 0.3; }
+.btn-small { padding: 4px 10px; font-size: 0.8em; background-color: #607d8b; color: white; border: none; border-radius: 4px; cursor: pointer; }
+#submit-btn { width: 100%; padding: 15px; font-size: 1.2em; background-color: #4caf50; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px; }
+#result-msg { margin-top: 10px; font-size: 1.1em; font-weight: bold; text-align: center; }
+
+/* 不足語入力エリア */
+#missing-word-input-area { background: #fff; padding: 15px; border-radius: 8px; border: 2px solid #ff9800; margin-bottom: 15px; display: flex; gap: 10px; align-items: center; }
+.input-label { font-weight: bold; color: #ff9800; }
+#missing-word-display { flex-grow: 1; padding: 10px; font-size: 1.2em; border: 2px solid #ccc; border-radius: 4px; background-color: #f9f9f9; min-height: 1.2em; cursor: pointer; }
+#create-card-btn { padding: 10px 15px; background-color: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+#create-card-btn:disabled { background-color: #ccc; cursor: not-allowed; }
+
+/* ソフトウェアキーボード */
+#keyboard-container { position: fixed; bottom: 0; left: 0; width: 100%; background-color: #d2d6da; padding: 8px 0; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); z-index: 1000; display: none; user-select: none; touch-action: manipulation; }
+.keyboard-row { display: flex; justify-content: center; gap: 4px; margin-bottom: 6px; padding: 0 4px; }
+.key { background-color: #fff; border: none; border-radius: 5px; height: 42px; flex-grow: 1; max-width: 45px; font-size: 1.1em; color: #000; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 1px 0 rgba(0,0,0,0.2); touch-action: manipulation; transition: background-color 0.1s; }
+.key:active { background-color: #adb5bd; }
+.key.wide { max-width: 70px; font-size: 0.9em; background-color: #adb5bd; }
+.key.space { max-width: 250px; }
+.key.enter { max-width: 100px; background-color: #ff9800; color: white; font-weight: bold; }
+.key.activated { background-color: #333 !important; color: #fff; }
+
+/* =========================================
+   ダッシュボード（マイページ）
+   ========================================= */
+.dashboard-grid { display: flex; flex-direction: column; gap: 15px; }
+.dashboard-card { background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+.card-title { font-weight: bold; font-size: 1.05em; margin-bottom: 15px; border-bottom: 2px solid #f0f0f0; padding-bottom: 8px; }
+.weakness-card .card-title { color: #d32f2f; border-bottom-color: #ffebee; }
+.recent-card .card-title { color: #1976d2; border-bottom-color: #e3f2fd; }
+.progress-card .card-title { color: #388e3c; border-bottom-color: #e8f5e9; }
+
+.dashboard-content { font-size: 0.9em; color: #555; }
+.log-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f5f5f5; }
+.log-item:last-child { border-bottom: none; }
+.log-title { font-weight: bold; color: #333; margin-bottom: 4px; }
+.log-meta { font-size: 0.8em; color: #888; }
+.log-score { font-weight: bold; font-size: 1.1em; padding: 4px 8px; border-radius: 4px; }
+
+.score-perfect { background-color: #e8f5e9; color: #2e7d32; }
+.score-good { background-color: #e3f2fd; color: #1565c0; }
+.score-warn { background-color: #fff8e1; color: #f57f17; }
+.score-poor { background-color: #ffebee; color: #c62828; }
+
+.progress-bar-container { width: 100%; background-color: #eee; border-radius: 4px; height: 10px; margin-top: 5px; overflow: hidden; }
+.progress-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+
+  </style>
 </head>
 <body>
-
-  <!-- Login Screen -->
+<!-- Login Screen -->
   <div id="login-screen">
     <div class="header-title">BrightStage ログイン</div>
     <div class="setting-section" style="text-align: center; padding: 40px 10px;">
@@ -169,14 +255,1092 @@
   </div>
 
   <div id="keyboard-container"></div>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+<script>
+window.API_URL = "<?= ScriptApp.getService().getUrl() ?>";
+const API_URL = window.API_URL;
+// algorithm.js
+// 出題アルゴリズム・成績記録モジュール
 
-  <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
-  <script src="algorithm.js"></script>
-  <script src="choice.js"></script>
-  <script src="typing.js"></script>
-  <script src="sorting.js"></script>
-  <script src="keyboard.js"></script>
-  <script src="authService.js"></script>
-  <script src="app.js"></script>
+const AlgorithmModule = (() => {
+  const STORAGE_KEY = 'brightstage_history';
+
+  function getHistory() {
+    try {
+      const data = localStorage.getItem(STORAGE_KEY);
+      return data ? JSON.parse(data) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveHistory(historyObj) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(historyObj));
+    } catch (e) {}
+  }
+
+  function recordResult(questionId, isCorrect) {
+    const history = getHistory();
+    if (!history[questionId]) {
+      history[questionId] = { correct: 0, incorrect: 0, lastPlayed: 0 };
+    }
+    if (isCorrect) {
+      history[questionId].correct += 1;
+    } else {
+      history[questionId].incorrect += 1;
+    }
+    history[questionId].lastPlayed = Date.now();
+    saveHistory(history);
+  }
+
+  function buildQuestionSet(allQuestions, mode) {
+    if (!allQuestions || allQuestions.length === 0) return [];
+    
+    let pool = [...allQuestions];
+    const history = getHistory();
+
+    if (mode === "normal") {
+      return pool;
+    }
+
+    if (mode === "random10") {
+      pool.sort(() => Math.random() - 0.5);
+      return pool.slice(0, 10);
+    }
+
+    if (mode === "weakness") {
+      pool.sort((a, b) => {
+        const ha = history[a.id] || { correct: 0, incorrect: 0, lastPlayed: 0 };
+        const hb = history[b.id] || { correct: 0, incorrect: 0, lastPlayed: 0 };
+        const errorRateA = ha.incorrect > 0 ? (ha.incorrect / (ha.correct + ha.incorrect)) : -1;
+        const errorRateB = hb.incorrect > 0 ? (hb.incorrect / (hb.correct + hb.incorrect)) : -1;
+        
+        if (errorRateA !== errorRateB) {
+           return errorRateB - errorRateA; // エラー率が高い順
+        }
+        return Math.random() - 0.5;
+      });
+      return pool.slice(0, 10);
+    }
+
+    if (mode === "unseen") {
+      pool.sort((a, b) => {
+        const ha = history[a.id] || { correct: 0, incorrect: 0, lastPlayed: 0 };
+        const hb = history[b.id] || { correct: 0, incorrect: 0, lastPlayed: 0 };
+        const playsA = ha.correct + ha.incorrect;
+        const playsB = hb.correct + hb.incorrect;
+        
+        if (playsA !== playsB) {
+          return playsA - playsB; // 取組回数少ない順
+        }
+        return ha.lastPlayed - hb.lastPlayed; // 日時が古い順
+      });
+      return pool.slice(0, 10);
+    }
+
+    return pool; 
+  }
+
+  return {
+    recordResult,
+    buildQuestionSet
+  };
+})();
+
+window.AlgorithmModule = AlgorithmModule;
+
+// keyboard.js
+// ソフトウェアキーボード汎用モジュール
+
+const KeyboardModule = (() => {
+  const kbContainer = document.getElementById('keyboard-container');
+  
+  let currentInput = "";
+  let shiftState = 0;
+  let lastShiftClickTime = 0;
+  let displayElement = null;
+  let onEnterCallback = null;
+  let onUpdateCallback = null;
+
+  const keyLayout = {
+    normal: [
+      ["!", "\"", "$", "%", "&", "'", "(", ")", "-", "¥"],
+      ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+      ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
+      ["Shift", "z", "x", "c", "v", "b", "n", "m", "Back"],
+      ["Space", "Enter"]
+    ],
+    shifted: [
+      ["!", "\"", "$", "%", "&", "'", "(", ")", "-", "¥"],
+      ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+      ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
+      ["Shift", "Z", "X", "C", "V", "B", "N", "M", "Back"],
+      ["Space", "Enter"]
+    ]
+  };
+
+  function init(targetElement, initialText, enterCallback, updateCallback) {
+    displayElement = targetElement;
+    currentInput = initialText || "";
+    onEnterCallback = enterCallback;
+    onUpdateCallback = updateCallback;
+    updateInputDisplay();
+    renderKeyboard();
+  }
+
+  function renderKeyboard() {
+    kbContainer.innerHTML = ''; 
+    const rows = (shiftState > 0) ? keyLayout.shifted : keyLayout.normal;
+
+    rows.forEach((row) => {
+      const rowDiv = document.createElement('div');
+      rowDiv.className = 'keyboard-row';
+      
+      row.forEach(key => {
+        const keyBtn = document.createElement('button');
+        keyBtn.className = 'key';
+        
+        if (key === "Back") keyBtn.textContent = "⌫";
+        else if (key === "Space") keyBtn.textContent = "空白"; 
+        else keyBtn.textContent = key;
+
+        if (key === "Shift") {
+          keyBtn.classList.add('wide');
+          if (shiftState === 1) keyBtn.classList.add('activated');
+          if (shiftState === 2) keyBtn.innerHTML = '⬆️<span style="font-size:0.6em">LOCK</span>';
+        }
+        if (key === "Back") keyBtn.classList.add('wide');
+        if (key === "Space") keyBtn.classList.add('space');
+        if (key === "Enter") keyBtn.classList.add('enter');
+
+        keyBtn.addEventListener('pointerdown', (e) => {
+          e.preventDefault(); 
+          handleKeyPress(key);
+        });
+
+        rowDiv.appendChild(keyBtn);
+      });
+      kbContainer.appendChild(rowDiv);
+    });
+  }
+
+  function handleKeyPress(key) {
+    if (key === "Shift") {
+      handleShiftLogic();
+    } else if (key === "Back") {
+      currentInput = currentInput.slice(0, -1);
+    } else if (key === "Space") {
+      currentInput += " ";
+    } else if (key === "Enter") {
+      if (onEnterCallback) {
+        onEnterCallback(currentInput);
+      }
+      return; 
+    } else {
+      currentInput += key;
+      if (shiftState === 1) shiftState = 0;
+    }
+    updateInputDisplay();
+    renderKeyboard(); 
+  }
+
+  function updateInputDisplay() {
+    if (displayElement) {
+      displayElement.textContent = currentInput;
+    }
+    if (onUpdateCallback) {
+      onUpdateCallback(currentInput);
+    }
+  }
+
+  function handleShiftLogic() {
+    const now = Date.now();
+    const timeDiff = now - lastShiftClickTime;
+    if (timeDiff < 300) shiftState = 2;
+    else shiftState = (shiftState === 0) ? 1 : 0;
+    lastShiftClickTime = now;
+  }
+
+  function show() {
+    kbContainer.style.display = 'block';
+  }
+
+  function hide() {
+    kbContainer.style.display = 'none';
+  }
+
+  function resetInput(text = "") {
+    currentInput = text;
+    updateInputDisplay();
+  }
+
+  // 物理キーボードサポート
+  window.addEventListener('keydown', (e) => {
+    if (kbContainer.style.display === 'none') return;
+    let pressedKey = e.key;
+    e.preventDefault(); 
+
+    if (pressedKey === "Backspace") pressedKey = "Back";
+    if (pressedKey === "Shift") pressedKey = "Shift";
+    if (pressedKey === " ") pressedKey = "Space";
+    if (pressedKey === "Enter") pressedKey = "Enter";
+
+    const allKeysNormal = keyLayout.normal.flat();
+    const allKeysShifted = keyLayout.shifted.flat();
+    
+    if (allKeysNormal.includes(pressedKey) || allKeysShifted.includes(pressedKey)) {
+      handleKeyPress(pressedKey);
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', () => {
+    renderKeyboard();
+  });
+
+  return {
+    init,
+    show,
+    hide,
+    resetInput
+  };
+})();
+
+// エクスポート
+window.KeyboardModule = KeyboardModule;
+
+// authService.js
+// Google認証機能の分離モジュール
+
+const AuthService = {
+    currentUser: null,
+
+    async loginWithToken(idToken) {
+        try {
+            const apiUrl = window.API_URL;
+            if (!apiUrl) {
+                throw new Error("API_URLが設定されていません。");
+            }
+
+            const response = await fetch(apiUrl, {
+                method: "POST",
+                body: JSON.stringify({
+                    action: "login",
+                    idToken: idToken
+                })
+            });
+
+            const data = await response.json();
+            
+            if (data.status === "success") {
+                this.currentUser = data.user;
+                this.saveSession(); // セッションをローカルストレージに保存
+                return { success: true, user: this.currentUser };
+            } else {
+                return { success: false, message: data.message || "認証に失敗しました。" };
+            }
+        } catch (error) {
+            console.error("AuthService Login Error:", error);
+            return { success: false, message: "通信エラーが発生しました。" };
+        }
+    },
+
+    saveSession() {
+        if (this.currentUser) {
+            localStorage.setItem('brightstage_user_data', JSON.stringify(this.currentUser));
+            localStorage.setItem('brightstage_login_time', Date.now().toString());
+        }
+    },
+
+    loadSession() {
+        try {
+            const dataStr = localStorage.getItem('brightstage_user_data');
+            const timeStr = localStorage.getItem('brightstage_login_time');
+            if (dataStr && timeStr) {
+                const loginTime = parseInt(timeStr, 10);
+                const thirtyDays = 30 * 24 * 60 * 60 * 1000; // 30日間の有効期限（任意に調整可能）
+                if (Date.now() - loginTime < thirtyDays) {
+                    this.currentUser = JSON.parse(dataStr);
+                    return true;
+                } else {
+                    this.clearSession();
+                }
+            }
+        } catch (e) {
+            console.error("Session load error", e);
+            this.clearSession();
+        }
+        return false;
+    },
+
+    clearSession() {
+        this.currentUser = null;
+        localStorage.removeItem('brightstage_user_data');
+        localStorage.removeItem('brightstage_login_time');
+    },
+
+    isLoggedIn() {
+        return this.currentUser !== null;
+    }
+};
+
+window.AuthService = AuthService;
+
+// Google Identity Servicesが期待するグローバルコールバック
+window.handleCredentialResponse = async function(response) {
+    const msgEl = document.getElementById('login-msg');
+    if (msgEl) {
+        msgEl.textContent = "認証中...";
+        msgEl.style.color = "#555";
+    }
+
+    const result = await AuthService.loginWithToken(response.credential);
+
+    if (result.success) {
+        if (msgEl) msgEl.textContent = "";
+        
+        // メイン側（app.jsなど）に定義された処理を呼び出す
+        if (typeof window.onLoginSuccess === 'function') {
+            window.onLoginSuccess(result.user);
+        }
+    } else {
+        if (msgEl) {
+            msgEl.textContent = "エラー: " + result.message;
+            msgEl.style.color = "#f44336";
+        }
+    }
+};
+
+// choice.js
+// 4択問題制御モジュール
+
+const ChoiceModule = (() => {
+  const container = document.getElementById('choice-sentence-container');
+  const buttonsContainer = document.getElementById('choice-buttons-container');
+  const resultMsg = document.getElementById('result-msg');
+  
+  let qData = null;
+
+  function initGame(questionData) {
+    qData = questionData;
+    container.innerHTML = '';
+    buttonsContainer.innerHTML = '';
+    resultMsg.textContent = '';
+
+    if (qData.sentence_template) {
+      container.textContent = qData.sentence_template;
+    } else {
+      container.textContent = "";
+    }
+
+    let choices = [qData.correct_answer];
+    
+    // ダミー選出方法
+    let dummiesToUse = [];
+    if (qData.dummy_selection_method === "順番" || qData.dummy_selection_method === "sequential") {
+       dummiesToUse = qData.dummies.slice(0, 3);
+    } else {
+       // 無作為
+       let shuffled = [...qData.dummies].sort(() => Math.random() - 0.5);
+       dummiesToUse = shuffled.slice(0, 3);
+    }
+    
+    choices = choices.concat(dummiesToUse);
+    choices.sort(() => Math.random() - 0.5);
+
+    // 第5の選択肢
+    choices.push("わからない・自信がない");
+
+    choices.forEach((choiceText) => {
+      if (!choiceText) return;
+      const btn = document.createElement('button');
+      btn.className = 'choice-btn';
+      btn.textContent = choiceText;
+      
+      if (choiceText === "わからない・自信がない") {
+        btn.classList.add('unknown');
+      }
+
+      btn.onclick = () => handleChoice(choiceText, btn);
+      buttonsContainer.appendChild(btn);
+    });
+  }
+
+  function handleChoice(selectedText, btn) {
+    if (resultMsg.textContent !== '') return;
+
+    Array.from(buttonsContainer.children).forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+
+    if (selectedText === qData.correct_answer) {
+      resultMsg.textContent = "⭕️ 正解！";
+      resultMsg.style.color = "#4caf50";
+      if(window.onQuestionCompleted) window.onQuestionCompleted(true);
+    } else if (selectedText === "わからない・自信がない") {
+      resultMsg.textContent = "復習しましょう。正答: " + qData.correct_answer;
+      resultMsg.style.color = "#ff9800";
+      if(window.onQuestionCompleted) window.onQuestionCompleted(false);
+    } else {
+      resultMsg.textContent = "❌ 不正解...";
+      resultMsg.style.color = "#f44336";
+      if(window.onQuestionCompleted) window.onQuestionCompleted(false);
+    }
+  }
+
+  return { initGame };
+})();
+
+window.ChoiceModule = ChoiceModule;
+
+// typing.js
+// 和文英訳・空所入力制御モジュール
+
+const TypingModule = (() => {
+  const container = document.getElementById('typing-sentence-container');
+  const inputDisplay = document.getElementById('typing-input-display');
+  const submitBtn = document.getElementById('typing-submit-btn');
+  const resultMsg = document.getElementById('result-msg');
+  
+  let qData = null;
+
+  document.body.addEventListener('click', (e) => {
+    if (window.KeyboardModule && document.getElementById('typing-ui').style.display === 'block') {
+      if (!e.target.closest('#typing-ui') && !e.target.closest('#keyboard-container')) {
+        window.KeyboardModule.hide();
+      }
+    }
+  });
+
+  function initGame(questionData) {
+    qData = questionData;
+    container.innerHTML = '';
+    resultMsg.textContent = '';
+    inputDisplay.textContent = "タップして入力";
+    submitBtn.style.display = 'none';
+
+    if (qData.sentence_template) {
+      container.textContent = qData.sentence_template;
+    } else {
+      container.textContent = "（訳を入力してください）";
+    }
+
+    if (window.KeyboardModule) {
+      window.KeyboardModule.init(
+        inputDisplay, 
+        "", 
+        (text) => {
+           checkAnswer(text);
+        }, 
+        (text) => {
+           if (text) {
+             submitBtn.style.display = 'block';
+           } else {
+             submitBtn.style.display = 'none';
+             if (inputDisplay.textContent === "") {
+               inputDisplay.textContent = "タップして入力";
+             }
+           }
+        }
+      );
+
+      inputDisplay.onclick = (e) => {
+        window.KeyboardModule.show();
+        if (inputDisplay.textContent === "タップして入力") {
+          inputDisplay.textContent = "";
+        }
+        e.stopPropagation();
+      };
+    }
+    
+    submitBtn.onclick = () => {
+       const text = inputDisplay.textContent;
+       if (text && text !== "タップして入力") {
+         checkAnswer(text);
+       }
+    };
+  }
+
+  function checkAnswer(userAnswer) {
+    if (userAnswer.trim().toLowerCase() === qData.correct_answer.trim().toLowerCase()) {
+      resultMsg.textContent = "⭕️ 正解！";
+      resultMsg.style.color = "#4caf50";
+      if(window.onQuestionCompleted) window.onQuestionCompleted(true);
+    } else {
+      resultMsg.textContent = "❌ 惜しい！ 正答: " + qData.correct_answer;
+      resultMsg.style.color = "#f44336";
+      if(window.onQuestionCompleted) window.onQuestionCompleted(false);
+    }
+    if (window.KeyboardModule) window.KeyboardModule.hide();
+    submitBtn.style.display = 'none';
+  }
+
+  return { initGame };
+})();
+
+window.TypingModule = TypingModule;
+
+// sorting.js
+// 並び替えと正誤判定
+
+const SortingModule = (() => {
+  const answerSlot = document.getElementById('answer-slot');
+  const wordPool = document.getElementById('word-pool');
+  const trashSlot = document.getElementById('trash-slot');
+  const submitBtn = document.getElementById('submit-btn');
+  const resultMsg = document.getElementById('result-msg');
+  const moveAllBtn = document.getElementById('move-all-btn');
+  
+  const missDisplay = document.getElementById('missing-word-display');
+  const createCardBtn = document.getElementById('create-card-btn');
+  const missingWordArea = document.getElementById('missing-word-input-area');
+  
+  let qData = null;
+
+  document.body.addEventListener('click', (e) => {
+    if (window.KeyboardModule && document.getElementById('sort-ui').style.display === 'block') {
+      if (!e.target.closest('#missing-word-input-area') && !e.target.closest('#keyboard-container')) {
+        window.KeyboardModule.hide();
+      }
+    }
+  });
+
+  function initGame(questionData) {
+    qData = questionData;
+    
+    answerSlot.innerHTML = '';
+    wordPool.innerHTML = '';
+    trashSlot.innerHTML = '';
+    resultMsg.textContent = '';
+    
+    let initialPool = [...qData.pool_words, ...qData.dummies];
+    initialPool.sort(() => Math.random() - 0.5);
+    initialPool.forEach(w => createCard(w, wordPool));
+    
+    // キーボード機能の初期化
+    if (window.KeyboardModule) {
+      window.KeyboardModule.init(
+        missDisplay, 
+        "", 
+        (text) => {
+           if (text) createCardAction(text);
+        }, 
+        (text) => {
+           createCardBtn.disabled = (text.length === 0);
+        }
+      );
+      
+      missDisplay.onclick = (e) => {
+        window.KeyboardModule.show();
+        e.stopPropagation();
+      };
+      
+      createCardBtn.onclick = () => {
+         if (!createCardBtn.disabled) createCardAction(missDisplay.textContent);
+      };
+    }
+    
+    checkSubmitVisibility();
+  }
+
+  function createCardAction(text) {
+    createCard(text, wordPool);
+    checkSubmitVisibility();
+    if(window.KeyboardModule) window.KeyboardModule.resetInput("");
+    createCardBtn.disabled = true;
+  }
+
+  function createCard(text, container) {
+    const card = document.createElement('div');
+    card.className = 'word-card'; 
+    card.textContent = text;
+    container.appendChild(card);
+  }
+
+  const sortOptions = { 
+    group: 'shared', 
+    animation: 150, 
+    ghostClass: 'sortable-ghost', 
+    onSort: checkSubmitVisibility 
+  };
+  
+  // Init Sortable logic
+  new Sortable(answerSlot, sortOptions);
+  new Sortable(wordPool, sortOptions);
+  new Sortable(trashSlot, sortOptions);
+
+  function checkSubmitVisibility() {
+    if (!qData) return;
+    submitBtn.style.display = (answerSlot.children.length === qData.all_correct_words.length) ? 'block' : 'none';
+    resultMsg.textContent = "";
+  }
+
+  moveAllBtn.addEventListener('click', () => {
+    Array.from(wordPool.children).forEach(c => answerSlot.appendChild(c));
+    checkSubmitVisibility();
+  });
+
+  submitBtn.addEventListener('click', () => {
+    if (!qData) return;
+    const userAnswer = Array.from(answerSlot.children).map(c => c.textContent).join(' ');
+    if (userAnswer === qData.correct_answer) {
+      resultMsg.textContent = "⭕️ 正解！";
+      resultMsg.style.color = "#4caf50";
+      submitBtn.style.display = 'none'; // 正解したら消す
+      if(window.onQuestionCompleted) window.onQuestionCompleted(true);
+    } else {
+      resultMsg.textContent = "❌ 不正解...";
+      resultMsg.style.color = "#f44336";
+      if(window.onQuestionCompleted) window.onQuestionCompleted(false);
+    }
+  });
+
+  return {
+    initGame,
+    createCard,
+    getPool: () => wordPool,
+    checkSubmitVisibility
+  };
+})();
+
+// エクスポート（グローバルスコープ）
+window.SortingModule = SortingModule;
+
+// app.js
+// データと画面遷移の管理
+
+let currentQuestionDataList = [];
+let currentQuestionIndex = 0;
+let totalQuestionsCount = 0;
+let currentScore = 0;
+let sessionResults = [];
+let currentUserId = "Guest";
+let sessionStartTime = null;
+
+// GASへ送信するテキスト値
+const unitData = { 
+  "中学1年 英語": ["単元A", "単元B", "be動詞", "一般動詞"], 
+  "中学2年 英語": ["単元A", "単元B", "過去形", "助動詞"] 
+};
+
+// UI要素
+const screens = {
+  login: document.getElementById('login-screen'),
+  settings: document.getElementById('settings-screen'),
+  game: document.getElementById('game-screen')
+};
+const elements = {
+  subject: document.getElementById('subject-select'),
+  units: document.getElementById('unit-container'),
+  startBtn: document.getElementById('start-btn'),
+  backBtn: document.getElementById('back-btn'),
+  qJa: document.getElementById('question-ja'),
+  prefix: document.getElementById('prefix-text'),
+  suffix: document.getElementById('suffix-text')
+};
+
+// セレクトボックスの表示テキスト（実際のスプレッドシート名として使われるもの）を取得
+function getSelectedSubjectName() {
+  const select = elements.subject;
+  return select.options[select.selectedIndex].text;
+}
+
+function renderUnits(subjectText) {
+  elements.units.innerHTML = '';
+  // フォールバック付きで単元リストを取得
+  const units = unitData[subjectText] || ["単元A", "単元B"];
+  
+  units.forEach(unit => {
+    const lbl = document.createElement('label');
+    lbl.className = 'unit-card selected';
+    lbl.innerHTML = `<input type="checkbox" value="${unit}" checked style="display:none;"> ${unit}`;
+    lbl.querySelector('input').addEventListener('change', e => {
+      lbl.classList.toggle('selected', e.target.checked);
+    });
+    elements.units.appendChild(lbl);
+  });
+}
+
+elements.subject.addEventListener('change', e => {
+  renderUnits(getSelectedSubjectName());
+});
+
+elements.startBtn.addEventListener('click', async () => {
+  const subjectName = getSelectedSubjectName();
+  const checkedUnits = Array.from(elements.units.querySelectorAll('input:checked')).map(el => el.value);
+  
+  if (checkedUnits.length === 0) {
+    alert("単元を1つ以上選択してください。");
+    return;
+  }
+
+  // ユーザー名の保存・取得
+  const unInput = document.getElementById('username-input');
+  if (unInput && unInput.value.trim() !== '') {
+    currentUserId = unInput.value.trim();
+    localStorage.setItem('brightstage_username', currentUserId);
+  } else {
+    currentUserId = localStorage.getItem('brightstage_username') || "Guest";
+    if (unInput && currentUserId !== "Guest") unInput.value = currentUserId;
+  }
+  
+  sessionResults = [];
+  
+  // UX：ロード中の表現
+  elements.startBtn.disabled = true;
+  const originalText = elements.startBtn.textContent;
+  elements.startBtn.textContent = "問題を読み込み中...";
+
+  try {
+    const unitParam = checkedUnits.join(",");
+    const rawQuestions = await fetchQuestionsFromGAS(subjectName, unitParam);
+    const mode = document.querySelector('input[name="play-mode"]:checked').value;
+    
+    // アルゴリズムモジュールを通す
+    const questions = window.AlgorithmModule ? window.AlgorithmModule.buildQuestionSet(rawQuestions, mode) : rawQuestions;
+    
+    if (questions && questions.length > 0) {
+      currentQuestionDataList = questions;
+      totalQuestionsCount = questions.length;
+      currentQuestionIndex = 0;
+      currentScore = 0;
+      sessionStartTime = Date.now();
+      loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
+      screens.settings.style.display = 'none';
+      document.getElementById('result-screen').style.display = 'none';
+      screens.game.style.display = 'block';
+    } else {
+      alert("問題が見つからない、またはシートに有効なデータがありません。");
+    }
+  } catch (error) {
+    console.error(error);
+    alert("通信エラーが発生しました: " + error.message);
+  } finally {
+    elements.startBtn.disabled = false;
+    elements.startBtn.textContent = originalText;
+  }
+});
+
+elements.backBtn.addEventListener('click', () => {
+  screens.game.style.display = 'none';
+  screens.settings.style.display = 'block';
+});
+
+async function fetchQuestionsFromGAS(subject, unit) {
+  const url = `${API_URL}?action=getQuestions&subject=${encodeURIComponent(subject)}&unit=${encodeURIComponent(unit)}`;
+  const response = await fetch(url, { redirect: "follow" });
+  if (!response.ok) {
+    throw new Error("HTTP error " + response.status);
+  }
+  const result = await response.json();
+  if (result.status === "success") {
+    return result.data;
+  } else {
+    throw new Error(result.message);
+  }
+}
+
+function loadQuestionToGame(qData) {
+  elements.qJa.textContent = qData.japanese;
+  
+  // UIの初期化・非表示化
+  document.getElementById('sort-ui').style.display = 'none';
+  document.getElementById('choice-ui').style.display = 'none';
+  document.getElementById('typing-ui').style.display = 'none';
+  const missingWordArea = document.getElementById('missing-word-input-area');
+  if (missingWordArea) missingWordArea.style.display = 'none';
+  document.getElementById('result-msg').textContent = '';
+
+  const format = qData.format || "並び替え";
+
+  if (format.includes("4択") || format.includes("４択")) {
+    // 4択問題
+    document.getElementById('choice-ui').style.display = 'block';
+    if (window.ChoiceModule) window.ChoiceModule.initGame(qData);
+  } else if (format.includes("英訳") || format.includes("空所")) {
+    // 和文英訳・空所入力
+    document.getElementById('typing-ui').style.display = 'block';
+    if (window.TypingModule) window.TypingModule.initGame(qData);
+  } else {
+    // 並び替え問題
+    document.getElementById('sort-ui').style.display = 'block';
+    if (missingWordArea) missingWordArea.style.display = 'flex';
+
+    if (qData.sentence_template) {
+      const match = qData.sentence_template.match(/[(\[（［<＜][^)\]）］>＞]*[)\]）］>＞]/);
+      if (match) {
+        elements.prefix.textContent = qData.sentence_template.substring(0, match.index).trim();
+        elements.suffix.textContent = qData.sentence_template.substring(match.index + match[0].length).trim();
+      } else {
+        elements.prefix.textContent = qData.sentence_template;
+        elements.suffix.textContent = "";
+      }
+    } else {
+      elements.prefix.textContent = "";
+      elements.suffix.textContent = "";
+    }
+    
+    if (!document.getElementById('dummy-option').checked) {
+      qData.dummies = [];
+    }
+    
+    if (window.SortingModule) {
+      window.SortingModule.initGame(qData);
+    }
+  }
+}
+
+// モジュールからのコールバック
+window.onQuestionCompleted = (isCorrect) => {
+  const currentQ = currentQuestionDataList[currentQuestionIndex];
+  if (window.AlgorithmModule) {
+    window.AlgorithmModule.recordResult(currentQ.id, isCorrect);
+  }
+  if (isCorrect) currentScore++;
+  
+  let modeDesc = "通常";
+  const modeRadio = document.querySelector('input[name="play-mode"]:checked');
+  if (modeRadio) modeDesc = modeRadio.value;
+  
+  const user = window.AuthService && window.AuthService.currentUser ? window.AuthService.currentUser : {};
+  
+  sessionResults.push({
+    timestamp: new Date().toISOString(),
+    userId: currentUserId,
+    userName: user.name || "",
+    grade: user.grade || "",
+    userClass: user.class || "",
+    questionId: currentQ.id,
+    subject: elements.subject.options[elements.subject.selectedIndex].text,
+    unit: currentQ.unit || "",
+    isCorrect: isCorrect ? "正解" : "不正解",
+    mode: modeDesc
+  });
+  
+  document.getElementById('next-btn').style.display = 'block';
+};
+
+async function sendResultsToGAS() {
+  if (sessionResults.length === 0) return;
+  const payload = {
+    action: "saveResult",
+    results: sessionResults
+  };
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    console.log("Save Response:", data);
+  } catch(e) {
+    console.error("Save Error:", e);
+  }
+}
+
+async function sendSessionLogToGAS() {
+  const timeTaken = sessionStartTime ? Math.round((Date.now() - sessionStartTime) / 1000) : 0;
+  const correctRate = totalQuestionsCount > 0 ? Math.round((currentScore / totalQuestionsCount) * 100) : 0;
+  const checkedUnits = Array.from(elements.units.querySelectorAll('input:checked')).map(el => el.value);
+  const setName = `${getSelectedSubjectName()} - ${checkedUnits.join(',')}`;
+  
+  const payload = {
+    action: "saveSessionLog",
+    email: currentUserId,
+    setName: setName,
+    correctRate: correctRate,
+    timeTaken: timeTaken
+  };
+  try {
+    const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
+    const data = await res.json();
+    console.log("Session Log Response:", data);
+  } catch(e) {
+    console.error("Session Log Error:", e);
+  }
+}
+
+document.getElementById('next-btn').addEventListener('click', () => {
+  document.getElementById('next-btn').style.display = 'none';
+  currentQuestionIndex++;
+  if (currentQuestionIndex < currentQuestionDataList.length) {
+    loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
+  } else {
+    showResultScreen();
+  }
+});
+
+function showResultScreen() {
+  screens.game.style.display = 'none';
+  const resultScreen = document.getElementById('result-screen');
+  resultScreen.style.display = 'block';
+  
+  document.getElementById('result-score').textContent = `スコア: ${currentScore} / ${totalQuestionsCount}`;
+  document.getElementById('result-details').textContent = "成績データを保存しています...";
+  
+  Promise.all([sendResultsToGAS(), sendSessionLogToGAS()]).then(() => {
+    document.getElementById('result-details').textContent = "演習が終了し、成績が保存されました。";
+  }).catch(() => {
+    document.getElementById('result-details').textContent = "演習が終了しました。(一部通信エラーあり)";
+  });
+}
+
+document.getElementById('return-settings-btn').addEventListener('click', () => {
+  document.getElementById('result-screen').style.display = 'none';
+  screens.settings.style.display = 'block';
+});
+
+// ======= AuthService連携 =======
+window.onLoginSuccess = function(user) {
+  currentUserId = user.account;
+  const unInput = document.getElementById('username-input');
+  if (unInput) unInput.value = currentUserId;
+  localStorage.setItem('brightstage_username', currentUserId);
+
+  // プロフィールUIへの反映
+  const elName = document.getElementById('profile-name');
+  const elGrade = document.getElementById('profile-grade');
+  const elClass = document.getElementById('profile-class');
+  const elAccount = document.getElementById('profile-account');
+
+  if(elName) elName.textContent = user.name || "未設定";
+  if(elGrade) elGrade.textContent = user.grade || "未設定";
+  if(elClass) elClass.textContent = user.class || "未設定";
+  if(elAccount) elAccount.textContent = user.account || currentUserId;
+
+  screens.login.style.display = 'none';
+  screens.settings.style.display = 'block';
+  
+  renderUnits(getSelectedSubjectName());
+  fetchUserLogs(currentUserId);
+};
+
+// ログ取得とマイページ描画
+async function fetchUserLogs(email) {
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "getUserLogs", email: email })
+    });
+    const data = await res.json();
+    if (data.status === "success") {
+      renderMyPage(data.data);
+    }
+  } catch (e) {
+    console.error("fetchUserLogs error:", e);
+  }
+}
+
+function renderMyPage(logs) {
+  const container = document.getElementById('mypage-container');
+  if (container) container.style.display = 'block';
+  
+  if (!logs || logs.length === 0) {
+    document.getElementById('recent-history-list').innerHTML = "<p>まだ学習記録がありません。</p>";
+    document.getElementById('set-progress-list').innerHTML = "<p>まだ学習記録がありません。</p>";
+    document.getElementById('weakness-list').innerHTML = "<p>まだ学習記録がありません。</p>";
+    return;
+  }
+
+  // 1. 最近の学習履歴 (直近5件)
+  const recentLogs = [...logs].reverse().slice(0, 5);
+  let recentHtml = '';
+  recentLogs.forEach(log => {
+    const rate = parseInt(log['正答率']) || 0;
+    const scoreClass = rate >= 80 ? 'score-perfect' : rate >= 60 ? 'score-good' : rate >= 40 ? 'score-warn' : 'score-poor';
+    recentHtml += `
+      <div class="log-item">
+        <div>
+          <div class="log-title">${log['学習セット名']}</div>
+          <div class="log-meta">${log['タイムスタンプ']} - ${log['解答時間']}秒</div>
+        </div>
+        <div class="log-score ${scoreClass}">${rate}%</div>
+      </div>
+    `;
+  });
+  document.getElementById('recent-history-list').innerHTML = recentHtml;
+
+  // 2. セット別進捗 & 弱点分析
+  const setMap = {};
+  logs.forEach(log => {
+    const setName = log['学習セット名'];
+    const rate = parseInt(log['正答率']) || 0;
+    if (!setMap[setName]) {
+      setMap[setName] = { playCount: 0, maxRate: 0, recentRate: rate };
+    }
+    setMap[setName].playCount++;
+    if (rate > setMap[setName].maxRate) setMap[setName].maxRate = rate;
+    setMap[setName].recentRate = rate; // keep last
+  });
+
+  let progressHtml = '';
+  const weaknessList = [];
+  
+  for (const setName in setMap) {
+    const stat = setMap[setName];
+    const rate = stat.maxRate;
+    const barColor = rate >= 80 ? '#4caf50' : rate >= 60 ? '#2196f3' : rate >= 40 ? '#ff9800' : '#f44336';
+    
+    progressHtml += `
+      <div style="margin-bottom: 12px;">
+        <div style="display:flex; justify-content:space-between; font-size: 0.9em; margin-bottom: 4px;">
+          <strong>${setName}</strong>
+          <span>最高 ${rate}% (計${stat.playCount}回)</span>
+        </div>
+        <div class="progress-bar-container">
+          <div class="progress-bar-fill" style="width: ${rate}%; background-color: ${barColor};"></div>
+        </div>
+      </div>
+    `;
+
+    if (stat.recentRate < 60) {
+      weaknessList.push({ name: setName, rate: stat.recentRate });
+    }
+  }
+  document.getElementById('set-progress-list').innerHTML = progressHtml;
+
+  let weaknessHtml = '';
+  if (weaknessList.length > 0) {
+    weaknessList.sort((a,b) => a.rate - b.rate);
+    weaknessList.slice(0, 3).forEach(w => {
+      weaknessHtml += `
+        <div class="log-item" style="background-color: #fff8e1; border-left: 4px solid #f44336; padding: 10px; margin-bottom: 8px;">
+          <div>
+            <div class="log-title" style="color: #c62828;">${w.name}</div>
+            <div class="log-meta">直近の正答率が <strong>${w.rate}%</strong> です！復習しましょう。</div>
+          </div>
+        </div>
+      `;
+    });
+  } else {
+    weaknessHtml = "<p>現在、目立った弱点はありません。すばらしい！</p>";
+  }
+  document.getElementById('weakness-list').innerHTML = weaknessHtml;
+}
+
+// ログアウト機能
+document.addEventListener('DOMContentLoaded', () => {
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', () => {
+      if (window.AuthService) {
+        window.AuthService.clearSession();
+      }
+      location.reload(); // ページをリロードしてログイン画面に戻す
+    });
+  }
+});
+
+// 初期化実行
+document.addEventListener('DOMContentLoaded', () => {
+  // 自動ログイン（セッション復元）の試行
+  if (window.AuthService && window.AuthService.loadSession()) {
+    console.log("前回ログインしたユーザー情報からセッションを復元中...", window.AuthService.currentUser);
+    window.onLoginSuccess(window.AuthService.currentUser);
+  } else {
+    // セッションがない場合はLogin画面を表示したまま待機。
+    // GSIライブラリが自動でボタンを描画します。
+  }
+});
+</script>
 </body>
 </html>

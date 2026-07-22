@@ -28,7 +28,7 @@ function doOptions(e) {
 
 function doGet(e) {
   ensureEnvironment();
-  const action = e.parameter.action;
+  const action = e && e.parameter ? e.parameter.action : null;
   if (action === 'getQuestions') {
     try {
       const data = fetchQuestionsFromSheet(e.parameter);
@@ -52,7 +52,9 @@ function doGet(e) {
       return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
     }
   }
-  return sendResponse({ status: "error", message: "Invalid action" });
+  return HtmlService.createHtmlOutputFromFile('index')
+    .setTitle('BrightStage')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 function fetchQuestionsFromSheet(params) {
