@@ -110,7 +110,7 @@ function fetchQuestionsFromSheet(params) {
         const h = headers[c] ? headers[c].toString() : "";
         if (h.startsWith("並び替え語句") && !h.includes("ダミー")) {
           if (row[c] !== "") poolWords.push(row[c]);
-        } else if (h.includes("ダミー")) {
+        } else if (h.includes("ダミー") && !h.includes("選出方法")) {
           if (row[c] !== "") dummies.push(row[c]);
         }
       }
