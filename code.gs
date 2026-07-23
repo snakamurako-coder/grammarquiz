@@ -741,6 +741,11 @@ function getSampleQuestionCatalog_() {
   function typing(id, ja, template, answer, hint) {
     return row(id, '英訳', ja, '', template, answer, [], [], '', hint);
   }
+  // 正誤判断指摘訂正: 4択と同じデータ形式。空所に正答かダミーを当てはめた英文を提示し、
+  // ユーザーが最終確定した英文が正答文と一致するかで判定する
+  function correction(id, ja, template, answer, dummies, hint) {
+    return row(id, '正誤判断指摘訂正', ja, '', template, answer, [], dummies, '', hint);
+  }
 
   return {
     '中学1年 英語': {
@@ -763,7 +768,8 @@ function getSampleQuestionCatalog_() {
         sorting(2, '彼は忙しいです。', 'He ( ) busy.', 'is', ['is'], ['am', 'are'], '無作為', ''),
         choice(3, '私たちは日本人です。', 'We ( ) Japanese.', 'are', ['am', 'is', 'be'], '順番', ''),
         choice(4, 'あなたは学生ですか。', '( ) you a student?', 'Are', ['Is', 'Am', 'Be'], '無作為', '疑問文'),
-        typing(5, '彼女は歌手です。', 'She ( ) a singer.', 'is', '')
+        typing(5, '彼女は歌手です。', 'She ( ) a singer.', 'is', ''),
+        correction(6, '彼らは野球選手です。', 'They ( ) baseball players.', 'are', ['is', 'am'], '主語が複数のときの be 動詞')
       ],
       '一般動詞': [
         headers,
@@ -791,7 +797,8 @@ function getSampleQuestionCatalog_() {
         sorting(1, '私はきのう走った。', 'I ( ) yesterday.', 'ran', ['ran'], ['run', 'runs'], '無作為', '不規則動詞'),
         sorting(2, '彼らはきのう遊んだ。', 'They ( ) yesterday.', 'played', ['played'], ['play', 'plays'], '無作為', ''),
         choice(3, '彼女はきのう来た。', 'She ( ) yesterday.', 'came', ['come', 'comes', 'coming'], '無作為', ''),
-        typing(4, '私たちはきのう食べた。', 'We ( ) yesterday.', 'ate', 'eat の過去形')
+        typing(4, '私たちはきのう食べた。', 'We ( ) yesterday.', 'ate', 'eat の過去形'),
+        correction(5, '彼はきのうそこへ行った。', 'He ( ) there yesterday.', 'went', ['go', 'goes'], '過去形に注意')
       ],
       '助動詞': [
         headers,
