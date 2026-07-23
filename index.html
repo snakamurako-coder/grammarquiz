@@ -92,6 +92,16 @@ select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px;
 .progress-bar-container { width: 100%; background-color: #eee; border-radius: 4px; height: 10px; margin-top: 5px; overflow: hidden; }
 .progress-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
 
+/* =========================================
+   正誤判断指摘訂正 UI
+   ========================================= */
+.correction-token { padding: 8px 12px; border: 1px solid #cfd8dc; border-radius: 8px; background-color: #fff; font-size: 1.15em; color: #333; user-select: none; }
+.correction-token.selectable { cursor: pointer; border-color: #90caf9; }
+.correction-token.selectable:active { background-color: #e3f2fd; }
+.correction-token.selected { background-color: #ffebee; border-color: #f44336; color: #c62828; font-weight: bold; }
+.correction-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+#correction-preview-sentence { background: #e8f5e9; border: 2px solid #a5d6a7; border-radius: 8px; padding: 12px; font-size: 1.2em; }
+
   </style>
 </head>
 <body>
@@ -238,6 +248,38 @@ select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px;
       <div id="typing-sentence-container" class="sentence-container fixed-text" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;"></div>
       <div id="typing-input-display" class="typing-display" style="min-height: 40px; padding: 10px; border: 2px solid #ccc; border-radius: 4px; background-color: #fff; cursor: pointer; font-size: 1.2em; margin-bottom: 15px;">タップして入力</div>
       <button id="typing-submit-btn" style="display: none; width: 100%; padding: 15px; font-size: 1.2em; background-color: #4caf50; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px;">これで回答する</button>
+    </div>
+
+    <!-- 正誤判断指摘訂正用 UI -->
+    <div id="correction-ui" style="display:none;">
+      <div id="correction-sentence" class="sentence-container" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;"></div>
+      <div id="correction-hint" style="margin-bottom: 10px; color: #666; font-size: 0.95em; font-weight: bold;"></div>
+
+      <!-- STEP1: 誤りの有無を判断 -->
+      <div id="correction-judge-area" class="correction-actions">
+        <button id="correction-no-error-btn" class="choice-btn">✅ 誤りはない（この英文で正しい）</button>
+        <button id="correction-has-error-btn" class="choice-btn unknown">⚠️ 誤りがある</button>
+      </div>
+
+      <!-- STEP2: 誤り箇所を指摘 -->
+      <button id="correction-locate-btn" style="display: none; width: 100%; padding: 12px; font-size: 1.1em; background-color: #ff9800; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px;" disabled>選択した部分を修正する</button>
+
+      <!-- STEP3: 修正文をキーボード入力 -->
+      <div id="correction-edit-area" style="display: none; background: #fff; padding: 15px; border-radius: 8px; border: 2px solid #ff9800; margin-top: 10px;">
+        <div class="input-label" style="margin-bottom: 8px;">修正後の語句（削除する場合は空のまま）:</div>
+        <div id="correction-input-display" style="min-height: 40px; padding: 10px; border: 2px solid #ccc; border-radius: 4px; background-color: #f9f9f9; cursor: pointer; font-size: 1.2em; margin-bottom: 10px;">タップして入力</div>
+        <button id="correction-preview-btn" style="width: 100%; padding: 12px; font-size: 1.1em; background-color: #2196f3; color: white; border: none; border-radius: 8px; cursor: pointer;">置換後の英文を確認する</button>
+      </div>
+
+      <!-- STEP4: プレビュー確認 -->
+      <div id="correction-preview-area" style="display: none; margin-top: 12px;">
+        <div class="area-label" style="margin-bottom: 6px;">▼ 修正後の英文（これで回答しますか？）</div>
+        <div id="correction-preview-sentence"></div>
+        <div class="correction-actions">
+          <button id="correction-confirm-btn" style="width: 100%; padding: 15px; font-size: 1.2em; background-color: #4caf50; color: white; border: none; border-radius: 8px; cursor: pointer;">これでよい（回答する）</button>
+          <button id="correction-retry-btn" class="btn-small" style="padding: 10px;">やり直す</button>
+        </div>
+      </div>
     </div>
 
     <div id="result-msg"></div>
@@ -849,6 +891,215 @@ const TypingModule = (() => {
 
 window.TypingModule = TypingModule;
 
+// correction.js
+// 正誤判断指摘訂正モジュール
+// 手順: 誤りの有無を判断 → 誤り箇所をタップ指摘 → 修正語句を入力 → 置換後プレビューで確定 → 正答文と一致すれば正解
+const CorrectionModule = (() => {
+  const sentenceEl = document.getElementById('correction-sentence');
+  const hintEl = document.getElementById('correction-hint');
+  const judgeArea = document.getElementById('correction-judge-area');
+  const noErrorBtn = document.getElementById('correction-no-error-btn');
+  const hasErrorBtn = document.getElementById('correction-has-error-btn');
+  const locateBtn = document.getElementById('correction-locate-btn');
+  const editArea = document.getElementById('correction-edit-area');
+  const inputDisplay = document.getElementById('correction-input-display');
+  const previewBtn = document.getElementById('correction-preview-btn');
+  const previewArea = document.getElementById('correction-preview-area');
+  const previewSentence = document.getElementById('correction-preview-sentence');
+  const confirmBtn = document.getElementById('correction-confirm-btn');
+  const retryBtn = document.getElementById('correction-retry-btn');
+  const resultMsg = document.getElementById('result-msg');
+
+  let qData = null;
+  let tokens = [];            // 提示英文の単語トークン
+  let selected = new Set();   // 選択中トークンの添字
+  let presentedSentence = "";
+  let correctSentence = "";
+  let finalSentence = "";
+  let phase = "judge";        // judge → locate → edit → preview → done
+
+  const BLANK_RE = /[(\[（［<＜][^)\]）］>＞]*[)\]）］>＞]/;
+
+  function normalize(s) {
+    return (s || "").toString().replace(/\s+/g, " ").trim().toLowerCase();
+  }
+
+  document.body.addEventListener('click', (e) => {
+    if (window.KeyboardModule && document.getElementById('correction-ui').style.display === 'block') {
+      if (!e.target.closest('#correction-edit-area') && !e.target.closest('#keyboard-container')) {
+        window.KeyboardModule.hide();
+      }
+    }
+  });
+
+  function initGame(questionData) {
+    qData = questionData;
+    resultMsg.textContent = '';
+
+    // 出題文の組み立て：
+    // ・テンプレートに空所 ( ) がある場合（4択からのコンバート）:
+    //   正答またはダミーのどれかを無作為に当てはめた英文を提示。
+    //   正答文 = 正答を当てはめた英文。
+    // ・空所がない場合: 提示文 = テンプレート、正答文 = 正答（フルセンテンス）。
+    const tpl = (qData.sentence_template || "").toString();
+    if (BLANK_RE.test(tpl)) {
+      correctSentence = tpl.replace(BLANK_RE, qData.correct_answer).replace(/\s+/g, " ").trim();
+      const options = [qData.correct_answer].concat(qData.dummies || []);
+      const pick = options[Math.floor(Math.random() * options.length)];
+      presentedSentence = tpl.replace(BLANK_RE, pick).replace(/\s+/g, " ").trim();
+    } else {
+      presentedSentence = tpl.replace(/\s+/g, " ").trim();
+      correctSentence = (qData.correct_answer || "").toString().replace(/\s+/g, " ").trim();
+      if (!presentedSentence) presentedSentence = correctSentence;
+    }
+
+    tokens = presentedSentence.split(" ");
+    resetToJudge();
+  }
+
+  function resetToJudge() {
+    phase = "judge";
+    selected = new Set();
+    finalSentence = "";
+    renderTokens();
+    hintEl.textContent = "この英文は正しいですか？";
+    judgeArea.style.display = 'flex';
+    locateBtn.style.display = 'none';
+    editArea.style.display = 'none';
+    previewArea.style.display = 'none';
+    resultMsg.textContent = '';
+    if (window.KeyboardModule) window.KeyboardModule.hide();
+  }
+
+  function renderTokens() {
+    sentenceEl.innerHTML = '';
+    tokens.forEach((word, i) => {
+      const span = document.createElement('span');
+      span.className = 'correction-token';
+      span.textContent = word;
+      if (phase === 'locate') {
+        span.classList.add('selectable');
+        if (selected.has(i)) span.classList.add('selected');
+        span.onclick = () => {
+          if (selected.has(i)) selected.delete(i);
+          else selected.add(i);
+          renderTokens();
+          locateBtn.disabled = (selected.size === 0);
+        };
+      } else if (selected.has(i)) {
+        span.classList.add('selected');
+      }
+      sentenceEl.appendChild(span);
+    });
+  }
+
+  noErrorBtn.onclick = () => {
+    if (phase !== 'judge') return;
+    finalSentence = presentedSentence;
+    judge();
+  };
+
+  hasErrorBtn.onclick = () => {
+    if (phase !== 'judge') return;
+    phase = 'locate';
+    judgeArea.style.display = 'none';
+    locateBtn.style.display = 'block';
+    locateBtn.disabled = true;
+    hintEl.textContent = "誤っている語句をタップして選択してください（複数選択可）";
+    renderTokens();
+  };
+
+  locateBtn.onclick = () => {
+    if (phase !== 'locate' || selected.size === 0) return;
+    phase = 'edit';
+    locateBtn.style.display = 'none';
+    editArea.style.display = 'block';
+    hintEl.textContent = "選択した部分をどう直しますか？修正後の語句を入力してください";
+    renderTokens();
+
+    if (window.KeyboardModule) {
+      window.KeyboardModule.init(
+        inputDisplay,
+        "",
+        () => { showPreview(); },
+        (text) => {
+          if (text === "" && inputDisplay.textContent === "") {
+            inputDisplay.textContent = "タップして入力";
+          }
+        }
+      );
+      inputDisplay.onclick = (e) => {
+        window.KeyboardModule.show();
+        if (inputDisplay.textContent === "タップして入力") {
+          inputDisplay.textContent = "";
+        }
+        e.stopPropagation();
+      };
+    }
+  };
+
+  previewBtn.onclick = () => {
+    if (phase !== 'edit') return;
+    showPreview();
+  };
+
+  function showPreview() {
+    let replacement = inputDisplay.textContent;
+    if (replacement === "タップして入力") replacement = "";
+    replacement = replacement.replace(/\s+/g, " ").trim();
+
+    // 選択された範囲（最小添字〜最大添字）を入力語句で置換
+    const indices = Array.from(selected).sort((a, b) => a - b);
+    const min = indices[0];
+    const max = indices[indices.length - 1];
+    const newTokens = tokens.slice(0, min)
+      .concat(replacement ? replacement.split(" ") : [])
+      .concat(tokens.slice(max + 1));
+    finalSentence = newTokens.join(" ").replace(/\s+/g, " ").trim();
+
+    phase = 'preview';
+    editArea.style.display = 'none';
+    previewArea.style.display = 'block';
+    previewSentence.textContent = finalSentence;
+    hintEl.textContent = "置換後の英文を確認してください";
+    if (window.KeyboardModule) window.KeyboardModule.hide();
+  }
+
+  confirmBtn.onclick = () => {
+    if (phase !== 'preview') return;
+    judge();
+  };
+
+  retryBtn.onclick = () => {
+    if (phase !== 'preview') return;
+    resetToJudge();
+  };
+
+  // 最終的にユーザーが「これでよい」とした英文が正答文と一致するかで判定
+  function judge() {
+    phase = 'done';
+    judgeArea.style.display = 'none';
+    locateBtn.style.display = 'none';
+    editArea.style.display = 'none';
+    previewArea.style.display = 'none';
+    if (window.KeyboardModule) window.KeyboardModule.hide();
+
+    if (normalize(finalSentence) === normalize(correctSentence)) {
+      resultMsg.textContent = "⭕️ 正解！ " + correctSentence;
+      resultMsg.style.color = "#4caf50";
+      if (window.onQuestionCompleted) window.onQuestionCompleted(true);
+    } else {
+      resultMsg.textContent = "❌ 不正解... 正答: " + correctSentence;
+      resultMsg.style.color = "#f44336";
+      if (window.onQuestionCompleted) window.onQuestionCompleted(false);
+    }
+  }
+
+  return { initGame };
+})();
+
+window.CorrectionModule = CorrectionModule;
+
 // sorting.js
 // 並び替えと正誤判定
 
@@ -1110,13 +1361,18 @@ function loadQuestionToGame(qData) {
   document.getElementById('sort-ui').style.display = 'none';
   document.getElementById('choice-ui').style.display = 'none';
   document.getElementById('typing-ui').style.display = 'none';
+  document.getElementById('correction-ui').style.display = 'none';
   const missingWordArea = document.getElementById('missing-word-input-area');
   if (missingWordArea) missingWordArea.style.display = 'none';
   document.getElementById('result-msg').textContent = '';
 
   const format = qData.format || "並び替え";
 
-  if (format.includes("4択") || format.includes("４択")) {
+  if (format.includes("正誤")) {
+    // 正誤判断指摘訂正
+    document.getElementById('correction-ui').style.display = 'block';
+    if (window.CorrectionModule) window.CorrectionModule.initGame(qData);
+  } else if (format.includes("4択") || format.includes("４択")) {
     // 4択問題
     document.getElementById('choice-ui').style.display = 'block';
     if (window.ChoiceModule) window.ChoiceModule.initGame(qData);
