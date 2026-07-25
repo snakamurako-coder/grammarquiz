@@ -1586,7 +1586,8 @@ const VocabQuizGenerator = (() => {
     const dummiesNeeded = Math.max(0, normalSlots - (forceNone ? 0 : 1));
     const dummies = pickDummies(wordObj, targetMeaning, pool, bookPool, options, dummiesNeeded, forceNone);
 
-    let choices = forceNone ? dummies.slice() : [targetMeaning.meaning].concat(dummies.map(function (d) { return d.meaning; }));
+    const dummyTexts = dummies.map(function (d) { return d.meaning; });
+    let choices = forceNone ? dummyTexts : [targetMeaning.meaning].concat(dummyTexts);
     choices = vocabShuffle(choices);
 
     const choiceObjects = choices.map(function (text) {
