@@ -1,4 +1,4 @@
-# BrightStage デプロイ手順（2UI構成）
+# 英語学習総合ツール デプロイ手順（2UI構成）
 
 ## 構成概要
 
@@ -86,7 +86,10 @@ https://script.google.com/macros/s/.../exec?action=setup
 
 または Apps Script エディタで `setupEnvironment(true)` を実行。
 
-作成者Drive に `materials/`、`vocabulary/`（プリセット）、管理ブックが生成されます。
+作成者Drive に `grammarquizzes/`（文法演習）、`vocabulary/`（プリセット）、管理ブックが生成されます。
+旧環境の `materials/` フォルダは初回アクセス時に自動で `grammarquizzes/` にリネームされます。
+
+セットアップ実行者のメールアドレスが `ADMIN_EMAIL` として記録され、**管理者はホワイトリスト登録なしで常に利用できます**。
 
 ---
 
@@ -132,18 +135,33 @@ clasp deploy -i <GAS1_DEPLOYMENT_ID> --description "Dashboard update"
 
 ---
 
-## 10. Script Properties（任意）
+## 10. ホワイトリスト（利用者制限）
+
+ホワイトリストに登録されたユーザーと管理者のみがアプリを利用できます。
+
+- **登録方法**: 管理ブック（作成者Drive の `BrightStage管理`）の `whitelist` シートに、`account` 列へ利用者の Google メールアドレスを追記
+- **GitHub Pages 学習画面**: Google ログイン必須。ログイン時に GAS② が whitelist と照合し、未登録ユーザーは拒否
+- **GAS① ダッシュボード**: アクセス時に whitelist（Script Properties キャッシュ）と照合し、未登録ユーザーにはアクセス拒否画面を表示
+- **管理者**: セットアップ実行者（`ADMIN_EMAIL`）は whitelist 登録不要で常に利用可
+- **キャッシュ**: whitelist は GAS② のリクエスト時に約10分間隔で Script Properties へ同期されます。シート編集直後に反映したい場合は GAS② の任意の API（例: `?action=getCatalog`）へ1回アクセスするか、エディタで `syncWhitelistCache_()` を実行してください
+
+---
+
+## 11. Script Properties（任意）
 
 Apps Script → プロジェクトの設定 → スクリプト プロパティ:
 
 | キー | 説明 |
 |---|---|
 | `PAGES_URL` | GitHub Pages の URL（GAS① リダイレクト先。未設定時は既定値） |
+| `ADMIN_EMAIL` | 管理者メールアドレス（setup 時に自動設定。変更可） |
+| `WHITELIST_CACHE` | whitelist の自動キャッシュ（手動編集不要） |
 
 ---
 
 ## トラブルシューティング
 
+- **「利用が許可されていないアカウントです」**: 管理ブックの `whitelist` シートにそのメールアドレスがあるか確認。追加直後は GAS② に1回アクセスしてキャッシュを更新
 - **dashboard が真っ白**: GAS① のデプロイが「ユーザーとして実行」になっているか確認
 - **API が 403**: GAS② が「全員（匿名）」アクセスになっているか確認
 - **セッションが見つからない**: CacheService TTL は6時間。再スタートしてください
