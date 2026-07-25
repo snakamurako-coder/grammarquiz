@@ -10,8 +10,24 @@ const PROP = {
   SAMPLE_VOCAB_BOOK_IDS: 'SAMPLE_VOCAB_BOOK_IDS',
   PARENT_FOLDER_ID: 'PARENT_FOLDER_ID',
   SAMPLE_BOOK_IDS: 'SAMPLE_BOOK_IDS',
-  SETUP_COMPLETED: 'SETUP_COMPLETED'
+  SETUP_COMPLETED: 'SETUP_COMPLETED',
+  PAGES_URL: 'PAGES_URL'
 };
+
+/** ユーザー権限実行時の UserProperties キー */
+const USER_PROP = {
+  MY_DATA_FOLDER_ID: 'MY_DATA_FOLDER_ID',
+  MY_VOCAB_BOOK_ID: 'MY_VOCAB_BOOK_ID',
+  MY_LOG_BOOK_ID: 'MY_LOG_BOOK_ID'
+};
+
+const USER_DATA_FOLDER_NAME = 'BrightStage_MyData';
+const USER_LOG_BOOK_NAME = 'BrightStage学習記録';
+const SESSION_CACHE_PREFIX = 'sess_';
+const RESULT_CACHE_PREFIX = 'result_';
+const SESSION_CACHE_TTL = 21600;
+const RESULT_CACHE_TTL = 21600;
+const DEFAULT_PAGES_URL = 'https://snakamurako-coder.github.io/grammarquiz/';
 
 /** index.html の GSI client_id と揃える既定値（未設定時のみ書き込む） */
 const DEFAULT_CLIENT_ID = '505252303455-84r495bnnsgiefcrv24ro2qtohlgbk2h.apps.googleusercontent.com';
@@ -42,54 +58,79 @@ function doOptions(e) {
 }
 
 function doGet(e) {
-  ensureEnvironment();
   const action = e && e.parameter ? e.parameter.action : null;
-  if (action === 'getQuestions') {
-    try {
-      const data = fetchQuestionsFromSheet(e.parameter);
-      return sendResponse({ status: "success", data: data });
-    } catch (error) {
-      return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
+
+  if (action) {
+    ensureEnvironment();
+    if (action === 'getQuestions') {
+      try {
+        const data = fetchQuestionsFromSheet(e.parameter);
+        return sendResponse({ status: "success", data: data });
+      } catch (error) {
+        return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
+      }
+    } else if (action === 'getCatalog') {
+      try {
+        const data = fetchCatalogFromDrive();
+        return sendResponse({ status: "success", data: data });
+      } catch (error) {
+        return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
+      }
+    } else if (action === 'getVocabCatalog') {
+      try {
+        const data = fetchVocabCatalogFromDrive_();
+        return sendResponse({ status: "success", data: data });
+      } catch (error) {
+        return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
+      }
+    } else if (action === 'getVocabWords') {
+      try {
+        const filters = e.parameter.filters ? JSON.parse(e.parameter.filters) : {};
+        const data = fetchVocabWordsFromSheet_({
+          bookName: e.parameter.bookName,
+          sheetName: e.parameter.sheetName,
+          filters: filters,
+          includeBookPool: e.parameter.includeBookPool || '0'
+        });
+        return sendResponse({ status: "success", data: data });
+      } catch (error) {
+        return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
+      }
+    } else if (action === 'getSession') {
+      try {
+        const token = e.parameter.token;
+        const session = getSessionFromCache_(token);
+        if (!session) return sendResponse({ status: "error", message: "セッションが見つかりません" });
+        return sendResponse({ status: "success", data: session });
+      } catch (error) {
+        return sendResponse({ status: "error", message: error.toString() });
+      }
+    } else if (action === 'getResult') {
+      try {
+        const token = e.parameter.token;
+        const result = getResultFromCache_(token);
+        if (!result) return sendResponse({ status: "error", message: "結果が見つかりません" });
+        return sendResponse({ status: "success", data: result });
+      } catch (error) {
+        return sendResponse({ status: "error", message: error.toString() });
+      }
+    } else if (action === 'setup') {
+      try {
+        const force = String(e.parameter.force || '') === '1';
+        const result = setupEnvironmentWithLock_(force);
+        return sendResponse({ status: "success", data: result });
+      } catch (error) {
+        return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
+      }
     }
-  } else if (action === 'getCatalog') {
-    try {
-      const data = fetchCatalogFromDrive();
-      return sendResponse({ status: "success", data: data });
-    } catch (error) {
-      return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
-    }
-  } else if (action === 'getVocabCatalog') {
-    try {
-      const data = fetchVocabCatalogFromDrive_();
-      return sendResponse({ status: "success", data: data });
-    } catch (error) {
-      return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
-    }
-  } else if (action === 'getVocabWords') {
-    try {
-      const filters = e.parameter.filters ? JSON.parse(e.parameter.filters) : {};
-      const data = fetchVocabWordsFromSheet_({
-        bookName: e.parameter.bookName,
-        sheetName: e.parameter.sheetName,
-        filters: filters,
-        includeBookPool: e.parameter.includeBookPool || '0'
-      });
-      return sendResponse({ status: "success", data: data });
-    } catch (error) {
-      return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
-    }
-  } else if (action === 'setup') {
-    try {
-      const force = String(e.parameter.force || '') === '1';
-      const result = setupEnvironmentWithLock_(force);
-      return sendResponse({ status: "success", data: result });
-    } catch (error) {
-      return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
-    }
+    return sendResponse({ status: "error", message: "無効なactionです: " + action });
   }
-  return HtmlService.createTemplateFromFile('index')
-    .evaluate()
-    .setTitle('BrightStage')
+
+  const template = HtmlService.createTemplateFromFile('dashboard');
+  template.PAGES_URL = getPagesUrl_();
+  template.RESULT_TOKEN = (e && e.parameter && e.parameter.result_token) ? e.parameter.result_token : '';
+  return template.evaluate()
+    .setTitle('BrightStage 管理')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -209,6 +250,8 @@ function doPost(e) {
       return handleGetUserLogs(requestData); // マイページ情報取得用
     } else if (action === "registerVocabWords") {
       return handleRegisterVocabWords(requestData);
+    } else if (action === "scoreReading") {
+      return handleScoreReading(requestData);
     } else if (action === "save") {
       return handleSave(requestData);       // 既存利用用
     } else if (action === "get_csv_data") {
@@ -548,6 +591,10 @@ function setupEnvironment_(force) {
   props.setProperty(PROP.SAMPLE_VOCAB_BOOK_IDS, JSON.stringify(sampleVocabBookIds));
 
   props.setProperty(PROP.SETUP_COMPLETED, 'true');
+  if (!props.getProperty(PROP.PAGES_URL)) {
+    props.setProperty(PROP.PAGES_URL, DEFAULT_PAGES_URL);
+    created.push('PAGES_URL');
+  }
 
   const result = {
     parentFolderId: parentFolder.getId(),
@@ -1384,79 +1431,25 @@ function buildVocabSheetInfo_(sheet) {
 function fetchVocabWordsFromSheet_(params) {
   const bookName = params.bookName;
   const sheetName = params.sheetName;
-  const includeBookPool = String(params.includeBookPool || '') === '1';
-
   if (!bookName || !sheetName) {
     throw new Error('bookName と sheetName は必須です。');
   }
-
   const ss = openVocabBookByName_(bookName);
-  const sheet = ss.getSheetByName(sheetName);
-  if (!sheet) throw new Error('シートが見つかりません: ' + sheetName);
-
-  const data = sheet.getDataRange().getValues();
-  if (data.length <= 1) {
-    return { words: [], pool: [] };
-  }
-
-  const headers = data[0];
-  const filters = params.filters || {};
-  const daiFilter = filters.dai || [];
-  const chuFilter = filters.chu || [];
-  const shoFilter = filters.sho || [];
-
-  const words = [];
-  const pool = [];
-
-  for (let r = 1; r < data.length; r++) {
-    const rowObj = rowToVocabObject_(headers, data[r]);
-    const word = normalizeVocabField_(rowObj['英単語・熟語の表現']);
-    if (word === UNREGISTERED) continue;
-
-    rowObj._rowIndex = r + 1;
-    pool.push(rowObj);
-
-    const dai = normalizeVocabField_(rowObj['大区分']);
-    const chu = normalizeVocabField_(rowObj['中区分']);
-    const sho = normalizeVocabField_(rowObj['小区分']);
-
-    if (daiFilter.length > 0 && daiFilter.indexOf(dai) === -1) continue;
-    if (chuFilter.length > 0 && chuFilter.indexOf(chu) === -1) continue;
-    if (shoFilter.length > 0 && shoFilter.indexOf(sho) === -1) continue;
-
-    words.push(rowObj);
-  }
-
-  let bookPool = pool;
-  if (includeBookPool) {
-    bookPool = [];
-    const allSheets = ss.getSheets();
-    allSheets.forEach(function (s) {
-      const sData = s.getDataRange().getValues();
-      if (sData.length <= 1) return;
-      const sHeaders = sData[0];
-      for (let r = 1; r < sData.length; r++) {
-        const rowObj = rowToVocabObject_(sHeaders, sData[r]);
-        const word = normalizeVocabField_(rowObj['英単語・熟語の表現']);
-        if (word === UNREGISTERED) continue;
-        rowObj._sheetName = s.getName();
-        bookPool.push(rowObj);
-      }
-    });
-  }
-
-  return { words: words, pool: pool, bookPool: bookPool };
+  const includeBookPool = String(params.includeBookPool || '') === '1' || params.includeBookPool === true;
+  return fetchVocabWordsFromSpreadsheet_(ss, sheetName, params.filters || {}, includeBookPool);
 }
 
-function registerVocabWords_(sheetName, rows) {
+function registerVocabWords_(sheetName, rows, ssOpt) {
   if (!sheetName) throw new Error('sheetName は必須です。');
   if (!rows || rows.length === 0) throw new Error('登録する単語がありません。');
 
-  const vocabularyFolder = getVocabularyFolder();
-  const myFile = findChildSpreadsheetByName_(vocabularyFolder, MY_VOCAB_BOOK_NAME);
-  if (!myFile) throw new Error('マイ単語帳が見つかりません。');
-
-  const ss = SpreadsheetApp.open(myFile);
+  let ss = ssOpt;
+  if (!ss) {
+    const vocabularyFolder = getVocabularyFolder();
+    const myFile = findChildSpreadsheetByName_(vocabularyFolder, MY_VOCAB_BOOK_NAME);
+    if (!myFile) throw new Error('マイ単語帳が見つかりません。');
+    ss = SpreadsheetApp.open(myFile);
+  }
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     sheet = ss.insertSheet(sheetName);
@@ -1476,6 +1469,302 @@ function registerVocabWords_(sheetName, rows) {
   renumberVocabSheet_(sheet);
 
   return { registeredCount: builtRows.length, sheetName: sheetName };
+}
+
+// =========================================================
+// ⑨ ユーザー権限環境（GAS①・UserProperties + ユーザーDrive）
+// =========================================================
+
+function getPagesUrl_() {
+  const props = PropertiesService.getScriptProperties();
+  return props.getProperty(PROP.PAGES_URL) || DEFAULT_PAGES_URL;
+}
+
+function generateSessionToken_() {
+  return Utilities.getUuid().replace(/-/g, '');
+}
+
+function saveSessionToCache_(token, payload) {
+  const json = JSON.stringify(payload);
+  if (json.length > 95000) {
+    throw new Error('セッションデータが大きすぎます（CacheService 100KB上限）');
+  }
+  CacheService.getScriptCache().put(SESSION_CACHE_PREFIX + token, json, SESSION_CACHE_TTL);
+  return token;
+}
+
+function getSessionFromCache_(token) {
+  if (!token) return null;
+  const raw = CacheService.getScriptCache().get(SESSION_CACHE_PREFIX + token);
+  if (!raw) return null;
+  return JSON.parse(raw);
+}
+
+function saveResultToCache_(token, result) {
+  CacheService.getScriptCache().put(RESULT_CACHE_PREFIX + token, JSON.stringify(result), RESULT_CACHE_TTL);
+}
+
+function getResultFromCache_(token) {
+  if (!token) return null;
+  const raw = CacheService.getScriptCache().get(RESULT_CACHE_PREFIX + token);
+  if (!raw) return null;
+  return JSON.parse(raw);
+}
+
+function normalizeForScoring_(s) {
+  return (s || '').toString().toLowerCase().replace(/[^\w\s']/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function scoreReadingTranscript_(sessionData, transcript) {
+  const words = sessionData.words || [];
+  const normalizedTranscript = normalizeForScoring_(transcript);
+  let matched = 0;
+  words.forEach(function (w) {
+    const target = normalizeForScoring_(w['英単語・熟語の表現'] || '');
+    if (target && normalizedTranscript.indexOf(target) >= 0) matched++;
+  });
+  const score = words.length > 0 ? Math.round((matched / words.length) * 100) : 0;
+  return {
+    score: score,
+    matched: matched,
+    total: words.length,
+    transcript: transcript,
+    mode: sessionData.mode || 'reading',
+    setName: sessionData.setName || '',
+    bookName: sessionData.bookName || '',
+    sheetName: sessionData.sheetName || '',
+    timestamp: new Date().toISOString()
+  };
+}
+
+function handleScoreReading(requestData) {
+  try {
+    const token = requestData.token;
+    const transcript = requestData.transcript || '';
+    const session = getSessionFromCache_(token);
+    if (!session) return sendResponse({ status: "error", message: "セッションが見つかりません" });
+    const result = scoreReadingTranscript_(session, transcript);
+    const resultToken = generateSessionToken_();
+    result.sessionToken = token;
+    saveResultToCache_(resultToken, result);
+    return sendResponse({ status: "success", data: result, resultToken: resultToken });
+  } catch (error) {
+    return sendResponse({ status: "error", message: error.toString() });
+  }
+}
+
+function ensureUserEnvironment_() {
+  const props = PropertiesService.getUserProperties();
+  let folderId = props.getProperty(USER_PROP.MY_DATA_FOLDER_ID);
+  let folder = null;
+
+  if (folderId) {
+    try {
+      folder = DriveApp.getFolderById(folderId);
+    } catch (e) {
+      folder = null;
+    }
+  }
+
+  if (!folder) {
+    const root = DriveApp.getRootFolder();
+    folder = findChildFolderByName_(root, USER_DATA_FOLDER_NAME);
+    if (!folder) folder = root.createFolder(USER_DATA_FOLDER_NAME);
+    props.setProperty(USER_PROP.MY_DATA_FOLDER_ID, folder.getId());
+  }
+
+  const created = [];
+  const reused = [];
+  const vocabBook = getOrCreateMyVocabBook_(folder, false, created, reused);
+  props.setProperty(USER_PROP.MY_VOCAB_BOOK_ID, vocabBook.getId());
+
+  const logBook = getOrCreateUserLogBook_(folder, props);
+  props.setProperty(USER_PROP.MY_LOG_BOOK_ID, logBook.getId());
+
+  return {
+    folderId: folder.getId(),
+    vocabBookId: vocabBook.getId(),
+    logBookId: logBook.getId()
+  };
+}
+
+function getOrCreateUserLogBook_(folder, userProps) {
+  let bookId = userProps.getProperty(USER_PROP.MY_LOG_BOOK_ID);
+  if (bookId) {
+    try {
+      return SpreadsheetApp.openById(bookId);
+    } catch (e) {
+      // fall through
+    }
+  }
+
+  const existing = findChildSpreadsheetByName_(folder, USER_LOG_BOOK_NAME);
+  if (existing) return SpreadsheetApp.open(existing);
+
+  const ss = createSpreadsheetInFolder_(USER_LOG_BOOK_NAME, folder);
+  let sheet = ss.getSheets()[0];
+  sheet.setName('学習記録');
+  sheet.appendRow(['タイムスタンプ', '学習セット名', 'モード', '正答率', '解答時間', '詳細']);
+  sheet.getRange(1, 1, 1, 6).setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  return ss;
+}
+
+function getUserVocabBook_() {
+  ensureUserEnvironment_();
+  const bookId = PropertiesService.getUserProperties().getProperty(USER_PROP.MY_VOCAB_BOOK_ID);
+  return SpreadsheetApp.openById(bookId);
+}
+
+function getUserLogBook_() {
+  ensureUserEnvironment_();
+  const bookId = PropertiesService.getUserProperties().getProperty(USER_PROP.MY_LOG_BOOK_ID);
+  return SpreadsheetApp.openById(bookId);
+}
+
+function fetchUserVocabCatalog_() {
+  const ss = getUserVocabBook_();
+  const sheetInfos = ss.getSheets().map(function (sheet) {
+    return buildVocabSheetInfo_(sheet);
+  });
+  return {
+    presets: [],
+    userBooks: [{
+      bookName: MY_VOCAB_BOOK_NAME,
+      bookId: ss.getId(),
+      sheets: sheetInfos
+    }]
+  };
+}
+
+function fetchUserVocabWordsFromSheet_(params) {
+  const sheetName = params.sheetName;
+  if (!sheetName) throw new Error('sheetName は必須です。');
+
+  const ss = getUserVocabBook_();
+  return fetchVocabWordsFromSpreadsheet_(ss, sheetName, params.filters || {}, !!params.includeBookPool);
+}
+
+function fetchVocabWordsFromSpreadsheet_(ss, sheetName, filters, includeBookPool) {
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error('シートが見つかりません: ' + sheetName);
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return { words: [], pool: [], bookPool: [] };
+
+  const headers = data[0];
+  const daiFilter = filters.dai || [];
+  const chuFilter = filters.chu || [];
+  const shoFilter = filters.sho || [];
+  const words = [];
+  const pool = [];
+
+  for (let r = 1; r < data.length; r++) {
+    const rowObj = rowToVocabObject_(headers, data[r]);
+    const word = normalizeVocabField_(rowObj['英単語・熟語の表現']);
+    if (word === UNREGISTERED) continue;
+    rowObj._rowIndex = r + 1;
+    pool.push(rowObj);
+
+    const dai = normalizeVocabField_(rowObj['大区分']);
+    const chu = normalizeVocabField_(rowObj['中区分']);
+    const sho = normalizeVocabField_(rowObj['小区分']);
+    if (daiFilter.length > 0 && daiFilter.indexOf(dai) === -1) continue;
+    if (chuFilter.length > 0 && chuFilter.indexOf(chu) === -1) continue;
+    if (shoFilter.length > 0 && shoFilter.indexOf(sho) === -1) continue;
+    words.push(rowObj);
+  }
+
+  let bookPool = pool;
+  if (includeBookPool) {
+    bookPool = [];
+    ss.getSheets().forEach(function (s) {
+      const sData = s.getDataRange().getValues();
+      if (sData.length <= 1) return;
+      const sHeaders = sData[0];
+      for (let r = 1; r < sData.length; r++) {
+        const rowObj = rowToVocabObject_(sHeaders, sData[r]);
+        const word = normalizeVocabField_(rowObj['英単語・熟語の表現']);
+        if (word === UNREGISTERED) continue;
+        rowObj._sheetName = s.getName();
+        bookPool.push(rowObj);
+      }
+    });
+  }
+
+  return { words: words, pool: pool, bookPool: bookPool };
+}
+
+function registerUserVocabWords_(sheetName, rows) {
+  const ss = getUserVocabBook_();
+  return registerVocabWords_(sheetName, rows, ss);
+}
+
+function saveUserLearningLog_(result) {
+  const ss = getUserLogBook_();
+  let sheet = ss.getSheetByName('学習記録');
+  if (!sheet) {
+    sheet = ss.insertSheet('学習記録');
+    sheet.appendRow(['タイムスタンプ', '学習セット名', 'モード', '正答率', '解答時間', '詳細']);
+  }
+  const timeStr = Utilities.formatDate(new Date(), 'JST', 'yyyy/MM/dd HH:mm:ss');
+  sheet.appendRow([
+    timeStr,
+    result.setName || '',
+    result.mode || '',
+    result.score != null ? result.score : (result.correctRate || ''),
+    result.timeTaken || '',
+    JSON.stringify(result)
+  ]);
+}
+
+function fetchUserLearningLogs_() {
+  const ss = getUserLogBook_();
+  const sheet = ss.getSheetByName('学習記録');
+  if (!sheet || sheet.getLastRow() <= 1) return [];
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const logs = [];
+  for (let i = data.length - 1; i >= 1 && logs.length < 20; i--) {
+    const obj = {};
+    for (let j = 0; j < headers.length; j++) {
+      if (headers[j]) obj[headers[j]] = data[i][j];
+    }
+    logs.push(obj);
+  }
+  return logs;
+}
+
+function buildSessionPayload_(params) {
+  const mode = params.mode || 'reading';
+  const sheetName = params.sheetName;
+  if (!sheetName) throw new Error('sheetName は必須です');
+
+  const filters = params.filters || {};
+  const wordData = fetchUserVocabWordsFromSheet_({
+    sheetName: sheetName,
+    filters: filters,
+    includeBookPool: true
+  });
+
+  if (!wordData.words || wordData.words.length === 0) {
+    throw new Error('出題できる単語がありません');
+  }
+
+  return {
+    mode: mode,
+    setName: MY_VOCAB_BOOK_NAME + ' / ' + sheetName,
+    bookName: MY_VOCAB_BOOK_NAME,
+    sheetName: sheetName,
+    filters: filters,
+    words: wordData.words,
+    pool: wordData.pool,
+    bookPool: wordData.bookPool,
+    options: params.options || {},
+    createdAt: new Date().toISOString(),
+    userEmail: Session.getActiveUser().getEmail() || ''
+  };
 }
 
 // =========================================================
@@ -1564,4 +1853,77 @@ function apiRegisterVocabWords(sheetName, rowsJson) {
   } catch (e) {
     return { status: 'error', message: e.toString() };
   }
+}
+
+// --- GAS① ユーザー権限 API（dashboard / google.script.run） ---
+
+function apiUserGetVocabCatalog() {
+  try {
+    const data = fetchUserVocabCatalog_();
+    return { status: 'success', data: data };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiUserGetVocabWords(sheetName, filtersJson) {
+  try {
+    const filters = filtersJson ? JSON.parse(filtersJson) : {};
+    const data = fetchUserVocabWordsFromSheet_({
+      sheetName: sheetName,
+      filters: filters,
+      includeBookPool: true
+    });
+    return { status: 'success', data: data };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiUserRegisterVocabWords(sheetName, rowsJson) {
+  try {
+    const rows = rowsJson ? JSON.parse(rowsJson) : [];
+    const data = registerUserVocabWords_(sheetName, rows);
+    return { status: 'success', data: data };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiUserGetLearningLogs() {
+  try {
+    const data = fetchUserLearningLogs_();
+    return { status: 'success', data: data };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiStartSession(payloadJson) {
+  try {
+    const params = payloadJson ? JSON.parse(payloadJson) : {};
+    const payload = buildSessionPayload_(params);
+    const token = generateSessionToken_();
+    saveSessionToCache_(token, payload);
+    return { status: 'success', token: token, pagesUrl: getPagesUrl_() };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiSaveSessionResult(resultToken) {
+  try {
+    if (!resultToken) return { status: 'error', message: 'resultToken が必要です' };
+    const result = getResultFromCache_(resultToken);
+    if (!result) return { status: 'error', message: '結果が見つかりません（期限切れの可能性）' };
+    saveUserLearningLog_(result);
+    CacheService.getScriptCache().remove(RESULT_CACHE_PREFIX + resultToken);
+    return { status: 'success', data: result };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiGetPagesUrl() {
+  return { status: 'success', url: getPagesUrl_() };
 }
