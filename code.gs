@@ -900,13 +900,49 @@ function getVocabularyFolder() {
   throw new Error('vocabularyフォルダが見つかりません。setupEnvironment() を実行してください。');
 }
 
-/** vocabulary 未作成の既存環境向けに遅延セットアップ */
-function ensureVocabularyResources_() {
+/** vocabulary フォルダと登録ブック（マイ単語帳）が実在するか */
+function vocabularyResourcesReady_() {
+  const props = PropertiesService.getScriptProperties();
+  const folderId = props.getProperty(PROP.VOCABULARY_FOLDER_ID);
+  const bookId = props.getProperty(PROP.MY_VOCAB_BOOK_ID);
+  if (!folderId || !bookId) return false;
   try {
-    getVocabularyFolder();
-    return;
+    DriveApp.getFolderById(folderId);
+    SpreadsheetApp.openById(bookId);
+    return true;
   } catch (e) {
-    setupEnvironmentWithLock_(false);
+    return false;
+  }
+}
+
+/**
+ * vocabulary フォルダ・登録ブック未作成の既存環境向け遅延セットアップ。
+ * 登録ブック（マイ単語帳）が無いときは、見出しを整えた「サンプル」シートに
+ * 10単語分のサンプルデータを流し込んだ状態で作成する。
+ */
+function ensureVocabularyResources_() {
+  if (vocabularyResourcesReady_()) return;
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    if (vocabularyResourcesReady_()) return;
+
+    const props = PropertiesService.getScriptProperties();
+    const created = [];
+    const reused = [];
+
+    const parentFolder = getScriptParentFolder_();
+    const vocabularyFolder = getOrCreateVocabularyFolder_(parentFolder, false, created, reused);
+    props.setProperty(PROP.VOCABULARY_FOLDER_ID, vocabularyFolder.getId());
+
+    const myVocabBook = getOrCreateMyVocabBook_(vocabularyFolder, false, created, reused);
+    props.setProperty(PROP.MY_VOCAB_BOOK_ID, myVocabBook.getId());
+
+    const sampleVocabBookIds = ensureSampleVocabBooks_(vocabularyFolder, false, created, reused);
+    props.setProperty(PROP.SAMPLE_VOCAB_BOOK_IDS, JSON.stringify(sampleVocabBookIds));
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -950,36 +986,33 @@ function getOrCreateVocabularyFolder_(parentFolder, force, created, reused) {
 function getOrCreateMyVocabBook_(vocabularyFolder, force, created, reused) {
   const props = PropertiesService.getScriptProperties();
 
+  let ss = null;
+
   if (!force) {
     const existingId = props.getProperty(PROP.MY_VOCAB_BOOK_ID);
     if (existingId) {
       try {
+        ss = SpreadsheetApp.openById(existingId);
         reused.push(MY_VOCAB_BOOK_NAME);
-        return SpreadsheetApp.openById(existingId);
       } catch (e) {
-        // fall through
+        ss = null;
       }
-    }
-
-    const existingFile = findChildSpreadsheetByName_(vocabularyFolder, MY_VOCAB_BOOK_NAME);
-    if (existingFile) {
-      props.setProperty(PROP.MY_VOCAB_BOOK_ID, existingFile.getId());
-      reused.push(MY_VOCAB_BOOK_NAME);
-      return SpreadsheetApp.open(existingFile);
     }
   }
 
-  let ss;
-  const existingFile = findChildSpreadsheetByName_(vocabularyFolder, MY_VOCAB_BOOK_NAME);
-  if (existingFile) {
-    ss = SpreadsheetApp.open(existingFile);
-    reused.push(MY_VOCAB_BOOK_NAME);
-  } else {
-    ss = createSpreadsheetInFolder_(MY_VOCAB_BOOK_NAME, vocabularyFolder);
-    created.push(MY_VOCAB_BOOK_NAME);
+  if (!ss) {
+    const existingFile = findChildSpreadsheetByName_(vocabularyFolder, MY_VOCAB_BOOK_NAME);
+    if (existingFile) {
+      ss = SpreadsheetApp.open(existingFile);
+      reused.push(MY_VOCAB_BOOK_NAME);
+    } else {
+      ss = createSpreadsheetInFolder_(MY_VOCAB_BOOK_NAME, vocabularyFolder);
+      created.push(MY_VOCAB_BOOK_NAME);
+    }
   }
 
   ensureMyVocabDefaultSheet_(ss);
+  ensureMyVocabSampleSheet_(ss);
   props.setProperty(PROP.MY_VOCAB_BOOK_ID, ss.getId());
   return ss;
 }
@@ -996,6 +1029,31 @@ function ensureMyVocabDefaultSheet_(ss) {
     }
   }
   ensureVocabSheetHeader_(sheet);
+}
+
+/**
+ * マイ単語帳に「サンプル」シートを用意する。
+ * 空（またはヘッダのみ）のときだけ、見出しを整えたうえで
+ * 22列仕様どおりに埋めた10単語分のサンプルデータを流し込む。
+ * ユーザーが編集した既存データは上書きしない。
+ */
+function ensureMyVocabSampleSheet_(ss) {
+  let sheet = ss.getSheetByName('サンプル');
+  if (!sheet) {
+    sheet = ss.insertSheet('サンプル');
+  }
+
+  const lastRow = sheet.getLastRow();
+  const firstCell = lastRow > 0 ? sheet.getRange(1, 1).getValue() : '';
+  if (lastRow <= 1 && (firstCell === '' || firstCell === '通し番号')) {
+    const rows = [VOCAB_HEADERS].concat(getSampleVocabWords_());
+    sheet.clear();
+    sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+    sheet.getRange(1, 1, 1, rows[0].length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  } else {
+    ensureVocabSheetHeader_(sheet);
+  }
 }
 
 function ensureVocabSheetHeader_(sheet) {
@@ -1070,62 +1128,101 @@ function ensureSampleVocabSheets_(ss, sheetsData) {
   }
 }
 
+/** サンプル単語1行を22列配列に組み立てる */
+function sampleVocabRow_(id, dai, chu, sho, word, noun, verb, adj, adv, prep, conj, other, idiom, memo, syn, ant, deriv, def, chunk, chunkJa, ex, exJa) {
+  return [
+    id, dai || UNREGISTERED, chu || UNREGISTERED, sho || UNREGISTERED, word,
+    noun || UNREGISTERED, verb || UNREGISTERED, adj || UNREGISTERED,
+    adv || UNREGISTERED, prep || UNREGISTERED, conj || UNREGISTERED,
+    other || UNREGISTERED, idiom || UNREGISTERED,
+    memo || UNREGISTERED, syn || UNREGISTERED, ant || UNREGISTERED, deriv || UNREGISTERED,
+    def || UNREGISTERED, chunk || UNREGISTERED, chunkJa || UNREGISTERED,
+    ex || UNREGISTERED, exJa || UNREGISTERED
+  ];
+}
+
+/** 22列仕様に沿った10単語分のサンプルデータ（ヘッダなし） */
+function getSampleVocabWords_() {
+  return [
+    sampleVocabRow_(1, '通常ステージ', 'Stage1', 'Lesson1', 'well',
+      '井戸', '湧き出る', '健康な', '上手に・十分に', UNREGISTERED, UNREGISTERED, UNREGISTERED, 'ええと・さて',
+      '名詞の「井戸」という意味に注意。間投詞は熟語・慣用表現として扱う。',
+      UNREGISTERED, 'badly,ill', 'wellness,better,best',
+      'in a good or satisfactory way',
+      'She sings (well).', '彼女は(上手に)歌う。',
+      'The water in the (well) is clean.', 'その(井戸)の水はきれいだ。'),
+    sampleVocabRow_(2, '通常ステージ', 'Stage1', 'Lesson1', 'book',
+      '本', '予約する', UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
+      '動詞「予約する」の意味も重要。',
+      'volume,reserve', UNREGISTERED, 'booklet,booking',
+      'a set of printed pages bound together',
+      'read a (book)', '(本)を読む',
+      'I bought a new (book) yesterday.', '昨日新しい(本)を買った。'),
+    sampleVocabRow_(3, '通常ステージ', 'Stage1', 'Lesson1', 'run',
+      '走ること・経営', '走る・経営する', UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
+      '「経営する」の意味にも注意。',
+      'sprint,manage', 'walk', 'runner,running',
+      'to move quickly on foot',
+      '(run) a company', '会社を(経営する)',
+      'He (runs) every morning.', '彼は毎朝(走る)。'),
+    sampleVocabRow_(4, '通常ステージ', 'Stage1', 'Lesson1', 'happy',
+      UNREGISTERED, UNREGISTERED, '幸せな・うれしい', UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
+      '感情を表す基本的な形容詞。',
+      'glad,joyful', 'sad,unhappy', 'happily,happiness',
+      'feeling or showing pleasure',
+      'a (happy) child', '(幸せな)子供',
+      'She looks (happy) today.', '彼女は今日(うれしそう)に見える。'),
+    sampleVocabRow_(5, '通常ステージ', 'Stage1', 'Lesson2', 'look up',
+      UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
+      '（辞書などで）調べる',
+      '熟語として登録。6〜12列目はすべて(未登録)。',
+      'search,check', UNREGISTERED, UNREGISTERED,
+      'to search for information in a reference book or online',
+      '(look up) a word', '単語を(調べる)',
+      'Please (look up) this word in the dictionary.', '辞書でこの単語を(調べて)ください。'),
+    sampleVocabRow_(6, '通常ステージ', 'Stage1', 'Lesson2', 'fast',
+      UNREGISTERED, UNREGISTERED, '速い', '速く', UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
+      '形容詞と副詞が同形。fastly という語は存在しない。',
+      'quick,rapid', 'slow', 'faster,fastest',
+      'moving or able to move quickly',
+      'a (fast) runner', '(速い)走者',
+      'He drives too (fast).', '彼は(速く)運転しすぎる。'),
+    sampleVocabRow_(7, '通常ステージ', 'Stage1', 'Lesson2', 'water',
+      '水', '水をやる', UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
+      '不可算名詞。動詞「水をやる」の用法にも注意。',
+      UNREGISTERED, UNREGISTERED, 'watery,waterfall',
+      'a clear liquid that falls as rain and is essential for life',
+      'drink (water)', '(水)を飲む',
+      'She (waters) the flowers every day.', '彼女は毎日花に(水をやる)。'),
+    sampleVocabRow_(8, '通常ステージ', 'Stage1', 'Lesson3', 'because',
+      UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, '〜だから・〜なので', UNREGISTERED, UNREGISTERED,
+      '理由を表す従属接続詞。because of は前置詞句として働く。',
+      'since,as', UNREGISTERED, UNREGISTERED,
+      'for the reason that',
+      '(because) of the rain', '雨(のため)',
+      'I stayed home (because) it was raining.', '雨が降っていた(ので)家にいた。'),
+    sampleVocabRow_(9, '通常ステージ', 'Stage1', 'Lesson3', 'under',
+      UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, '〜の下に・〜未満で', UNREGISTERED, UNREGISTERED, UNREGISTERED,
+      '位置の「下」のほか「〜未満」「〜の状況下で」の意味もある。',
+      'beneath,below', 'over,above', 'underground,underline',
+      'in or to a position below something',
+      '(under) the table', 'テーブル(の下に)',
+      'The cat is sleeping (under) the chair.', '猫は椅子(の下で)眠っている。'),
+    sampleVocabRow_(10, '通常ステージ', 'Stage1', 'Lesson3', 'give up',
+      UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
+      'あきらめる・やめる',
+      '熟語。代名詞目的語は give it up のように間に置く。',
+      'quit,abandon', 'continue', UNREGISTERED,
+      'to stop trying to do something',
+      '(give up) smoking', '喫煙を(やめる)',
+      'Never (give up) your dream.', '夢を(あきらめる)な。')
+  ];
+}
+
 function getSampleVocabCatalog_() {
-  const headers = VOCAB_HEADERS;
-
-  function vocabRow(id, dai, chu, sho, word, noun, verb, adj, adv, prep, conj, other, idiom, memo, syn, ant, deriv, def, chunk, chunkJa, ex, exJa) {
-    return [
-      id, dai || UNREGISTERED, chu || UNREGISTERED, sho || UNREGISTERED, word,
-      noun || UNREGISTERED, verb || UNREGISTERED, adj || UNREGISTERED,
-      adv || UNREGISTERED, prep || UNREGISTERED, conj || UNREGISTERED,
-      other || UNREGISTERED, idiom || UNREGISTERED,
-      memo || UNREGISTERED, syn || UNREGISTERED, ant || UNREGISTERED, deriv || UNREGISTERED,
-      def || UNREGISTERED, chunk || UNREGISTERED, chunkJa || UNREGISTERED,
-      ex || UNREGISTERED, exJa || UNREGISTERED
-    ];
-  }
-
   return {
     'コーパス（サンプル）': {
-      'コーパス': [
-        headers,
-        vocabRow(1, '通常ステージ', 'Stage1', 'Lesson1', 'well',
-          '井戸', '湧き出る', '健康な', '上手に・十分に', UNREGISTERED, UNREGISTERED, UNREGISTERED, 'ええと・さて',
-          '名詞の「井戸」という意味に注意。間投詞は熟語・慣用表現として扱う。',
-          UNREGISTERED, UNREGISTERED, 'badly,ill', 'wellness,better,best',
-          'in a good or satisfactory way',
-          'She sings (well).', '彼女は(上手に)歌う。',
-          'The water in the (well) is clean.', 'その(井戸)の水はきれいだ。'),
-        vocabRow(2, '通常ステージ', 'Stage1', 'Lesson1', 'book',
-          '本', UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
-          '可算名詞として最も基本的な意味。',
-          'volume,text', UNREGISTERED, 'booklet,bookish',
-          'a set of printed pages bound together',
-          'read a (book)', '(本)を読む',
-          'I bought a new (book) yesterday.', '昨日新しい(本)を買った。'),
-        vocabRow(3, '通常ステージ', 'Stage1', 'Lesson1', 'run',
-          UNREGISTERED, '走る', UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
-          '基本の自動詞意味。',
-          'sprint,jog', 'walk', 'runner,running',
-          'to move quickly on foot',
-          '(run) fast', '(速く)走る',
-          'He (runs) every morning.', '彼は毎朝(走る)。'),
-        vocabRow(4, '通常ステージ', 'Stage1', 'Lesson1', 'happy',
-          UNREGISTERED, UNREGISTERED, '幸せな・うれしい', UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
-          '感情を表す基本的な形容詞。',
-          'glad,joyful', 'sad,unhappy', 'happily,happiness',
-          'feeling or showing pleasure',
-          'a (happy) child', '(幸せな)子供',
-          'She looks (happy) today.', '彼女は今日(うれしそう)に見える。'),
-        vocabRow(5, '通常ステージ', 'Stage1', 'Lesson2', 'look up',
-          UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
-          '辞書などで調べる',
-          '熟語として登録。6〜12列目はすべて(未登録)。',
-          UNREGISTERED, UNREGISTERED, UNREGISTERED,
-          'to search for information in a reference book or online',
-          '(look up) a word', '単語を(調べる)',
-          'Please (look up) this word in the dictionary.', '辞書でこの単語を(調べて)ください。')
-      ]
+      'コーパス': [VOCAB_HEADERS].concat(getSampleVocabWords_())
     }
   };
 }
