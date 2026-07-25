@@ -52,6 +52,23 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .btn-primary:active { background-color: var(--c-primary-dark); }
 .btn-primary:disabled { background-color: #b0bec5; }
 
+/* モード切替タブ */
+.mode-tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.mode-tab { flex: 1; min-width: 100px; min-height: 44px; padding: 10px 12px; border: 2px solid #cfd8dc; border-radius: 10px; background: #fff; font-weight: bold; cursor: pointer; font-size: 0.9em; }
+.mode-tab.active { background: #e3f2fd; border-color: var(--c-primary); color: var(--c-primary-dark); }
+
+/* 単語登録フォーム */
+.vocab-form-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.vocab-form-grid label { font-size: 0.85em; }
+.vocab-form-grid input, .vocab-form-grid textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; font-family: inherit; }
+.vocab-form-grid textarea { min-height: 60px; resize: vertical; }
+.vocab-preview-table { width: 100%; border-collapse: collapse; font-size: 0.75em; margin-top: 10px; }
+.vocab-preview-table th, .vocab-preview-table td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; word-break: break-word; }
+.vocab-preview-table th { background: #f5f5f5; }
+.vocab-word-display { font-size: clamp(1.4em, 5vw, 1.8em); font-weight: bold; color: #1565c0; margin-bottom: 8px; }
+.vocab-pos-hint { font-size: 0.9em; color: #666; margin-bottom: 12px; }
+.division-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 180px; overflow-y: auto; }
+
 /* =========================================
    ゲーム画面（並び替えUI & 不足語入力）
    ========================================= */
@@ -195,6 +212,12 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
   <div id="settings-screen" style="display: none;">
     <div class="header-title">BrightStage 学習設定</div>
 
+    <div class="mode-tabs">
+      <button type="button" class="mode-tab active" data-mode="grammar">文法・語法演習</button>
+      <button type="button" class="mode-tab" data-mode="vocab">単語学習</button>
+      <button type="button" class="mode-tab" data-mode="register">単語登録</button>
+    </div>
+
     <div class="setting-section" id="profile-container">
       <div class="section-title">0. ユーザー情報（認証済み）</div>
       <div style="background-color: #f5f5f5; border: 1px solid #ccc; border-radius: 6px; padding: 10px; font-size: 1.1em; text-align: left; position: relative;">
@@ -229,6 +252,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
       </div>
     </div>
     
+    <div id="grammar-settings-panel">
     <div class="setting-section">
       <div class="section-title">1. 学年・科目</div>
       <div class="form-group">
@@ -258,6 +282,130 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
       </div>
     </div>
     <button id="start-btn" class="btn-primary">学習を開始する</button>
+    </div>
+
+    <div id="vocab-settings-panel" style="display: none;">
+      <div class="setting-section">
+        <div class="section-title">1. 単語ブック</div>
+        <div class="form-group">
+          <label>ブック種別</label>
+          <select id="vocab-book-type">
+            <option value="preset">管理者プリセット</option>
+            <option value="user">マイ単語帳</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>ブック名</label>
+          <select id="vocab-book-select"></select>
+        </div>
+        <div class="form-group">
+          <label>教材（シート）</label>
+          <select id="vocab-sheet-select"></select>
+        </div>
+      </div>
+      <div class="setting-section">
+        <div class="section-title">2. 区分で絞り込み（任意）</div>
+        <div class="form-group">
+          <label>大区分</label>
+          <div class="division-grid" id="vocab-dai-container"></div>
+        </div>
+        <div class="form-group">
+          <label>中区分</label>
+          <div class="division-grid" id="vocab-chu-container"></div>
+        </div>
+        <div class="form-group">
+          <label>小区分</label>
+          <div class="division-grid" id="vocab-sho-container"></div>
+        </div>
+      </div>
+      <div class="setting-section">
+        <div class="section-title">3. 出題設定</div>
+        <div class="form-group">
+          <label>出題数</label>
+          <select id="vocab-question-count">
+            <option value="all">すべて</option>
+            <option value="10">10問</option>
+            <option value="20">20問</option>
+            <option value="30">30問</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>選択肢数（N択）</label>
+          <select id="vocab-choice-count">
+            <option value="2">2択</option>
+            <option value="3">3択</option>
+            <option value="4" selected>4択</option>
+            <option value="5">5択</option>
+            <option value="6">6択</option>
+          </select>
+        </div>
+        <div class="check-list">
+          <label class="check-item"><input type="checkbox" id="vocab-include-unknown" checked> 「わからない」選択肢を含める</label>
+          <label class="check-item"><input type="checkbox" id="vocab-include-none" checked> 「この中に正答はない」選択肢を含める</label>
+        </div>
+      </div>
+      <div class="setting-section">
+        <div class="section-title">4. ダミー選出オプション</div>
+        <div class="form-group">
+          <label>選出範囲（不足時は上位範囲へ自動拡張）</label>
+          <select id="vocab-dummy-scope">
+            <option value="sho">同一小区分</option>
+            <option value="chu">同一中区分</option>
+            <option value="dai">同一大区分</option>
+            <option value="sheet" selected>同一シート（教材）</option>
+            <option value="book">同一ブック全体</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>選出条件</label>
+          <select id="vocab-dummy-method">
+            <option value="none" selected>指定なし</option>
+            <option value="samePos">同一品詞選択肢</option>
+            <option value="diffPos">相違品詞選択肢</option>
+            <option value="sameAffix">同一頭文字・接辞</option>
+          </select>
+        </div>
+        <div class="form-group" id="vocab-affix-options" style="display:none;">
+          <label>接辞一致（1〜3文字）</label>
+          <div class="check-list">
+            <label class="check-item"><input type="radio" name="vocab-affix-type" value="prefix" checked> 先頭1〜3文字</label>
+            <label class="check-item"><input type="radio" name="vocab-affix-type" value="suffix"> 語末1〜3文字</label>
+          </div>
+          <select id="vocab-affix-len">
+            <option value="1">1文字</option>
+            <option value="2" selected>2文字</option>
+            <option value="3">3文字</option>
+          </select>
+        </div>
+      </div>
+      <button id="vocab-start-btn" class="btn-primary">単語学習を開始する</button>
+    </div>
+
+    <div id="vocab-register-panel" style="display: none;">
+      <div class="setting-section">
+        <div class="section-title">単語登録（マイ単語帳）</div>
+        <div class="form-group">
+          <label>登録先シート（教材名）</label>
+          <input type="text" id="register-sheet-name" value="デフォルト" placeholder="例: デフォルト">
+        </div>
+        <div class="form-group">
+          <label>チャットボット出力のTSV貼り付け（22列・ヘッダなし）</label>
+          <textarea id="register-tsv-input" rows="4" placeholder="大区分	中区分	小区分	英単語	意味＠名詞	..."></textarea>
+          <button type="button" id="register-parse-tsv-btn" class="btn-small" style="margin-top:8px;">TSVを解析してプレビュー</button>
+        </div>
+        <div id="register-preview-area" style="display:none;">
+          <div class="section-title" style="margin-top:12px;">プレビュー</div>
+          <div id="register-preview-table-wrap" style="overflow-x:auto;"></div>
+          <button type="button" id="register-import-btn" class="btn-primary" style="margin-top:12px;">プレビューを一括登録</button>
+        </div>
+        <div id="register-msg" style="margin-top:10px;font-weight:bold;"></div>
+      </div>
+      <div class="setting-section">
+        <div class="section-title">手動入力（1語ずつ）</div>
+        <div class="vocab-form-grid" id="register-form-grid"></div>
+        <button type="button" id="register-single-btn" class="btn-primary" style="margin-top:12px;">この単語を登録</button>
+      </div>
+    </div>
   </div>
 
   <!-- Game Screen -->
@@ -300,6 +448,13 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
     <div id="choice-ui" style="display:none;">
       <div id="choice-sentence-container" class="sentence-container fixed-text" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px;"></div>
       <div id="choice-buttons-container" class="choices-grid"></div>
+    </div>
+
+    <!-- 単語学習 N択 UI -->
+    <div id="vocab-quiz-ui" style="display:none;">
+      <div class="vocab-word-display" id="vocab-quiz-word"></div>
+      <div class="vocab-pos-hint" id="vocab-quiz-prompt">この単語の意味として正しいものを選んでください。</div>
+      <div id="vocab-choice-buttons" class="choices-grid"></div>
     </div>
 
     <!-- タイピング（和文英訳・空所）用 UI -->
@@ -436,6 +591,23 @@ async function gasFetch_(fnName, args) {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'getUserLogs', email: args[0] })
+    }));
+  }
+  if (fnName === 'apiGetVocabCatalog') {
+    return parseGasJson_(await fetch(url + '?action=getVocabCatalog', { redirect: 'follow' }));
+  }
+  if (fnName === 'apiGetVocabWords') {
+    var vUrl = url + '?action=getVocabWords&bookName=' + encodeURIComponent(args[0])
+      + '&sheetName=' + encodeURIComponent(args[1])
+      + '&filters=' + encodeURIComponent(args[2] || '{}')
+      + '&includeBookPool=' + encodeURIComponent(args[3] ? '1' : '0');
+    return parseGasJson_(await fetch(vUrl, { redirect: 'follow' }));
+  }
+  if (fnName === 'apiRegisterVocabWords') {
+    return parseGasJson_(await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'registerVocabWords', sheetName: args[0], rows: args[1] })
     }));
   }
   throw new Error('未対応のAPI: ' + fnName);
@@ -1159,6 +1331,543 @@ const CorrectionModule = (() => {
 
 window.CorrectionModule = CorrectionModule;
 
+// vocabConstants.js
+const VOCAB_UNREGISTERED = '(未登録)';
+const VOCAB_MEANING_KEYS = [
+  '意味＠名詞', '意味＠動詞', '意味＠形容詞', '意味＠副詞',
+  '意味＠前置詞', '意味＠接続詞', '意味＠その他品詞', '意味＠熟語・慣用表現'
+];
+const VOCAB_POS_GROUPS = {
+  '意味＠名詞': 'noun',
+  '意味＠動詞': 'verb',
+  '意味＠形容詞': 'adjective',
+  '意味＠副詞': 'minor',
+  '意味＠前置詞': 'minor',
+  '意味＠接続詞': 'minor',
+  '意味＠その他品詞': 'minor',
+  '意味＠熟語・慣用表現': 'idiom'
+};
+const VOCAB_POS_LABELS = {
+  noun: '名詞', verb: '動詞', adjective: '形容詞', idiom: '熟語・慣用表現', minor: '副詞・前置詞・接続詞・その他'
+};
+const VOCAB_REGISTER_FIELDS = [
+  '大区分', '中区分', '小区分', '英単語・熟語の表現',
+  '意味＠名詞', '意味＠動詞', '意味＠形容詞', '意味＠副詞', '意味＠前置詞',
+  '意味＠接続詞', '意味＠その他品詞', '意味＠熟語・慣用表現',
+  'メモ', '類義語・同義語', '対義語', '派生語・関連語',
+  '英文による定義', 'チャンク', 'チャンク訳', '例文', '例文訳'
+];
+const VOCAB_OPTION_NONE = 'この中に正答はない';
+const VOCAB_OPTION_UNKNOWN = 'わからない';
+
+function vocabNorm(v) {
+  if (v === null || v === undefined) return VOCAB_UNREGISTERED;
+  const s = v.toString().trim();
+  return s === '' ? VOCAB_UNREGISTERED : s;
+}
+
+function vocabHasMeaning(v) {
+  return vocabNorm(v) !== VOCAB_UNREGISTERED;
+}
+
+function vocabShuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+function vocabGetMeanings(wordObj) {
+  const list = [];
+  VOCAB_MEANING_KEYS.forEach(function (key) {
+    if (vocabHasMeaning(wordObj[key])) {
+      list.push({ key: key, meaning: vocabNorm(wordObj[key]), posGroup: VOCAB_POS_GROUPS[key], posLabel: VOCAB_POS_LABELS[VOCAB_POS_GROUPS[key]] });
+    }
+  });
+  return list;
+}
+
+function vocabParseSynonyms(wordObj) {
+  const raw = vocabNorm(wordObj['類義語・同義語']);
+  if (raw === VOCAB_UNREGISTERED) return [];
+  return raw.split(/[,，、]/).map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+}
+
+function vocabIsSynonymRelated(a, b) {
+  const wa = vocabNorm(a['英単語・熟語の表現']).toLowerCase();
+  const wb = vocabNorm(b['英単語・熟語の表現']).toLowerCase();
+  if (wa === wb) return true;
+  const synA = vocabParseSynonyms(a);
+  const synB = vocabParseSynonyms(b);
+  if (synA.indexOf(wb) >= 0 || synB.indexOf(wa) >= 0) return true;
+  return false;
+}
+
+function vocabSameJapaneseMeaning(meaningA, meaningB) {
+  return vocabNorm(meaningA) === vocabNorm(meaningB);
+}
+
+function vocabAffixMatch(wordA, wordB, affixType, affixLen) {
+  const a = vocabNorm(wordA).toLowerCase();
+  const b = vocabNorm(wordB).toLowerCase();
+  if (a === VOCAB_UNREGISTERED.toLowerCase() || b === VOCAB_UNREGISTERED.toLowerCase()) return false;
+  const len = Math.min(affixLen, a.length, b.length);
+  if (len <= 0) return false;
+  if (affixType === 'suffix') return a.slice(-len) === b.slice(-len);
+  return a.slice(0, len) === b.slice(0, len);
+}
+
+function vocabInScope(target, source, scope, sheetName) {
+  const td = vocabNorm(target['大区分']);
+  const tc = vocabNorm(target['中区分']);
+  const ts = vocabNorm(target['小区分']);
+  const sd = vocabNorm(source['大区分']);
+  const sc = vocabNorm(source['中区分']);
+  const ss = vocabNorm(source['小区分']);
+  if (scope === 'book') return true;
+  if (scope === 'sheet') {
+    if (!source._sheetName) return true;
+    return source._sheetName === sheetName;
+  }
+  if (scope === 'dai') return td === sd;
+  if (scope === 'chu') return td === sd && tc === sc;
+  if (scope === 'sho') return td === sd && tc === sc && ts === ss;
+  return true;
+}
+
+function vocabScopeChain(scope) {
+  const order = ['sho', 'chu', 'dai', 'sheet', 'book'];
+  const idx = order.indexOf(scope);
+  return idx >= 0 ? order.slice(idx) : order;
+}
+
+// vocabSettings.js
+const VocabSettingsModule = (() => {
+  let catalog = { presets: [], userBooks: [] };
+
+  async function loadCatalog() {
+    const result = await gasRun('apiGetVocabCatalog');
+    if (result.status !== 'success') throw new Error(result.message || 'カタログ取得失敗');
+    catalog = result.data;
+    refreshBookSelect();
+  }
+
+  function getBooksByType(type) {
+    return type === 'user' ? catalog.userBooks : catalog.presets;
+  }
+
+  function refreshBookSelect() {
+    const type = document.getElementById('vocab-book-type').value;
+    const select = document.getElementById('vocab-book-select');
+    const books = getBooksByType(type);
+    select.innerHTML = '';
+    books.forEach(function (b) {
+      const opt = document.createElement('option');
+      opt.value = b.bookName;
+      opt.textContent = b.bookName;
+      select.appendChild(opt);
+    });
+    refreshSheetSelect();
+  }
+
+  function refreshSheetSelect() {
+    const type = document.getElementById('vocab-book-type').value;
+    const bookName = document.getElementById('vocab-book-select').value;
+    const books = getBooksByType(type);
+    const book = books.find(function (b) { return b.bookName === bookName; });
+    const sheetSelect = document.getElementById('vocab-sheet-select');
+    sheetSelect.innerHTML = '';
+    if (!book) return;
+    book.sheets.forEach(function (s) {
+      const opt = document.createElement('option');
+      opt.value = s.sheetName;
+      opt.textContent = s.sheetName + ' (' + s.wordCount + '語)';
+      sheetSelect.appendChild(opt);
+    });
+    refreshDivisionFilters();
+  }
+
+  function renderDivisionCheckboxes(containerId, items, prefix) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = '';
+    items.forEach(function (item) {
+      const lbl = document.createElement('label');
+      lbl.className = 'check-item';
+      lbl.innerHTML = '<input type="checkbox" value="' + item + '" checked data-prefix="' + prefix + '"> ' + item;
+      container.appendChild(lbl);
+    });
+  }
+
+  function refreshDivisionFilters() {
+    const type = document.getElementById('vocab-book-type').value;
+    const bookName = document.getElementById('vocab-book-select').value;
+    const sheetName = document.getElementById('vocab-sheet-select').value;
+    const books = getBooksByType(type);
+    const book = books.find(function (b) { return b.bookName === bookName; });
+    const sheet = book && book.sheets.find(function (s) { return s.sheetName === sheetName; });
+    const div = sheet ? sheet.divisions : { dai: [], chu: [], sho: [] };
+    renderDivisionCheckboxes('vocab-dai-container', div.dai, 'dai');
+    renderDivisionCheckboxes('vocab-chu-container', div.chu, 'chu');
+    renderDivisionCheckboxes('vocab-sho-container', div.sho, 'sho');
+  }
+
+  function getSelectedDivisions(prefix) {
+    const containerMap = { dai: 'vocab-dai-container', chu: 'vocab-chu-container', sho: 'vocab-sho-container' };
+    const container = document.getElementById(containerMap[prefix]);
+    if (!container) return [];
+    const checked = Array.from(container.querySelectorAll('input:checked')).map(function (el) { return el.value; });
+    const all = Array.from(container.querySelectorAll('input')).map(function (el) { return el.value; });
+    return checked.length === all.length ? [] : checked;
+  }
+
+  function getQuizOptions() {
+    const dummyMethod = document.getElementById('vocab-dummy-method').value;
+    let choiceCount = parseInt(document.getElementById('vocab-choice-count').value, 10);
+    if (dummyMethod === 'diffPos' && choiceCount > 4) choiceCount = 4;
+    return {
+      bookName: document.getElementById('vocab-book-select').value,
+      sheetName: document.getElementById('vocab-sheet-select').value,
+      filters: {
+        dai: getSelectedDivisions('dai'),
+        chu: getSelectedDivisions('chu'),
+        sho: getSelectedDivisions('sho')
+      },
+      questionCount: document.getElementById('vocab-question-count').value,
+      choiceCount: choiceCount,
+      includeUnknown: document.getElementById('vocab-include-unknown').checked,
+      includeNone: document.getElementById('vocab-include-none').checked,
+      dummyScope: document.getElementById('vocab-dummy-scope').value,
+      dummyMethod: document.getElementById('vocab-dummy-method').value,
+      affixType: document.querySelector('input[name="vocab-affix-type"]:checked').value,
+      affixLen: parseInt(document.getElementById('vocab-affix-len').value, 10)
+    };
+  }
+
+  function init() {
+    if (init._done) return;
+    init._done = true;
+    document.getElementById('vocab-book-type').addEventListener('change', refreshBookSelect);
+    document.getElementById('vocab-book-select').addEventListener('change', refreshSheetSelect);
+    document.getElementById('vocab-sheet-select').addEventListener('change', refreshDivisionFilters);
+    document.getElementById('vocab-dummy-method').addEventListener('change', function () {
+      document.getElementById('vocab-affix-options').style.display =
+        this.value === 'sameAffix' ? 'block' : 'none';
+    });
+  }
+
+  return { loadCatalog, init, getQuizOptions, refreshBookSelect };
+})();
+
+window.VocabSettingsModule = VocabSettingsModule;
+
+// vocabQuizGenerator.js
+const VocabQuizGenerator = (() => {
+  function buildQuestions(words, pool, bookPool, options) {
+    const shuffled = vocabShuffle(words);
+    let count = shuffled.length;
+    if (options.questionCount !== 'all') {
+      count = Math.min(parseInt(options.questionCount, 10), shuffled.length);
+    }
+    const selectedWords = shuffled.slice(0, count);
+    const noneRate = 0.25 + Math.random() * 0.0833;
+
+    return selectedWords.map(function (wordObj, idx) {
+      const meanings = vocabGetMeanings(wordObj);
+      const targetMeaning = meanings[Math.floor(Math.random() * meanings.length)];
+      const forceNone = options.includeNone && Math.random() < noneRate;
+      return buildSingleQuestion(wordObj, targetMeaning, pool, bookPool, options, forceNone, idx);
+    });
+  }
+
+  function buildSingleQuestion(wordObj, targetMeaning, pool, bookPool, options, forceNone, idx) {
+    const normalSlots = options.choiceCount;
+    const dummiesNeeded = Math.max(0, normalSlots - (forceNone ? 0 : 1));
+    const dummies = pickDummies(wordObj, targetMeaning, pool, bookPool, options, dummiesNeeded, forceNone);
+
+    let choices = forceNone ? dummies.slice() : [targetMeaning.meaning].concat(dummies.map(function (d) { return d.meaning; }));
+    choices = vocabShuffle(choices);
+
+    const choiceObjects = choices.map(function (text) {
+      return { text: text, isCorrect: !forceNone && text === targetMeaning.meaning };
+    });
+
+    if (options.includeNone) {
+      choiceObjects.push({ text: VOCAB_OPTION_NONE, isCorrect: forceNone, isSpecial: true });
+    }
+    if (options.includeUnknown) {
+      choiceObjects.push({ text: VOCAB_OPTION_UNKNOWN, isCorrect: false, isSpecial: true });
+    }
+
+    return {
+      id: wordObj['通し番号'] + '-' + targetMeaning.key + '-' + idx,
+      format: 'vocab-enja',
+      word: vocabNorm(wordObj['英単語・熟語の表現']),
+      posLabel: targetMeaning.posLabel,
+      correctAnswer: forceNone ? VOCAB_OPTION_NONE : targetMeaning.meaning,
+      forceNone: forceNone,
+      choices: choiceObjects,
+      explanation: vocabNorm(wordObj['メモ']),
+      wordObj: wordObj,
+      unit: options.sheetName
+    };
+  }
+
+  function pickDummies(wordObj, targetMeaning, pool, bookPool, options, count, excludeCorrect) {
+    if (count <= 0) return [];
+    const scopes = vocabScopeChain(options.dummyScope);
+    const usedMeanings = {};
+    if (excludeCorrect) usedMeanings[vocabNorm(targetMeaning.meaning)] = true;
+
+    const result = [];
+
+    for (let s = 0; s < scopes.length && result.length < count; s++) {
+      const scope = scopes[s];
+      const sourcePool = scope === 'book' ? (bookPool || pool) : pool;
+      const candidates = sourcePool.filter(function (candidate) {
+        if (vocabNorm(candidate['英単語・熟語の表現']).toLowerCase() === vocabNorm(wordObj['英単語・熟語の表現']).toLowerCase()) return false;
+        if (vocabIsSynonymRelated(wordObj, candidate)) return false;
+        if (!vocabInScope(wordObj, candidate, scope, options.sheetName)) return false;
+        const meanings = vocabGetMeanings(candidate);
+        return meanings.some(function (meaning) {
+          if (usedMeanings[vocabNorm(meaning.meaning)]) return false;
+          if (vocabSameJapaneseMeaning(meaning.meaning, targetMeaning.meaning)) return false;
+          return passesDummyMethod(wordObj, candidate, targetMeaning, meaning, options);
+        });
+      });
+
+      const shuffledCandidates = vocabShuffle(candidates);
+      for (let c = 0; c < shuffledCandidates.length && result.length < count; c++) {
+        const cand = shuffledCandidates[c];
+        const meanings = vocabGetMeanings(cand).filter(function (m) {
+          if (usedMeanings[vocabNorm(m.meaning)]) return false;
+          if (vocabSameJapaneseMeaning(m.meaning, targetMeaning.meaning)) return false;
+          return passesDummyMethod(wordObj, cand, targetMeaning, m, options);
+        });
+        if (meanings.length === 0) continue;
+        const pick = meanings[Math.floor(Math.random() * meanings.length)];
+        usedMeanings[vocabNorm(pick.meaning)] = true;
+        result.push(pick);
+      }
+    }
+    return result;
+  }
+
+  function passesDummyMethod(wordObj, candidate, targetMeaning, candidateMeaning, options) {
+    if (options.dummyMethod === 'none') return true;
+    if (options.dummyMethod === 'samePos') {
+      return candidateMeaning.posGroup === targetMeaning.posGroup;
+    }
+    if (options.dummyMethod === 'diffPos') {
+      return candidateMeaning.posGroup !== targetMeaning.posGroup;
+    }
+    if (options.dummyMethod === 'sameAffix') {
+      return vocabAffixMatch(
+        wordObj['英単語・熟語の表現'],
+        candidate['英単語・熟語の表現'],
+        options.affixType,
+        options.affixLen
+      );
+    }
+    return true;
+  }
+
+  return { buildQuestions };
+})();
+
+window.VocabQuizGenerator = VocabQuizGenerator;
+
+// vocabQuizModule.js
+const VocabQuizModule = (() => {
+  const wordEl = document.getElementById('vocab-quiz-word');
+  const promptEl = document.getElementById('vocab-quiz-prompt');
+  const buttonsEl = document.getElementById('vocab-choice-buttons');
+  const resultMsg = document.getElementById('result-msg');
+  let qData = null;
+
+  function initGame(questionData) {
+    qData = questionData;
+    wordEl.textContent = qData.word;
+    promptEl.textContent = '（' + qData.posLabel + '）の意味として正しいものを選んでください。';
+    buttonsEl.innerHTML = '';
+    resultMsg.textContent = '';
+
+    qData.choices.forEach(function (choice) {
+      const btn = document.createElement('button');
+      btn.className = 'choice-btn';
+      btn.textContent = choice.text;
+      if (choice.isSpecial) btn.classList.add('unknown');
+      btn.onclick = function () { handleChoice(choice, btn); };
+      buttonsEl.appendChild(btn);
+    });
+  }
+
+  function handleChoice(choice, btn) {
+    if (resultMsg.textContent !== '') return;
+    Array.from(buttonsEl.children).forEach(function (b) { b.classList.remove('selected'); });
+    btn.classList.add('selected');
+
+    if (choice.isCorrect) {
+      resultMsg.textContent = '⭕️ 正解！';
+      resultMsg.style.color = '#4caf50';
+      if (window.onQuestionCompleted) window.onQuestionCompleted(true);
+    } else if (choice.text === VOCAB_OPTION_UNKNOWN) {
+      resultMsg.textContent = '復習しましょう。正答: ' + qData.correctAnswer;
+      resultMsg.style.color = '#ff9800';
+      if (window.onQuestionCompleted) window.onQuestionCompleted(false);
+    } else {
+      resultMsg.textContent = '❌ 不正解... 正答: ' + qData.correctAnswer;
+      resultMsg.style.color = '#f44336';
+      if (window.onQuestionCompleted) window.onQuestionCompleted(false);
+    }
+  }
+
+  return { initGame };
+})();
+
+window.VocabQuizModule = VocabQuizModule;
+
+// vocabRegisterModule.js
+const VocabRegisterModule = (() => {
+  let previewRows = [];
+
+  function buildForm() {
+    const grid = document.getElementById('register-form-grid');
+    grid.innerHTML = '';
+    VOCAB_REGISTER_FIELDS.forEach(function (field) {
+      const wrap = document.createElement('div');
+      wrap.className = 'form-group';
+      const lbl = document.createElement('label');
+      lbl.textContent = field + (field === '英単語・熟語の表現' ? ' *' : '');
+      wrap.appendChild(lbl);
+      const isLong = field.indexOf('訳') >= 0 || field === 'メモ' || field.indexOf('例文') >= 0 || field.indexOf('チャンク') >= 0 || field === '英文による定義';
+      const input = document.createElement(isLong ? 'textarea' : 'input');
+      input.dataset.field = field;
+      input.placeholder = field === '英単語・熟語の表現' ? '必須' : '';
+      wrap.appendChild(input);
+      grid.appendChild(wrap);
+    });
+  }
+
+  function readFormRow() {
+    const row = {};
+    VOCAB_REGISTER_FIELDS.forEach(function (field) {
+      const el = document.querySelector('#register-form-grid [data-field="' + field + '"]');
+      row[field] = el ? el.value : '';
+    });
+    return row;
+  }
+
+  function clearForm() {
+    VOCAB_REGISTER_FIELDS.forEach(function (field) {
+      const el = document.querySelector('#register-form-grid [data-field="' + field + '"]');
+      if (el) el.value = '';
+    });
+  }
+
+  function parseTsv(text) {
+    const lines = text.split(/\r?\n/).filter(function (l) { return l.trim() !== ''; });
+    const rows = [];
+    lines.forEach(function (line) {
+      const cols = line.split('\t');
+      if (cols.length < 4) return;
+      const row = {};
+      if (cols.length >= 22 && !isNaN(parseInt(cols[0], 10))) {
+        VOCAB_REGISTER_FIELDS.forEach(function (field, i) { row[field] = cols[i + 1] || ''; });
+      } else if (cols.length >= 21) {
+        VOCAB_REGISTER_FIELDS.forEach(function (field, i) { row[field] = cols[i] || ''; });
+      } else {
+        row['大区分'] = cols[0] || '';
+        row['中区分'] = cols[1] || '';
+        row['小区分'] = cols[2] || '';
+        row['英単語・熟語の表現'] = cols[3] || '';
+        VOCAB_REGISTER_FIELDS.slice(4).forEach(function (field, i) {
+          row[field] = cols[i + 4] || '';
+        });
+      }
+      rows.push(row);
+    });
+    return rows;
+  }
+
+  function renderPreview(rows) {
+    previewRows = rows;
+    const wrap = document.getElementById('register-preview-table-wrap');
+    let html = '<table class="vocab-preview-table"><thead><tr>';
+    html += '<th>#</th><th>英単語</th><th>名詞</th><th>動詞</th><th>形容詞</th><th>熟語</th></tr></thead><tbody>';
+    rows.forEach(function (row, i) {
+      html += '<tr><td>' + (i + 1) + '</td><td>' + vocabNorm(row['英単語・熟語の表現']) + '</td>';
+      html += '<td>' + vocabNorm(row['意味＠名詞']) + '</td><td>' + vocabNorm(row['意味＠動詞']) + '</td>';
+      html += '<td>' + vocabNorm(row['意味＠形容詞']) + '</td><td>' + vocabNorm(row['意味＠熟語・慣用表現']) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+    document.getElementById('register-preview-area').style.display = 'block';
+  }
+
+  async function registerRows(rows) {
+    const sheetName = document.getElementById('register-sheet-name').value.trim() || 'デフォルト';
+    const result = await gasRun('apiRegisterVocabWords', sheetName, JSON.stringify(rows));
+    if (result.status !== 'success') throw new Error(result.message || '登録失敗');
+    return result;
+  }
+
+  function showMsg(text, isError) {
+    const el = document.getElementById('register-msg');
+    el.textContent = text;
+    el.style.color = isError ? '#f44336' : '#4caf50';
+  }
+
+  function init() {
+    if (init._done) return;
+    init._done = true;
+    buildForm();
+    document.getElementById('register-parse-tsv-btn').addEventListener('click', function () {
+      const text = document.getElementById('register-tsv-input').value;
+      if (!text.trim()) { showMsg('TSVを入力してください。', true); return; }
+      try {
+        const rows = parseTsv(text);
+        if (rows.length === 0) { showMsg('有効な行がありません。', true); return; }
+        renderPreview(rows);
+        showMsg(rows.length + '語をプレビューしました。', false);
+      } catch (e) {
+        showMsg('TSV解析エラー: ' + e.message, true);
+      }
+    });
+
+    document.getElementById('register-import-btn').addEventListener('click', async function () {
+      if (previewRows.length === 0) return;
+      try {
+        const result = await registerRows(previewRows);
+        showMsg(result.data.registeredCount + '語を登録しました（' + result.data.sheetName + '）', false);
+        document.getElementById('register-tsv-input').value = '';
+        previewRows = [];
+        document.getElementById('register-preview-area').style.display = 'none';
+        if (window.VocabSettingsModule) await window.VocabSettingsModule.loadCatalog();
+      } catch (e) {
+        showMsg('登録エラー: ' + e.message, true);
+      }
+    });
+
+    document.getElementById('register-single-btn').addEventListener('click', async function () {
+      try {
+        const row = readFormRow();
+        const result = await registerRows([row]);
+        showMsg('「' + vocabNorm(row['英単語・熟語の表現']) + '」を登録しました', false);
+        clearForm();
+        if (window.VocabSettingsModule) await window.VocabSettingsModule.loadCatalog();
+      } catch (e) {
+        showMsg('登録エラー: ' + e.message, true);
+      }
+    });
+  }
+
+  return { init };
+})();
+
+window.VocabRegisterModule = VocabRegisterModule;
+
 // sorting.js
 // 並び替えと正誤判定
 
@@ -1295,6 +2004,8 @@ let currentScore = 0;
 let sessionResults = [];
 let currentUserId = "Guest";
 let sessionStartTime = null;
+let currentAppMode = 'grammar';
+let currentVocabSetName = '';
 
 // GASへ送信するテキスト値
 const unitData = { 
@@ -1345,6 +2056,7 @@ elements.subject.addEventListener('change', e => {
 });
 
 elements.startBtn.addEventListener('click', async () => {
+  currentAppMode = 'grammar';
   const subjectName = getSelectedSubjectName();
   const checkedUnits = Array.from(elements.units.querySelectorAll('input:checked')).map(el => el.value);
   
@@ -1400,6 +2112,60 @@ elements.startBtn.addEventListener('click', async () => {
   }
 });
 
+document.getElementById('vocab-start-btn').addEventListener('click', async () => {
+  currentAppMode = 'vocab';
+  const btn = document.getElementById('vocab-start-btn');
+  const options = window.VocabSettingsModule.getQuizOptions();
+
+  if (!options.bookName || !options.sheetName) {
+    alert('ブックと教材（シート）を選択してください。');
+    return;
+  }
+
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = '単語を読み込み中...';
+
+  try {
+    const result = await gasRun('apiGetVocabWords', options.bookName, options.sheetName, JSON.stringify(options.filters), true);
+    if (result.status !== 'success') throw new Error(result.message || '単語取得失敗');
+
+    const words = result.data.words || [];
+    const pool = result.data.pool || [];
+    const bookPool = result.data.bookPool || pool;
+
+    if (words.length === 0) {
+      alert('条件に合う単語がありません。');
+      return;
+    }
+
+    const questions = window.VocabQuizGenerator.buildQuestions(words, pool, bookPool, options);
+    if (questions.length === 0) {
+      alert('出題できる問題がありません。');
+      return;
+    }
+
+    currentVocabSetName = options.bookName + ' / ' + options.sheetName;
+    currentQuestionDataList = questions;
+    totalQuestionsCount = questions.length;
+    currentQuestionIndex = 0;
+    currentScore = 0;
+    sessionResults = [];
+    sessionStartTime = Date.now();
+
+    loadQuestionToGame(currentQuestionDataList[0]);
+    screens.settings.style.display = 'none';
+    document.getElementById('result-screen').style.display = 'none';
+    screens.game.style.display = 'block';
+  } catch (error) {
+    console.error(error);
+    alert('通信エラーが発生しました: ' + error.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+});
+
 elements.backBtn.addEventListener('click', () => {
   screens.game.style.display = 'none';
   screens.settings.style.display = 'block';
@@ -1414,20 +2180,26 @@ async function fetchQuestionsFromGAS(subject, unit) {
 }
 
 function loadQuestionToGame(qData) {
-  elements.qJa.textContent = qData.japanese;
+  elements.qJa.textContent = qData.format === 'vocab-enja'
+    ? '単語学習（英日） ' + (currentQuestionIndex + 1) + ' / ' + totalQuestionsCount
+    : qData.japanese;
   
   // UIの初期化・非表示化
   document.getElementById('sort-ui').style.display = 'none';
   document.getElementById('choice-ui').style.display = 'none';
   document.getElementById('typing-ui').style.display = 'none';
   document.getElementById('correction-ui').style.display = 'none';
+  document.getElementById('vocab-quiz-ui').style.display = 'none';
   const missingWordArea = document.getElementById('missing-word-input-area');
   if (missingWordArea) missingWordArea.style.display = 'none';
   document.getElementById('result-msg').textContent = '';
 
   const format = qData.format || "並び替え";
 
-  if (format.includes("正誤")) {
+  if (format === 'vocab-enja') {
+    document.getElementById('vocab-quiz-ui').style.display = 'block';
+    if (window.VocabQuizModule) window.VocabQuizModule.initGame(qData);
+  } else if (format.includes("正誤")) {
     // 正誤判断指摘訂正
     document.getElementById('correction-ui').style.display = 'block';
     if (window.CorrectionModule) window.CorrectionModule.initGame(qData);
@@ -1489,10 +2261,10 @@ window.onQuestionCompleted = (isCorrect) => {
     grade: user.grade || "",
     userClass: user.class || "",
     questionId: currentQ.id,
-    subject: elements.subject.options[elements.subject.selectedIndex].text,
+    subject: currentAppMode === 'vocab' ? '単語学習' : elements.subject.options[elements.subject.selectedIndex].text,
     unit: currentQ.unit || "",
     isCorrect: isCorrect ? "正解" : "不正解",
-    mode: modeDesc
+    mode: currentAppMode === 'vocab' ? 'vocab-enja' : modeDesc
   });
   
   document.getElementById('next-btn').style.display = 'block';
@@ -1511,8 +2283,13 @@ async function sendResultsToGAS() {
 async function sendSessionLogToGAS() {
   const timeTaken = sessionStartTime ? Math.round((Date.now() - sessionStartTime) / 1000) : 0;
   const correctRate = totalQuestionsCount > 0 ? Math.round((currentScore / totalQuestionsCount) * 100) : 0;
-  const checkedUnits = Array.from(elements.units.querySelectorAll('input:checked')).map(el => el.value);
-  const setName = `${getSelectedSubjectName()} - ${checkedUnits.join(',')}`;
+  let setName;
+  if (currentAppMode === 'vocab') {
+    setName = '単語学習: ' + (currentVocabSetName || 'セット');
+  } else {
+    const checkedUnits = Array.from(elements.units.querySelectorAll('input:checked')).map(el => el.value);
+    setName = `${getSelectedSubjectName()} - ${checkedUnits.join(',')}`;
+  }
 
   try {
     const data = await gasRun('apiSaveSessionLog', currentUserId, setName, correctRate, timeTaken);
@@ -1576,6 +2353,42 @@ function enterAppAsGuest() {
   screens.login.style.display = 'none';
   screens.settings.style.display = 'block';
   renderUnits(getSelectedSubjectName());
+  initModeTabs();
+  initVocabModules();
+}
+
+function initModeTabs() {
+  const tabs = document.querySelectorAll('.mode-tab');
+  const grammarPanel = document.getElementById('grammar-settings-panel');
+  const vocabPanel = document.getElementById('vocab-settings-panel');
+  const registerPanel = document.getElementById('vocab-register-panel');
+  const startBtn = document.getElementById('start-btn');
+
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      tabs.forEach(function (t) { t.classList.remove('active'); });
+      tab.classList.add('active');
+      const mode = tab.dataset.mode;
+      grammarPanel.style.display = mode === 'grammar' ? 'block' : 'none';
+      vocabPanel.style.display = mode === 'vocab' ? 'block' : 'none';
+      registerPanel.style.display = mode === 'register' ? 'block' : 'none';
+      if (startBtn) startBtn.style.display = mode === 'grammar' ? 'block' : 'none';
+    });
+  });
+}
+
+async function initVocabModules() {
+  if (window.VocabSettingsModule) {
+    window.VocabSettingsModule.init();
+    try {
+      await window.VocabSettingsModule.loadCatalog();
+    } catch (e) {
+      console.warn('単語カタログ読込:', e.message);
+    }
+  }
+  if (window.VocabRegisterModule) {
+    window.VocabRegisterModule.init();
+  }
 }
 
 window.onLoginSuccess = function(user) {
@@ -1608,6 +2421,8 @@ window.onLoginSuccess = function(user) {
   screens.settings.style.display = 'block';
   
   renderUnits(getSelectedSubjectName());
+  initModeTabs();
+  initVocabModules();
   fetchUserLogs(currentUserId);
 };
 

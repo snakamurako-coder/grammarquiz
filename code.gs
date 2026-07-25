@@ -5,6 +5,9 @@ const PROP = {
   CLIENT_ID: 'CLIENT_ID',
   SPREADSHEET_ID: 'SPREADSHEET_ID',
   MATERIALS_FOLDER_ID: 'MATERIALS_FOLDER_ID',
+  VOCABULARY_FOLDER_ID: 'VOCABULARY_FOLDER_ID',
+  MY_VOCAB_BOOK_ID: 'MY_VOCAB_BOOK_ID',
+  SAMPLE_VOCAB_BOOK_IDS: 'SAMPLE_VOCAB_BOOK_IDS',
   PARENT_FOLDER_ID: 'PARENT_FOLDER_ID',
   SAMPLE_BOOK_IDS: 'SAMPLE_BOOK_IDS',
   SETUP_COMPLETED: 'SETUP_COMPLETED'
@@ -14,7 +17,19 @@ const PROP = {
 const DEFAULT_CLIENT_ID = '505252303455-84r495bnnsgiefcrv24ro2qtohlgbk2h.apps.googleusercontent.com';
 
 const MATERIALS_FOLDER_NAME = 'materials';
+const VOCABULARY_FOLDER_NAME = 'vocabulary';
 const MANAGEMENT_BOOK_NAME = 'BrightStage管理';
+const MY_VOCAB_BOOK_NAME = 'マイ単語帳';
+const UNREGISTERED = '(未登録)';
+
+/** 単語帳22列ヘッダ（管理者配布・ユーザー登録共通） */
+const VOCAB_HEADERS = [
+  '通し番号', '大区分', '中区分', '小区分', '英単語・熟語の表現',
+  '意味＠名詞', '意味＠動詞', '意味＠形容詞', '意味＠副詞', '意味＠前置詞',
+  '意味＠接続詞', '意味＠その他品詞', '意味＠熟語・慣用表現',
+  'メモ', '類義語・同義語', '対義語', '派生語・関連語',
+  '英文による定義', 'チャンク', 'チャンク訳', '例文', '例文訳'
+];
 
 // レスポンスを返す共通関数
 const sendResponse = (responseObject) => {
@@ -39,6 +54,26 @@ function doGet(e) {
   } else if (action === 'getCatalog') {
     try {
       const data = fetchCatalogFromDrive();
+      return sendResponse({ status: "success", data: data });
+    } catch (error) {
+      return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
+    }
+  } else if (action === 'getVocabCatalog') {
+    try {
+      const data = fetchVocabCatalogFromDrive_();
+      return sendResponse({ status: "success", data: data });
+    } catch (error) {
+      return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
+    }
+  } else if (action === 'getVocabWords') {
+    try {
+      const filters = e.parameter.filters ? JSON.parse(e.parameter.filters) : {};
+      const data = fetchVocabWordsFromSheet_({
+        bookName: e.parameter.bookName,
+        sheetName: e.parameter.sheetName,
+        filters: filters,
+        includeBookPool: e.parameter.includeBookPool || '0'
+      });
       return sendResponse({ status: "success", data: data });
     } catch (error) {
       return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
@@ -172,6 +207,8 @@ function doPost(e) {
       return handleSaveSessionLog(requestData); // セッションサマリー用
     } else if (action === "getUserLogs") {
       return handleGetUserLogs(requestData); // マイページ情報取得用
+    } else if (action === "registerVocabWords") {
+      return handleRegisterVocabWords(requestData);
     } else if (action === "save") {
       return handleSave(requestData);       // 既存利用用
     } else if (action === "get_csv_data") {
@@ -406,6 +443,18 @@ function handleGetUserLogs(requestData) {
   return sendResponse({ status: "success", data: userLogs });
 }
 
+function handleRegisterVocabWords(requestData) {
+  try {
+    const sheetName = requestData.sheetName;
+    const rows = requestData.rows;
+    const parsedRows = typeof rows === 'string' ? JSON.parse(rows) : rows;
+    const data = registerVocabWords_(sheetName, parsedRows);
+    return sendResponse({ status: "success", data: data, message: "単語を登録しました" });
+  } catch (error) {
+    return sendResponse({ status: "error", message: error.toString() });
+  }
+}
+
 // =========================================================
 // ⑥ 初回セットアップ（フォルダ・管理ブック・サンプル問題）
 // =========================================================
@@ -417,6 +466,7 @@ function handleGetUserLogs(requestData) {
 function ensureEnvironment() {
   const props = PropertiesService.getScriptProperties();
   if (isEnvironmentReady_(props)) {
+    ensureVocabularyResources_();
     return props.getProperties();
   }
   return setupEnvironmentWithLock_(false);
@@ -487,15 +537,28 @@ function setupEnvironment_(force) {
 
   const sampleBookIds = ensureSampleQuestionBooks_(materialsFolder, force, created, reused);
   props.setProperty(PROP.SAMPLE_BOOK_IDS, JSON.stringify(sampleBookIds));
+
+  const vocabularyFolder = getOrCreateVocabularyFolder_(parentFolder, force, created, reused);
+  props.setProperty(PROP.VOCABULARY_FOLDER_ID, vocabularyFolder.getId());
+
+  const myVocabBook = getOrCreateMyVocabBook_(vocabularyFolder, force, created, reused);
+  props.setProperty(PROP.MY_VOCAB_BOOK_ID, myVocabBook.getId());
+
+  const sampleVocabBookIds = ensureSampleVocabBooks_(vocabularyFolder, force, created, reused);
+  props.setProperty(PROP.SAMPLE_VOCAB_BOOK_IDS, JSON.stringify(sampleVocabBookIds));
+
   props.setProperty(PROP.SETUP_COMPLETED, 'true');
 
   const result = {
     parentFolderId: parentFolder.getId(),
     parentFolderName: parentFolder.getName(),
     materialsFolderId: materialsFolder.getId(),
+    vocabularyFolderId: vocabularyFolder.getId(),
+    myVocabBookId: myVocabBook.getId(),
     managementBookId: managementSs.getId(),
     managementBookUrl: managementSs.getUrl(),
     sampleBookIds: sampleBookIds,
+    sampleVocabBookIds: sampleVocabBookIds,
     created: created,
     reused: reused
   };
@@ -812,6 +875,513 @@ function getSampleQuestionCatalog_() {
 }
 
 // =========================================================
+// ⑧ 単語学習（vocabulary）フォルダ・ブック管理
+// =========================================================
+
+function getVocabularyFolder() {
+  const props = PropertiesService.getScriptProperties();
+  const folderId = props.getProperty(PROP.VOCABULARY_FOLDER_ID);
+  if (folderId) {
+    try {
+      return DriveApp.getFolderById(folderId);
+    } catch (e) {
+      // fall through
+    }
+  }
+
+  const parentFolder = getScriptParentFolder_();
+  const folder = findChildFolderByName_(parentFolder, VOCABULARY_FOLDER_NAME);
+  if (folder) {
+    props.setProperty(PROP.VOCABULARY_FOLDER_ID, folder.getId());
+    props.setProperty(PROP.PARENT_FOLDER_ID, parentFolder.getId());
+    return folder;
+  }
+
+  throw new Error('vocabularyフォルダが見つかりません。setupEnvironment() を実行してください。');
+}
+
+/** vocabulary 未作成の既存環境向けに遅延セットアップ */
+function ensureVocabularyResources_() {
+  try {
+    getVocabularyFolder();
+    return;
+  } catch (e) {
+    setupEnvironmentWithLock_(false);
+  }
+}
+
+function getOrCreateVocabularyFolder_(parentFolder, force, created, reused) {
+  const props = PropertiesService.getScriptProperties();
+
+  if (!force) {
+    const existingId = props.getProperty(PROP.VOCABULARY_FOLDER_ID);
+    if (existingId) {
+      try {
+        const folder = DriveApp.getFolderById(existingId);
+        reused.push(VOCABULARY_FOLDER_NAME);
+        return folder;
+      } catch (e) {
+        // fall through
+      }
+    }
+
+    const folder = findChildFolderByName_(parentFolder, VOCABULARY_FOLDER_NAME);
+    if (folder) {
+      props.setProperty(PROP.VOCABULARY_FOLDER_ID, folder.getId());
+      reused.push(VOCABULARY_FOLDER_NAME);
+      return folder;
+    }
+  }
+
+  const existing = findChildFolderByName_(parentFolder, VOCABULARY_FOLDER_NAME);
+  if (existing && !force) {
+    props.setProperty(PROP.VOCABULARY_FOLDER_ID, existing.getId());
+    reused.push(VOCABULARY_FOLDER_NAME);
+    return existing;
+  }
+
+  const folder = existing || parentFolder.createFolder(VOCABULARY_FOLDER_NAME);
+  props.setProperty(PROP.VOCABULARY_FOLDER_ID, folder.getId());
+  if (existing) reused.push(VOCABULARY_FOLDER_NAME);
+  else created.push(VOCABULARY_FOLDER_NAME);
+  return folder;
+}
+
+function getOrCreateMyVocabBook_(vocabularyFolder, force, created, reused) {
+  const props = PropertiesService.getScriptProperties();
+
+  if (!force) {
+    const existingId = props.getProperty(PROP.MY_VOCAB_BOOK_ID);
+    if (existingId) {
+      try {
+        reused.push(MY_VOCAB_BOOK_NAME);
+        return SpreadsheetApp.openById(existingId);
+      } catch (e) {
+        // fall through
+      }
+    }
+
+    const existingFile = findChildSpreadsheetByName_(vocabularyFolder, MY_VOCAB_BOOK_NAME);
+    if (existingFile) {
+      props.setProperty(PROP.MY_VOCAB_BOOK_ID, existingFile.getId());
+      reused.push(MY_VOCAB_BOOK_NAME);
+      return SpreadsheetApp.open(existingFile);
+    }
+  }
+
+  let ss;
+  const existingFile = findChildSpreadsheetByName_(vocabularyFolder, MY_VOCAB_BOOK_NAME);
+  if (existingFile) {
+    ss = SpreadsheetApp.open(existingFile);
+    reused.push(MY_VOCAB_BOOK_NAME);
+  } else {
+    ss = createSpreadsheetInFolder_(MY_VOCAB_BOOK_NAME, vocabularyFolder);
+    created.push(MY_VOCAB_BOOK_NAME);
+  }
+
+  ensureMyVocabDefaultSheet_(ss);
+  props.setProperty(PROP.MY_VOCAB_BOOK_ID, ss.getId());
+  return ss;
+}
+
+function ensureMyVocabDefaultSheet_(ss) {
+  let sheet = ss.getSheetByName('デフォルト');
+  if (!sheet) {
+    const sheets = ss.getSheets();
+    if (sheets.length === 1 && sheets[0].getName() === 'シート1') {
+      sheet = sheets[0];
+      sheet.setName('デフォルト');
+    } else {
+      sheet = ss.insertSheet('デフォルト');
+    }
+  }
+  ensureVocabSheetHeader_(sheet);
+}
+
+function ensureVocabSheetHeader_(sheet) {
+  const firstCell = sheet.getLastRow() > 0 ? sheet.getRange(1, 1).getValue() : '';
+  if (firstCell !== '通し番号') {
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow(VOCAB_HEADERS);
+    } else {
+      sheet.insertRowBefore(1);
+      sheet.getRange(1, 1, 1, VOCAB_HEADERS.length).setValues([VOCAB_HEADERS]);
+    }
+    sheet.getRange(1, 1, 1, VOCAB_HEADERS.length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+}
+
+function ensureSampleVocabBooks_(vocabularyFolder, force, created, reused) {
+  const catalog = getSampleVocabCatalog_();
+  const bookIds = {};
+
+  Object.keys(catalog).forEach(function (bookName) {
+    let file = findChildSpreadsheetByName_(vocabularyFolder, bookName);
+    let ss;
+
+    if (file && !force) {
+      ss = SpreadsheetApp.open(file);
+      reused.push(bookName);
+    } else if (file && force) {
+      ss = SpreadsheetApp.open(file);
+      reused.push(bookName + '(更新)');
+    } else {
+      ss = createSpreadsheetInFolder_(bookName, vocabularyFolder);
+      created.push(bookName);
+    }
+
+    ensureSampleVocabSheets_(ss, catalog[bookName]);
+    bookIds[bookName] = ss.getId();
+  });
+
+  return bookIds;
+}
+
+function ensureSampleVocabSheets_(ss, sheetsData) {
+  const sheetNames = Object.keys(sheetsData);
+  sheetNames.forEach(function (sheetName, index) {
+    let sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      if (index === 0 && ss.getSheetByName('シート1')) {
+        sheet = ss.getSheetByName('シート1');
+        sheet.setName(sheetName);
+      } else {
+        sheet = ss.insertSheet(sheetName);
+      }
+    }
+
+    const lastRow = sheet.getLastRow();
+    const firstCell = lastRow > 0 ? sheet.getRange(1, 1).getValue() : '';
+    if (lastRow <= 1 && (firstCell === '' || firstCell === '通し番号')) {
+      const rows = sheetsData[sheetName];
+      sheet.clear();
+      sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+      sheet.getRange(1, 1, 1, rows[0].length).setFontWeight('bold');
+      sheet.setFrozenRows(1);
+    } else {
+      ensureVocabSheetHeader_(sheet);
+    }
+  });
+
+  const leftover = ss.getSheetByName('シート1');
+  if (leftover && ss.getSheets().length > 1) {
+    ss.deleteSheet(leftover);
+  }
+}
+
+function getSampleVocabCatalog_() {
+  const headers = VOCAB_HEADERS;
+
+  function vocabRow(id, dai, chu, sho, word, noun, verb, adj, adv, prep, conj, other, idiom, memo, syn, ant, deriv, def, chunk, chunkJa, ex, exJa) {
+    return [
+      id, dai || UNREGISTERED, chu || UNREGISTERED, sho || UNREGISTERED, word,
+      noun || UNREGISTERED, verb || UNREGISTERED, adj || UNREGISTERED,
+      adv || UNREGISTERED, prep || UNREGISTERED, conj || UNREGISTERED,
+      other || UNREGISTERED, idiom || UNREGISTERED,
+      memo || UNREGISTERED, syn || UNREGISTERED, ant || UNREGISTERED, deriv || UNREGISTERED,
+      def || UNREGISTERED, chunk || UNREGISTERED, chunkJa || UNREGISTERED,
+      ex || UNREGISTERED, exJa || UNREGISTERED
+    ];
+  }
+
+  return {
+    'コーパス（サンプル）': {
+      'コーパス': [
+        headers,
+        vocabRow(1, '通常ステージ', 'Stage1', 'Lesson1', 'well',
+          '井戸', '湧き出る', '健康な', '上手に・十分に', UNREGISTERED, UNREGISTERED, UNREGISTERED, 'ええと・さて',
+          '名詞の「井戸」という意味に注意。間投詞は熟語・慣用表現として扱う。',
+          UNREGISTERED, UNREGISTERED, 'badly,ill', 'wellness,better,best',
+          'in a good or satisfactory way',
+          'She sings (well).', '彼女は(上手に)歌う。',
+          'The water in the (well) is clean.', 'その(井戸)の水はきれいだ。'),
+        vocabRow(2, '通常ステージ', 'Stage1', 'Lesson1', 'book',
+          '本', UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
+          '可算名詞として最も基本的な意味。',
+          'volume,text', UNREGISTERED, 'booklet,bookish',
+          'a set of printed pages bound together',
+          'read a (book)', '(本)を読む',
+          'I bought a new (book) yesterday.', '昨日新しい(本)を買った。'),
+        vocabRow(3, '通常ステージ', 'Stage1', 'Lesson1', 'run',
+          UNREGISTERED, '走る', UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
+          '基本の自動詞意味。',
+          'sprint,jog', 'walk', 'runner,running',
+          'to move quickly on foot',
+          '(run) fast', '(速く)走る',
+          'He (runs) every morning.', '彼は毎朝(走る)。'),
+        vocabRow(4, '通常ステージ', 'Stage1', 'Lesson1', 'happy',
+          UNREGISTERED, UNREGISTERED, '幸せな・うれしい', UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
+          '感情を表す基本的な形容詞。',
+          'glad,joyful', 'sad,unhappy', 'happily,happiness',
+          'feeling or showing pleasure',
+          'a (happy) child', '(幸せな)子供',
+          'She looks (happy) today.', '彼女は今日(うれしそう)に見える。'),
+        vocabRow(5, '通常ステージ', 'Stage1', 'Lesson2', 'look up',
+          UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
+          '辞書などで調べる',
+          '熟語として登録。6〜12列目はすべて(未登録)。',
+          UNREGISTERED, UNREGISTERED, UNREGISTERED,
+          'to search for information in a reference book or online',
+          '(look up) a word', '単語を(調べる)',
+          'Please (look up) this word in the dictionary.', '辞書でこの単語を(調べて)ください。')
+      ]
+    }
+  };
+}
+
+function openVocabBookByName_(bookName) {
+  const vocabularyFolder = getVocabularyFolder();
+  const files = vocabularyFolder.getFilesByName(bookName);
+  if (!files.hasNext()) {
+    throw new Error('単語ブックが見つかりません: ' + bookName);
+  }
+  return SpreadsheetApp.open(files.next());
+}
+
+function isMyVocabBook_(bookName) {
+  return bookName === MY_VOCAB_BOOK_NAME;
+}
+
+function rowToVocabObject_(headers, row) {
+  const obj = {};
+  for (let i = 0; i < headers.length; i++) {
+    if (headers[i]) obj[headers[i]] = row[i] !== undefined && row[i] !== null ? row[i] : '';
+  }
+  return obj;
+}
+
+function normalizeVocabField_(value) {
+  if (value === null || value === undefined) return UNREGISTERED;
+  const str = value.toString().trim();
+  return str === '' ? UNREGISTERED : str;
+}
+
+function isMeaningRegistered_(value) {
+  const str = normalizeVocabField_(value);
+  return str !== UNREGISTERED;
+}
+
+function validateVocabInputRow_(rowObj) {
+  const word = normalizeVocabField_(rowObj['英単語・熟語の表現']);
+  if (word === UNREGISTERED) {
+    throw new Error('英単語・熟語の表現（5列目）は必須です。');
+  }
+
+  const meaningKeys = [
+    '意味＠名詞', '意味＠動詞', '意味＠形容詞', '意味＠副詞',
+    '意味＠前置詞', '意味＠接続詞', '意味＠その他品詞', '意味＠熟語・慣用表現'
+  ];
+  const hasMeaning = meaningKeys.some(function (key) {
+    return isMeaningRegistered_(rowObj[key]);
+  });
+  if (!hasMeaning) {
+    throw new Error('6〜13列目のいずれか1つの意味は必須です: ' + word);
+  }
+}
+
+function buildVocabRowFromInput_(rowObj) {
+  validateVocabInputRow_(rowObj);
+  const result = [];
+  VOCAB_HEADERS.forEach(function (header, idx) {
+    if (header === '通し番号') {
+      result.push('');
+      return;
+    }
+    result.push(normalizeVocabField_(rowObj[header]));
+  });
+  return result;
+}
+
+function renumberVocabSheet_(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return;
+
+  const count = lastRow - 1;
+  const numbers = [];
+  for (let i = 1; i <= count; i++) {
+    numbers.push([i]);
+  }
+  sheet.getRange(2, 1, count, 1).setValues(numbers);
+}
+
+function fetchVocabCatalogFromDrive_() {
+  const vocabularyFolder = getVocabularyFolder();
+  const props = PropertiesService.getScriptProperties();
+  const myBookId = props.getProperty(PROP.MY_VOCAB_BOOK_ID);
+
+  const presets = [];
+  const userBooks = [];
+
+  const files = vocabularyFolder.getFilesByType(MimeType.GOOGLE_SHEETS);
+  while (files.hasNext()) {
+    const file = files.next();
+    const bookName = file.getName();
+    const bookId = file.getId();
+    const ss = SpreadsheetApp.open(file);
+    const sheets = ss.getSheets();
+    const sheetInfos = sheets.map(function (sheet) {
+      return buildVocabSheetInfo_(sheet);
+    });
+
+    const bookInfo = {
+      bookName: bookName,
+      bookId: bookId,
+      sheets: sheetInfos
+    };
+
+    if (bookId === myBookId || bookName === MY_VOCAB_BOOK_NAME) {
+      userBooks.push(bookInfo);
+    } else {
+      presets.push(bookInfo);
+    }
+  }
+
+  return { presets: presets, userBooks: userBooks };
+}
+
+function buildVocabSheetInfo_(sheet) {
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    return {
+      sheetName: sheet.getName(),
+      wordCount: 0,
+      divisions: { dai: [], chu: [], sho: [] }
+    };
+  }
+
+  const headers = data[0];
+  const daiIdx = headers.indexOf('大区分');
+  const chuIdx = headers.indexOf('中区分');
+  const shoIdx = headers.indexOf('小区分');
+  const wordIdx = headers.indexOf('英単語・熟語の表現');
+
+  const daiSet = {};
+  const chuSet = {};
+  const shoSet = {};
+
+  for (let r = 1; r < data.length; r++) {
+    const row = data[r];
+    const word = wordIdx >= 0 ? row[wordIdx] : '';
+    if (!word || word.toString().trim() === '') continue;
+
+    const dai = daiIdx >= 0 ? normalizeVocabField_(row[daiIdx]) : UNREGISTERED;
+    const chu = chuIdx >= 0 ? normalizeVocabField_(row[chuIdx]) : UNREGISTERED;
+    const sho = shoIdx >= 0 ? normalizeVocabField_(row[shoIdx]) : UNREGISTERED;
+    daiSet[dai] = true;
+    chuSet[chu] = true;
+    shoSet[sho] = true;
+  }
+
+  return {
+    sheetName: sheet.getName(),
+    wordCount: data.length - 1,
+    divisions: {
+      dai: Object.keys(daiSet).sort(),
+      chu: Object.keys(chuSet).sort(),
+      sho: Object.keys(shoSet).sort()
+    }
+  };
+}
+
+function fetchVocabWordsFromSheet_(params) {
+  const bookName = params.bookName;
+  const sheetName = params.sheetName;
+  const includeBookPool = String(params.includeBookPool || '') === '1';
+
+  if (!bookName || !sheetName) {
+    throw new Error('bookName と sheetName は必須です。');
+  }
+
+  const ss = openVocabBookByName_(bookName);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error('シートが見つかりません: ' + sheetName);
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    return { words: [], pool: [] };
+  }
+
+  const headers = data[0];
+  const filters = params.filters || {};
+  const daiFilter = filters.dai || [];
+  const chuFilter = filters.chu || [];
+  const shoFilter = filters.sho || [];
+
+  const words = [];
+  const pool = [];
+
+  for (let r = 1; r < data.length; r++) {
+    const rowObj = rowToVocabObject_(headers, data[r]);
+    const word = normalizeVocabField_(rowObj['英単語・熟語の表現']);
+    if (word === UNREGISTERED) continue;
+
+    rowObj._rowIndex = r + 1;
+    pool.push(rowObj);
+
+    const dai = normalizeVocabField_(rowObj['大区分']);
+    const chu = normalizeVocabField_(rowObj['中区分']);
+    const sho = normalizeVocabField_(rowObj['小区分']);
+
+    if (daiFilter.length > 0 && daiFilter.indexOf(dai) === -1) continue;
+    if (chuFilter.length > 0 && chuFilter.indexOf(chu) === -1) continue;
+    if (shoFilter.length > 0 && shoFilter.indexOf(sho) === -1) continue;
+
+    words.push(rowObj);
+  }
+
+  let bookPool = pool;
+  if (includeBookPool) {
+    bookPool = [];
+    const allSheets = ss.getSheets();
+    allSheets.forEach(function (s) {
+      const sData = s.getDataRange().getValues();
+      if (sData.length <= 1) return;
+      const sHeaders = sData[0];
+      for (let r = 1; r < sData.length; r++) {
+        const rowObj = rowToVocabObject_(sHeaders, sData[r]);
+        const word = normalizeVocabField_(rowObj['英単語・熟語の表現']);
+        if (word === UNREGISTERED) continue;
+        rowObj._sheetName = s.getName();
+        bookPool.push(rowObj);
+      }
+    });
+  }
+
+  return { words: words, pool: pool, bookPool: bookPool };
+}
+
+function registerVocabWords_(sheetName, rows) {
+  if (!sheetName) throw new Error('sheetName は必須です。');
+  if (!rows || rows.length === 0) throw new Error('登録する単語がありません。');
+
+  const vocabularyFolder = getVocabularyFolder();
+  const myFile = findChildSpreadsheetByName_(vocabularyFolder, MY_VOCAB_BOOK_NAME);
+  if (!myFile) throw new Error('マイ単語帳が見つかりません。');
+
+  const ss = SpreadsheetApp.open(myFile);
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+    sheet.appendRow(VOCAB_HEADERS);
+    sheet.getRange(1, 1, 1, VOCAB_HEADERS.length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  } else {
+    ensureVocabSheetHeader_(sheet);
+  }
+
+  const builtRows = rows.map(function (rowObj) {
+    return buildVocabRowFromInput_(rowObj);
+  });
+
+  const startRow = sheet.getLastRow() + 1;
+  sheet.getRange(startRow, 1, builtRows.length, VOCAB_HEADERS.length).setValues(builtRows);
+  renumberVocabSheet_(sheet);
+
+  return { registeredCount: builtRows.length, sheetName: sheetName };
+}
+
+// =========================================================
 // ⑦ HtmlService クライアント用 API（google.script.run）
 // =========================================================
 
@@ -856,6 +1426,43 @@ function apiGetCatalog() {
   ensureEnvironment();
   try {
     const data = fetchCatalogFromDrive();
+    return { status: 'success', data: data };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiGetVocabCatalog() {
+  ensureEnvironment();
+  try {
+    const data = fetchVocabCatalogFromDrive_();
+    return { status: 'success', data: data };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiGetVocabWords(bookName, sheetName, filtersJson, includeBookPool) {
+  ensureEnvironment();
+  try {
+    const filters = filtersJson ? JSON.parse(filtersJson) : {};
+    const data = fetchVocabWordsFromSheet_({
+      bookName: bookName,
+      sheetName: sheetName,
+      filters: filters,
+      includeBookPool: includeBookPool ? '1' : '0'
+    });
+    return { status: 'success', data: data };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiRegisterVocabWords(sheetName, rowsJson) {
+  ensureEnvironment();
+  try {
+    const rows = rowsJson ? JSON.parse(rowsJson) : [];
+    const data = registerVocabWords_(sheetName, rows);
     return { status: 'success', data: data };
   } catch (e) {
     return { status: 'error', message: e.toString() };
