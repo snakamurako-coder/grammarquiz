@@ -1,5 +1,8 @@
 // code.gs 統合版
 
+/** アプリ表示名 */
+const APP_NAME = '英語学習総合ツール';
+
 /** スクリプトプロパティキー */
 const PROP = {
   CLIENT_ID: 'CLIENT_ID',
@@ -11,7 +14,9 @@ const PROP = {
   PARENT_FOLDER_ID: 'PARENT_FOLDER_ID',
   SAMPLE_BOOK_IDS: 'SAMPLE_BOOK_IDS',
   SETUP_COMPLETED: 'SETUP_COMPLETED',
-  PAGES_URL: 'PAGES_URL'
+  PAGES_URL: 'PAGES_URL',
+  ADMIN_EMAIL: 'ADMIN_EMAIL',
+  WHITELIST_CACHE: 'WHITELIST_CACHE'
 };
 
 /** ユーザー権限実行時の UserProperties キー */
@@ -32,7 +37,9 @@ const DEFAULT_PAGES_URL = 'https://snakamurako-coder.github.io/grammarquiz/';
 /** index.html の GSI client_id と揃える既定値（未設定時のみ書き込む） */
 const DEFAULT_CLIENT_ID = '505252303455-84r495bnnsgiefcrv24ro2qtohlgbk2h.apps.googleusercontent.com';
 
-const MATERIALS_FOLDER_NAME = 'materials';
+const MATERIALS_FOLDER_NAME = 'grammarquizzes';
+/** 旧フォルダ名（既存環境からの自動リネーム用） */
+const LEGACY_MATERIALS_FOLDER_NAME = 'materials';
 const VOCABULARY_FOLDER_NAME = 'vocabulary';
 const MANAGEMENT_BOOK_NAME = 'BrightStage管理';
 const MY_VOCAB_BOOK_NAME = 'マイ単語帳';
@@ -126,11 +133,16 @@ function doGet(e) {
     return sendResponse({ status: "error", message: "無効なactionです: " + action });
   }
 
+  const access = checkDashboardAccess_();
+  if (!access.allowed) {
+    return renderAccessDeniedPage_(access.email);
+  }
+
   const template = HtmlService.createTemplateFromFile('dashboard');
   template.PAGES_URL = getPagesUrl_();
   template.RESULT_TOKEN = (e && e.parameter && e.parameter.result_token) ? e.parameter.result_token : '';
   return template.evaluate()
-    .setTitle('BrightStage 管理')
+    .setTitle(APP_NAME + ' 管理')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -282,6 +294,17 @@ function handleLogin(requestData) {
   }
 
   const userEmail = tokenData.email;
+
+  // 管理者（セットアップ実行者）は whitelist に無くても常に許可
+  if (isAdminEmail_(userEmail)) {
+    syncWhitelistCache_();
+    return sendResponse({
+      status: "success",
+      user: { account: userEmail, name: '管理者', grade: '', class: '', role: 'admin' },
+      message: "認証成功（管理者）"
+    });
+  }
+
   const spreadId = props.getProperty('SPREADSHEET_ID');
   if (!spreadId) return sendResponse({ status: "error", message: "SPREADSHEET_IDが設定されていません" });
 
@@ -303,12 +326,112 @@ function handleLogin(requestData) {
       break;
     }
   }
-  
+
+  syncWhitelistCache_();
+
   if (foundUser) {
     return sendResponse({ status: "success", user: foundUser, message: "認証成功" });
   } else {
     return sendResponse({ status: "error", message: "許可されていないユーザーです" });
   }
+}
+
+// =========================================================
+// ①-2 ホワイトリスト認可ヘルパー
+//   GAS①（ユーザー権限実行）は管理ブックを直接開けないため、
+//   GAS②（作成者権限）実行時に Script Properties へキャッシュしておき、
+//   GAS① はキャッシュを参照して入口で判定する。
+// =========================================================
+
+/** 管理者メールアドレス（setup 実行者）を小文字で返す */
+function getAdminEmail_() {
+  return String(PropertiesService.getScriptProperties().getProperty(PROP.ADMIN_EMAIL) || '').trim().toLowerCase();
+}
+
+function isAdminEmail_(email) {
+  const admin = getAdminEmail_();
+  return !!admin && String(email || '').trim().toLowerCase() === admin;
+}
+
+/** whitelist シートから許可メール一覧（小文字）を読み取る。管理ブックへのアクセス権が必要 */
+function readWhitelistEmailsFromSheet_() {
+  const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
+  if (!spreadId) throw new Error('SPREADSHEET_IDが設定されていません');
+  const sheet = SpreadsheetApp.openById(spreadId).getSheetByName('whitelist');
+  if (!sheet) throw new Error('whitelistシートが見つかりません');
+  const data = sheet.getDataRange().getValues();
+  const accountIdx = data[0].indexOf('account');
+  if (accountIdx === -1) throw new Error('account列がありません');
+  const emails = [];
+  for (let i = 1; i < data.length; i++) {
+    const v = String(data[i][accountIdx] || '').trim().toLowerCase();
+    if (v) emails.push(v);
+  }
+  return emails;
+}
+
+/** whitelist を Script Properties にキャッシュ（管理ブックを開けない実行文脈では何もしない） */
+function syncWhitelistCache_() {
+  try {
+    const emails = readWhitelistEmailsFromSheet_();
+    PropertiesService.getScriptProperties().setProperty(PROP.WHITELIST_CACHE, JSON.stringify(emails));
+  } catch (e) {
+    // ユーザー権限実行時など。既存キャッシュを維持
+  }
+}
+
+/** GAS② の通常リクエストに便乗して10分間隔でキャッシュを更新 */
+function syncWhitelistCacheIfStale_() {
+  const cache = CacheService.getScriptCache();
+  if (cache.get('whitelist_cache_fresh')) return;
+  syncWhitelistCache_();
+  cache.put('whitelist_cache_fresh', '1', 600);
+}
+
+/** メールが whitelist または管理者に含まれるか（シート読取不可時はキャッシュにフォールバック） */
+function isWhitelistedOrAdmin_(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return false;
+  if (isAdminEmail_(normalized)) return true;
+  let emails;
+  try {
+    emails = readWhitelistEmailsFromSheet_();
+  } catch (e) {
+    try {
+      const raw = PropertiesService.getScriptProperties().getProperty(PROP.WHITELIST_CACHE);
+      emails = raw ? JSON.parse(raw) : [];
+    } catch (e2) {
+      emails = [];
+    }
+  }
+  return emails.indexOf(normalized) !== -1;
+}
+
+/** GAS① ダッシュボードのアクセス判定（管理者は常に許可・匿名は拒否） */
+function checkDashboardAccess_() {
+  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  if (!email) return { allowed: false, email: '' };
+  return { allowed: isWhitelistedOrAdmin_(email), email: email };
+}
+
+/** アクセス拒否ページ */
+function renderAccessDeniedPage_(email) {
+  const shown = email
+    ? 'ログイン中のアカウント: <strong>' + email + '</strong>'
+    : 'アカウント情報を取得できませんでした。';
+  const html =
+    '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1.0"></head>' +
+    '<body style="font-family:sans-serif;max-width:560px;margin:60px auto;padding:0 16px;text-align:center;">' +
+    '<h1 style="font-size:1.4em;color:#2c3e50;">' + APP_NAME + '</h1>' +
+    '<div style="background:#ffebee;color:#c62828;border-radius:12px;padding:24px;font-weight:bold;">' +
+    '利用が許可されていないアカウントです。</div>' +
+    '<p style="color:#555;margin-top:16px;">' + shown + '</p>' +
+    '<p style="color:#777;font-size:.9em;">利用を希望する場合は、管理者に連絡してホワイトリストへの登録を依頼してください。</p>' +
+    '</body></html>';
+  return HtmlService.createHtmlOutput(html)
+    .setTitle(APP_NAME + ' - アクセス不可')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 // =========================================================
@@ -423,6 +546,7 @@ function handleGetData(requestData) {
 function handleSaveSessionLog(requestData) {
   const { email, setName, correctRate, timeTaken } = requestData;
   if (!email || !setName) return sendResponse({ status: "error", message: "必須パラメータがありません" });
+  if (!isWhitelistedOrAdmin_(email)) return sendResponse({ status: "error", message: "許可されていないユーザーです" });
 
   const spreadId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   if (!spreadId) return sendResponse({ status: "error", message: "SPREADSHEET_IDが設定されていません。" });
@@ -457,6 +581,7 @@ function handleSaveSessionLog(requestData) {
 function handleGetUserLogs(requestData) {
   const email = requestData.email;
   if (!email) return sendResponse({ status: "error", message: "emailが必要です" });
+  if (!isWhitelistedOrAdmin_(email)) return sendResponse({ status: "error", message: "許可されていないユーザーです" });
 
   const spreadId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   if (!spreadId) return sendResponse({ status: "error", message: "SPREADSHEET_IDが設定されていません。" });
@@ -510,6 +635,7 @@ function ensureEnvironment() {
   const props = PropertiesService.getScriptProperties();
   if (isEnvironmentReady_(props)) {
     ensureVocabularyResources_();
+    syncWhitelistCacheIfStale_();
     return props.getProperties();
   }
   return setupEnvironmentWithLock_(false);
@@ -551,7 +677,7 @@ function setupEnvironment(force) {
 }
 
 /**
- * ウェブアプリGASと同じDrive階層に materials / 管理ブック / サンプル問題を整える。
+ * ウェブアプリGASと同じDrive階層に grammarquizzes / 管理ブック / サンプル問題を整える。
  * @param {boolean} force true のとき、欠落リソースを再生成してプロパティを上書き
  * @return {Object} 作成・参照したリソース情報
  */
@@ -577,6 +703,16 @@ function setupEnvironment_(force) {
   const managementSs = getOrCreateManagementBook_(parentFolder, force, created, reused);
   ensureManagementSheets_(managementSs);
   props.setProperty(PROP.SPREADSHEET_ID, managementSs.getId());
+
+  // 管理者（setup 実行者）を記録（未設定時のみ）し、whitelist をキャッシュ
+  if (!props.getProperty(PROP.ADMIN_EMAIL)) {
+    const adminEmail = Session.getEffectiveUser().getEmail();
+    if (adminEmail) {
+      props.setProperty(PROP.ADMIN_EMAIL, adminEmail);
+      created.push('ADMIN_EMAIL');
+    }
+  }
+  syncWhitelistCache_();
 
   const sampleBookIds = ensureSampleQuestionBooks_(materialsFolder, force, created, reused);
   props.setProperty(PROP.SAMPLE_BOOK_IDS, JSON.stringify(sampleBookIds));
@@ -613,27 +749,44 @@ function setupEnvironment_(force) {
   return result;
 }
 
-/** materials フォルダを Script Properties 優先で取得（親フォルダ内のみ探索） */
+/** grammarquizzes（文法演習）フォルダを Script Properties 優先で取得（親フォルダ内のみ探索） */
 function getMaterialsFolder() {
   const props = PropertiesService.getScriptProperties();
   const folderId = props.getProperty(PROP.MATERIALS_FOLDER_ID);
   if (folderId) {
     try {
-      return DriveApp.getFolderById(folderId);
+      return migrateMaterialsFolderName_(DriveApp.getFolderById(folderId));
     } catch (e) {
       // fall through
     }
   }
 
   const parentFolder = getScriptParentFolder_();
-  const folder = findChildFolderByName_(parentFolder, MATERIALS_FOLDER_NAME);
+  const folder = findMaterialsFolderWithMigration_(parentFolder);
   if (folder) {
     props.setProperty(PROP.MATERIALS_FOLDER_ID, folder.getId());
     props.setProperty(PROP.PARENT_FOLDER_ID, parentFolder.getId());
     return folder;
   }
 
-  throw new Error("materialsフォルダが見つかりません。setupEnvironment() を実行してください。");
+  throw new Error(MATERIALS_FOLDER_NAME + "フォルダが見つかりません。setupEnvironment() を実行してください。");
+}
+
+/** 旧名 materials のフォルダを grammarquizzes に改名して返す（改名済みならそのまま） */
+function migrateMaterialsFolderName_(folder) {
+  if (folder.getName() === LEGACY_MATERIALS_FOLDER_NAME) {
+    folder.setName(MATERIALS_FOLDER_NAME);
+  }
+  return folder;
+}
+
+/** 親フォルダ内で grammarquizzes を探す。無ければ旧名 materials を探して改名する */
+function findMaterialsFolderWithMigration_(parentFolder) {
+  let folder = findChildFolderByName_(parentFolder, MATERIALS_FOLDER_NAME);
+  if (folder) return folder;
+  folder = findChildFolderByName_(parentFolder, LEGACY_MATERIALS_FOLDER_NAME);
+  if (folder) return migrateMaterialsFolderName_(folder);
+  return null;
 }
 
 /** スクリプトファイルと同じ親フォルダを返す（無ければマイドライブ直下） */
@@ -672,15 +825,18 @@ function getOrCreateMaterialsFolder_(parentFolder, force, created, reused) {
     const existingId = props.getProperty(PROP.MATERIALS_FOLDER_ID);
     if (existingId) {
       try {
-        const folder = DriveApp.getFolderById(existingId);
+        const folder = migrateMaterialsFolderName_(DriveApp.getFolderById(existingId));
         reused.push(MATERIALS_FOLDER_NAME);
         return folder;
       } catch (e) {
         // ID が無効な場合は名前検索へ
       }
     }
+  }
 
-    const folder = findChildFolderByName_(parentFolder, MATERIALS_FOLDER_NAME);
+  {
+    // force 時も旧名からの改名・既存フォルダ再利用を優先（サンプル問題の重複生成を防ぐ）
+    const folder = findMaterialsFolderWithMigration_(parentFolder);
     if (folder) {
       props.setProperty(PROP.MATERIALS_FOLDER_ID, folder.getId());
       reused.push(MATERIALS_FOLDER_NAME);
@@ -765,7 +921,7 @@ function ensureManagementSheets_(ss) {
 }
 
 /**
- * app.js の unitData と揃えたサンプル問題ブックを materials 内に用意する。
+ * app.js の unitData と揃えたサンプル問題ブックを grammarquizzes 内に用意する。
  * @return {Object} 科目名 → スプレッドシートID
  */
 function ensureSampleQuestionBooks_(materialsFolder, force, created, reused) {
