@@ -682,6 +682,30 @@ async function gasFetch_(fnName, args) {
   if (fnName === 'apiGetResult') {
     return parseGasJson_(await fetch(url + '?action=getResult&token=' + encodeURIComponent(args[0]), { redirect: 'follow' }));
   }
+  if (fnName === 'apiSaveSrsLog') {
+    return parseGasJson_(await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'saveSrsLog',
+        authToken: authToken_(),
+        setId: args[0],
+        score: args[1],
+        timeTaken: args[2]
+      })
+    }));
+  }
+  if (fnName === 'apiQueueSrsBulk') {
+    return parseGasJson_(await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'queueSrsBulk',
+        authToken: authToken_(),
+        rows: args[0]
+      })
+    }));
+  }
   throw new Error('未対応のAPI: ' + fnName);
 }
 
@@ -845,6 +869,216 @@ const AlgorithmModule = (() => {
 })();
 
 window.AlgorithmModule = AlgorithmModule;
+
+// srsModule.js — 固定間隔 × SM-2 ハイブリッド SRS
+const SrsModule = (() => {
+  const STORAGE_KEY = 'brightstage_srs_state';
+  const INTERVALS = [0, 1, 7, 30, 90, 180, 365];
+  const EF_MIN = 1.3;
+  const EF_DEFAULT = 2.5;
+  const HISTORY_MASK = 0xFFFF;
+
+  let sessionStates = {};
+  let sessionDiffs = {};
+
+  function buildWordId(bookName, sheetName, serialNo) {
+    return String(bookName || '(未登録)') + '|' + String(sheetName || '(未登録)') + '|' + String(serialNo || '(未登録)');
+  }
+
+  function loadFromLocalStorage() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveToLocalStorage(states) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(states));
+    } catch (e) {}
+  }
+
+  function defaultState(wordId) {
+    return {
+      Word_ID: wordId,
+      Step_Index: 0,
+      EF: EF_DEFAULT,
+      Next_Review: 0,
+      History: 0,
+      Avg_Time: 0,
+      _answerCount: 0
+    };
+  }
+
+  function normalizeState(raw, wordId) {
+    const base = defaultState(wordId);
+    if (!raw) return base;
+    return {
+      Word_ID: wordId,
+      Step_Index: parseInt(raw.Step_Index, 10) || 0,
+      EF: parseFloat(raw.EF) || EF_DEFAULT,
+      Next_Review: parseInt(raw.Next_Review, 10) || 0,
+      History: parseInt(raw.History, 10) || 0,
+      Avg_Time: parseInt(raw.Avg_Time, 10) || 0,
+      _answerCount: parseInt(raw._answerCount, 10) || 0
+    };
+  }
+
+  function initSession(serverStates) {
+    const local = loadFromLocalStorage();
+    sessionStates = {};
+    sessionDiffs = {};
+    const merged = Object.assign({}, local, serverStates || {});
+    Object.keys(merged).forEach(function (wordId) {
+      sessionStates[wordId] = normalizeState(merged[wordId], wordId);
+    });
+  }
+
+  function getState(wordId) {
+    if (!sessionStates[wordId]) {
+      sessionStates[wordId] = normalizeState(loadFromLocalStorage()[wordId], wordId);
+    }
+    return sessionStates[wordId];
+  }
+
+  function calcQScore(isCorrect, answerMs, isUnknown) {
+    if (isUnknown) return 0;
+    if (!isCorrect) return 1;
+    const ms = answerMs || 0;
+    if (ms < 3000) return 5;
+    if (ms < 8000) return 4;
+    return 3;
+  }
+
+  function updateEf(ef, q) {
+    let next = ef + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
+    return Math.max(EF_MIN, Math.round(next * 100) / 100);
+  }
+
+  function updateHistory(history, isCorrect) {
+    const bit = isCorrect ? 1 : 0;
+    return ((history << 1) | bit) & HISTORY_MASK;
+  }
+
+  function updateAvgTime(prevAvg, prevCount, answerMs) {
+    const count = prevCount + 1;
+    const avg = prevCount > 0
+      ? Math.round((prevAvg * prevCount + answerMs) / count)
+      : answerMs;
+    return { avg: avg, count: count };
+  }
+
+  function applyReview(state, isCorrect, answerMs, isUnknown) {
+    const q = calcQScore(isCorrect, answerMs, isUnknown);
+    let step = state.Step_Index;
+    let ef = state.EF;
+
+    if (q >= 3) {
+      step = Math.min(step + 1, INTERVALS.length - 1);
+      if (ef >= 2.8 && q >= 4) {
+        step = Math.min(step + 1, INTERVALS.length - 1);
+      }
+      ef = updateEf(ef, q);
+    } else {
+      step = 0;
+      ef = Math.max(EF_MIN, ef - 0.2);
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const intervalDays = INTERVALS[step] || 0;
+    const nextReview = nowSec + intervalDays * 86400;
+
+    const timeStats = updateAvgTime(state.Avg_Time, state._answerCount || 0, answerMs || 0);
+
+    return {
+      Word_ID: state.Word_ID,
+      Step_Index: step,
+      EF: ef,
+      Next_Review: nextReview,
+      History: updateHistory(state.History, q >= 3),
+      Avg_Time: timeStats.avg,
+      _answerCount: timeStats.count
+    };
+  }
+
+  function update(wordId, isCorrect, answerMs, isUnknown) {
+    const state = getState(wordId);
+    const next = applyReview(state, isCorrect, answerMs, isUnknown);
+    sessionStates[wordId] = next;
+    sessionDiffs[wordId] = {
+      Word_ID: next.Word_ID,
+      Step_Index: next.Step_Index,
+      EF: next.EF,
+      Next_Review: next.Next_Review,
+      History: next.History,
+      Avg_Time: next.Avg_Time
+    };
+    const allLocal = loadFromLocalStorage();
+    allLocal[wordId] = next;
+    saveToLocalStorage(allLocal);
+    return next;
+  }
+
+  function selectDueWords(words, bookName, sheetName, limit) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const due = [];
+    const unseen = [];
+
+    words.forEach(function (wordObj) {
+      const wordId = buildWordId(bookName, sheetName, wordObj['通し番号']);
+      const state = getState(wordId);
+      const nextReview = parseInt(state.Next_Review, 10) || 0;
+      const answerCount = state._answerCount || 0;
+
+      if (answerCount === 0 && nextReview === 0 && state.Step_Index === 0 && state.History === 0) {
+        unseen.push(wordObj);
+      } else if (nextReview <= nowSec) {
+        due.push({ wordObj: wordObj, wordId: wordId, nextReview: nextReview });
+      }
+    });
+
+    due.sort(function (a, b) { return a.nextReview - b.nextReview; });
+
+    const maxCount = limit || words.length;
+    const selected = due.slice(0, maxCount).map(function (d) { return d.wordObj; });
+    if (selected.length < maxCount) {
+      const shuffledUnseen = unseen.slice().sort(function () { return Math.random() - 0.5; });
+      selected.push.apply(selected, shuffledUnseen.slice(0, maxCount - selected.length));
+    }
+    if (selected.length < maxCount) {
+      const rest = words.filter(function (w) {
+        return selected.indexOf(w) === -1;
+      }).sort(function () { return Math.random() - 0.5; });
+      selected.push.apply(selected, rest.slice(0, maxCount - selected.length));
+    }
+    return selected;
+  }
+
+  function getDiffRows() {
+    return Object.keys(sessionDiffs).map(function (k) { return sessionDiffs[k]; });
+  }
+
+  function hasDiffs() {
+    return Object.keys(sessionDiffs).length > 0;
+  }
+
+  return {
+    INTERVALS: INTERVALS,
+    buildWordId: buildWordId,
+    initSession: initSession,
+    getState: getState,
+    update: update,
+    calcQScore: calcQScore,
+    selectDueWords: selectDueWords,
+    getDiffRows: getDiffRows,
+    hasDiffs: hasDiffs,
+    loadFromLocalStorage: loadFromLocalStorage
+  };
+})();
+
+window.SrsModule = SrsModule;
 
 // keyboard.js
 // ソフトウェアキーボード汎用モジュール
@@ -1656,6 +1890,9 @@ const VocabQuizGenerator = (() => {
 
     return {
       id: wordObj['通し番号'] + '-' + targetMeaning.key + '-' + idx,
+      wordId: (window.SrsModule
+        ? window.SrsModule.buildWordId(options.bookName || '', options.sheetName || '', wordObj['通し番号'])
+        : String(options.bookName || '') + '|' + String(options.sheetName || '') + '|' + String(wordObj['通し番号'] || '')),
       format: 'vocab-enja',
       word: vocabNorm(wordObj['英単語・熟語の表現']),
       posLabel: targetMeaning.posLabel,
@@ -1739,9 +1976,11 @@ const VocabQuizModule = (() => {
   const buttonsEl = document.getElementById('vocab-choice-buttons');
   const resultMsg = document.getElementById('result-msg');
   let qData = null;
+  let questionStartTime = null;
 
   function initGame(questionData) {
     qData = questionData;
+    questionStartTime = Date.now();
     wordEl.textContent = qData.word;
     promptEl.textContent = '（' + qData.posLabel + '）の意味として正しいものを選んでください。';
     buttonsEl.innerHTML = '';
@@ -1762,18 +2001,21 @@ const VocabQuizModule = (() => {
     Array.from(buttonsEl.children).forEach(function (b) { b.classList.remove('selected'); });
     btn.classList.add('selected');
 
+    const answerMs = questionStartTime ? Date.now() - questionStartTime : 0;
+    const meta = { answerMs: answerMs, isUnknown: choice.text === VOCAB_OPTION_UNKNOWN };
+
     if (choice.isCorrect) {
       resultMsg.textContent = '⭕️ 正解！';
       resultMsg.style.color = '#4caf50';
-      if (window.onQuestionCompleted) window.onQuestionCompleted(true);
+      if (window.onQuestionCompleted) window.onQuestionCompleted(true, meta);
     } else if (choice.text === VOCAB_OPTION_UNKNOWN) {
       resultMsg.textContent = '復習しましょう。正答: ' + qData.correctAnswer;
       resultMsg.style.color = '#ff9800';
-      if (window.onQuestionCompleted) window.onQuestionCompleted(false);
+      if (window.onQuestionCompleted) window.onQuestionCompleted(false, meta);
     } else {
       resultMsg.textContent = '❌ 不正解... 正答: ' + qData.correctAnswer;
       resultMsg.style.color = '#f44336';
-      if (window.onQuestionCompleted) window.onQuestionCompleted(false);
+      if (window.onQuestionCompleted) window.onQuestionCompleted(false, meta);
     }
   }
 
@@ -2016,6 +2258,53 @@ const ReadingSessionModule = (() => {
 
 window.ReadingSessionModule = ReadingSessionModule;
 
+function prepareVocabQuestions(words, pool, bookPool, options, srsStates) {
+  if (window.SrsModule) {
+    window.SrsModule.initSession(srsStates || {});
+  }
+
+  let targetWords = words;
+  if (window.SrsModule && options.bookName && options.sheetName) {
+    let limit = words.length;
+    if (options.questionCount !== 'all') {
+      limit = Math.min(parseInt(options.questionCount, 10) || words.length, words.length);
+    }
+    targetWords = window.SrsModule.selectDueWords(words, options.bookName, options.sheetName, limit);
+  }
+
+  return window.VocabQuizGenerator.buildQuestions(targetWords, pool, bookPool, options);
+}
+
+function applySrsSyncViaIframe(syncToken) {
+  return new Promise(function (resolve) {
+    if (!syncToken || !window.DASHBOARD_URL) {
+      resolve({ success: false, message: 'syncToken または DASHBOARD_URL がありません' });
+      return;
+    }
+
+    var iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = window.DASHBOARD_URL + '?action=applySrsSync&token=' + encodeURIComponent(syncToken);
+
+    var timeout = setTimeout(function () {
+      window.removeEventListener('message', onMessage);
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      resolve({ success: false, message: 'SRS同期がタイムアウトしました' });
+    }, 30000);
+
+    function onMessage(event) {
+      if (!event.data || event.data.type !== 'srsSyncComplete') return;
+      clearTimeout(timeout);
+      window.removeEventListener('message', onMessage);
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      resolve(event.data);
+    }
+
+    window.addEventListener('message', onMessage);
+    document.body.appendChild(iframe);
+  });
+}
+
 // Token-based vocab session
 async function initVocabSessionFromUrl() {
   const params = new URLSearchParams(window.location.search);
@@ -2034,8 +2323,10 @@ async function initVocabSessionFromUrl() {
   options.bookName = session.bookName;
   currentAppMode = 'vocab';
   currentVocabSetName = session.setName || '';
-  const questions = window.VocabQuizGenerator.buildQuestions(
-    session.words, session.pool, session.bookPool, options
+  currentVocabBookName = session.bookName || '';
+  currentVocabSheetName = session.sheetName || '';
+  const questions = prepareVocabQuestions(
+    session.words, session.pool, session.bookPool, options, session.srsStates
   );
   if (questions.length === 0) {
     alert('出題できる問題がありません');
@@ -2194,6 +2485,8 @@ let currentUserId = "Guest";
 let sessionStartTime = null;
 let currentAppMode = 'grammar';
 let currentVocabSetName = '';
+let currentVocabBookName = '';
+let currentVocabSheetName = '';
 
 // GASへ送信するテキスト値
 const unitData = { 
@@ -2327,13 +2620,16 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
       return;
     }
 
-    const questions = window.VocabQuizGenerator.buildQuestions(words, pool, bookPool, options);
+    currentVocabSetName = options.bookName + ' / ' + options.sheetName;
+    currentVocabBookName = options.bookName;
+    currentVocabSheetName = options.sheetName;
+
+    const questions = prepareVocabQuestions(words, pool, bookPool, options, null);
     if (questions.length === 0) {
       alert('出題できる問題がありません。');
       return;
     }
 
-    currentVocabSetName = options.bookName + ' / ' + options.sheetName;
     currentQuestionDataList = questions;
     totalQuestionsCount = questions.length;
     currentQuestionIndex = 0;
@@ -2429,8 +2725,19 @@ function loadQuestionToGame(qData) {
 }
 
 // モジュールからのコールバック
-window.onQuestionCompleted = (isCorrect) => {
+window.onQuestionCompleted = (isCorrect, meta) => {
+  meta = meta || {};
   const currentQ = currentQuestionDataList[currentQuestionIndex];
+
+  if (currentAppMode === 'vocab' && window.SrsModule && currentQ.wordId) {
+    window.SrsModule.update(
+      currentQ.wordId,
+      isCorrect,
+      meta.answerMs || 0,
+      !!meta.isUnknown
+    );
+  }
+
   if (window.AlgorithmModule) {
     window.AlgorithmModule.recordResult(currentQ.id, isCorrect);
   }
@@ -2487,6 +2794,54 @@ async function sendSessionLogToGAS() {
   }
 }
 
+async function sendSrsLogToGAS() {
+  if (!AuthGateService.isValid()) return { skipped: true };
+  const timeTaken = sessionStartTime ? Math.round((Date.now() - sessionStartTime) / 1000) : 0;
+  const correctRate = totalQuestionsCount > 0 ? Math.round((currentScore / totalQuestionsCount) * 100) : 0;
+  const setId = '単語学習: ' + (currentVocabSetName || 'セット');
+  try {
+    return await gasRun('apiSaveSrsLog', setId, correctRate, timeTaken);
+  } catch (e) {
+    console.error('SRS Log Error:', e);
+    throw e;
+  }
+}
+
+async function sendSrsBulkToGAS() {
+  if (!AuthGateService.isValid() || !window.SrsModule || !window.SrsModule.hasDiffs()) {
+    return { skipped: true };
+  }
+  const rows = window.SrsModule.getDiffRows();
+  if (rows.length === 0) return { skipped: true };
+
+  try {
+    const queueResult = await gasRun('apiQueueSrsBulk', rows);
+    if (queueResult.status !== 'success' || !queueResult.syncToken) {
+      throw new Error(queueResult.message || 'SRS差分キューに失敗しました');
+    }
+    return await applySrsSyncViaIframe(queueResult.syncToken);
+  } catch (e) {
+    console.error('SRS Bulk Error:', e);
+    throw e;
+  }
+}
+
+async function saveVocabSessionResults() {
+  const results = await Promise.allSettled([sendSrsLogToGAS(), sendSrsBulkToGAS()]);
+  const errors = results.filter(function (r) { return r.status === 'rejected'; });
+  if (errors.length > 0) {
+    throw new Error('一部の保存に失敗しました');
+  }
+  const bulkResult = results[1].value;
+  if (bulkResult && bulkResult.success === false) {
+    throw new Error(bulkResult.message || 'SRS同期に失敗しました');
+  }
+}
+
+async function saveGrammarSessionResults() {
+  await Promise.all([sendResultsToGAS(), sendSessionLogToGAS()]);
+}
+
 document.getElementById('next-btn').addEventListener('click', () => {
   document.getElementById('next-btn').style.display = 'none';
   currentQuestionIndex++;
@@ -2505,9 +2860,19 @@ function showResultScreen() {
   document.getElementById('result-score').textContent = `スコア: ${currentScore} / ${totalQuestionsCount}`;
   document.getElementById('result-details').textContent = "成績データを保存しています...";
   
-  Promise.all([sendResultsToGAS(), sendSessionLogToGAS()]).then(() => {
-    document.getElementById('result-details').textContent = "演習が終了し、成績が保存されました。";
-  }).catch(() => {
+  const savePromise = currentAppMode === 'vocab'
+    ? saveVocabSessionResults()
+    : saveGrammarSessionResults();
+
+  savePromise.then(function () {
+    if (currentAppMode === 'vocab') {
+      document.getElementById('result-details').textContent = AuthGateService.isValid()
+        ? "演習が終了し、SRSデータが保存されました。"
+        : "演習が終了しました。（ローカルSRSのみ更新・ログインすると同期されます）";
+    } else {
+      document.getElementById('result-details').textContent = "演習が終了し、成績が保存されました。";
+    }
+  }).catch(function () {
     document.getElementById('result-details').textContent = "演習が終了しました。(一部通信エラーあり)";
   });
 }
