@@ -1934,10 +1934,35 @@ function handleScoreReading(requestData) {
   }
 }
 
-function ensureUserEnvironment_() {
+/**
+ * アプリ本体（grammarquizzes / vocabulary / 管理ブック）と同じ親フォルダを返す。
+ * ScriptProperties → スクリプト親 → マイドライブ直下の順。
+ */
+function resolveAppParentFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const parentId = props.getProperty(PROP.PARENT_FOLDER_ID);
+  if (parentId) {
+    try {
+      return DriveApp.getFolderById(parentId);
+    } catch (e) {
+      // fall through
+    }
+  }
+  try {
+    return getScriptParentFolder_();
+  } catch (e) {
+    return DriveApp.getRootFolder();
+  }
+}
+
+/**
+ * BrightStage_MyData をアプリ親フォルダ内に1つだけ確保する。
+ * 既存フォルダ（名前一致）があれば再利用し、重複生成しない。
+ */
+function ensureUserDataFolder_() {
   const props = PropertiesService.getUserProperties();
-  let folderId = props.getProperty(USER_PROP.MY_DATA_FOLDER_ID);
   let folder = null;
+  const folderId = props.getProperty(USER_PROP.MY_DATA_FOLDER_ID);
 
   if (folderId) {
     try {
@@ -1947,26 +1972,80 @@ function ensureUserEnvironment_() {
     }
   }
 
+  const parent = resolveAppParentFolder_();
+  const parentId = parent.getId();
+
   if (!folder) {
-    const root = DriveApp.getRootFolder();
-    folder = findChildFolderByName_(root, USER_DATA_FOLDER_NAME);
-    if (!folder) folder = root.createFolder(USER_DATA_FOLDER_NAME);
-    props.setProperty(USER_PROP.MY_DATA_FOLDER_ID, folder.getId());
+    folder = findChildFolderByName_(parent, USER_DATA_FOLDER_NAME);
   }
 
-  const created = [];
-  const reused = [];
-  const vocabBook = getOrCreateMyVocabBook_(folder, false, created, reused);
-  props.setProperty(USER_PROP.MY_VOCAB_BOOK_ID, vocabBook.getId());
+  if (!folder) {
+    // Drive 内の同名フォルダを再利用（マイドライブ直下の重複など）
+    const it = DriveApp.getFoldersByName(USER_DATA_FOLDER_NAME);
+    let fallback = null;
+    while (it.hasNext()) {
+      const candidate = it.next();
+      if (!fallback) fallback = candidate;
+      const parents = candidate.getParents();
+      while (parents.hasNext()) {
+        if (parents.next().getId() === parentId) {
+          folder = candidate;
+          break;
+        }
+      }
+      if (folder) break;
+    }
+    if (!folder) folder = fallback;
+  }
 
-  const logBook = getOrCreateUserLogBook_(folder, props);
-  props.setProperty(USER_PROP.MY_LOG_BOOK_ID, logBook.getId());
+  if (!folder) {
+    folder = parent.createFolder(USER_DATA_FOLDER_NAME);
+  } else {
+    // 可能ならアプリ親フォルダ配下へ移動（既にそこなら何もしない）
+    try {
+      let underParent = false;
+      const parents = folder.getParents();
+      while (parents.hasNext()) {
+        if (parents.next().getId() === parentId) {
+          underParent = true;
+          break;
+        }
+      }
+      if (!underParent) {
+        folder.moveTo(parent);
+      }
+    } catch (e) {
+      // 移動権限が無い場合は現状の場所を維持
+    }
+  }
 
-  return {
-    folderId: folder.getId(),
-    vocabBookId: vocabBook.getId(),
-    logBookId: logBook.getId()
-  };
+  props.setProperty(USER_PROP.MY_DATA_FOLDER_ID, folder.getId());
+  return folder;
+}
+
+function ensureUserEnvironment_() {
+  const lock = LockService.getUserLock();
+  lock.waitLock(30000);
+  try {
+    const props = PropertiesService.getUserProperties();
+    const folder = ensureUserDataFolder_();
+
+    const created = [];
+    const reused = [];
+    const vocabBook = getOrCreateMyVocabBook_(folder, false, created, reused);
+    props.setProperty(USER_PROP.MY_VOCAB_BOOK_ID, vocabBook.getId());
+
+    const logBook = getOrCreateUserLogBook_(folder, props);
+    props.setProperty(USER_PROP.MY_LOG_BOOK_ID, logBook.getId());
+
+    return {
+      folderId: folder.getId(),
+      vocabBookId: vocabBook.getId(),
+      logBookId: logBook.getId()
+    };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function getOrCreateUserLogBook_(folder, userProps) {
