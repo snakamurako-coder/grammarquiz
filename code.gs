@@ -746,8 +746,58 @@ function handleSaveSessionLog(requestData) {
 }
 
 // =========================================================
-// ⑤ マイページ用ログ取得処理
+// ⑤ マイページ用ログ取得処理（文法: ログ + 単語SRS: SRSログ を統合）
 // =========================================================
+function normalizeLegacyLogRow_(rowObj) {
+  return {
+    タイムスタンプ: rowObj['タイムスタンプ'] != null ? rowObj['タイムスタンプ'] : '',
+    学習セット名: rowObj['学習セット名'] != null ? rowObj['学習セット名'] : '',
+    正答率: rowObj['正答率'] != null ? rowObj['正答率'] : '',
+    解答時間: rowObj['解答時間'] != null ? rowObj['解答時間'] : '',
+    実施回数: rowObj['実施回数'] != null ? rowObj['実施回数'] : '',
+    source: 'grammar'
+  };
+}
+
+function normalizeSrsLogRow_(rowObj) {
+  return {
+    タイムスタンプ: rowObj['Timestamp'] != null ? rowObj['Timestamp'] : '',
+    学習セット名: rowObj['Set_ID'] != null ? rowObj['Set_ID'] : '',
+    正答率: rowObj['Score'] != null ? rowObj['Score'] : '',
+    解答時間: '',
+    実施回数: rowObj['Attempts'] != null ? rowObj['Attempts'] : '',
+    Log_ID: rowObj['Log_ID'] != null ? rowObj['Log_ID'] : '',
+    source: 'vocab'
+  };
+}
+
+function collectSheetLogsForEmail_(sheet, emailColName, email, normalizer) {
+  if (!sheet || sheet.getLastRow() <= 1) return [];
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const emailIdx = headers.indexOf(emailColName);
+  if (emailIdx === -1) return [];
+
+  const logs = [];
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][emailIdx] !== email) continue;
+    const rowObj = {};
+    for (let j = 0; j < headers.length; j++) {
+      if (headers[j]) rowObj[headers[j]] = data[i][j];
+    }
+    logs.push(normalizer(rowObj));
+  }
+  return logs;
+}
+
+function compareLogTimestamp_(a, b) {
+  const ta = a['タイムスタンプ'] ? new Date(a['タイムスタンプ']).getTime() : 0;
+  const tb = b['タイムスタンプ'] ? new Date(b['タイムスタンプ']).getTime() : 0;
+  const na = isNaN(ta) ? 0 : ta;
+  const nb = isNaN(tb) ? 0 : tb;
+  return na - nb;
+}
+
 function handleGetUserLogs(requestData) {
   const authCheck = requireAuthToken_(requestData);
   if (!authCheck.ok) return sendResponse({ status: "error", message: authCheck.error });
@@ -757,26 +807,14 @@ function handleGetUserLogs(requestData) {
   if (!spreadId) return sendResponse({ status: "error", message: "SPREADSHEET_IDが設定されていません。" });
 
   const ss = SpreadsheetApp.openById(spreadId);
-  const sheet = ss.getSheetByName("ログ");
-  
-  if (!sheet) return sendResponse({ status: "success", data: [], message: "ログがありません" });
+  const legacySheet = ss.getSheetByName("ログ");
+  const srsSheet = ss.getSheetByName(ADMIN_SRS_LOG_SHEET);
 
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const emailIdx = headers.indexOf('メールアドレス');
+  const legacyLogs = collectSheetLogsForEmail_(legacySheet, 'メールアドレス', email, normalizeLegacyLogRow_);
+  const srsLogs = collectSheetLogsForEmail_(srsSheet, 'User_ID', email, normalizeSrsLogRow_);
 
-  if (emailIdx === -1) return sendResponse({ status: "error", message: "ログ内にメールアドレス列がありません" });
-
-  const userLogs = [];
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][emailIdx] === email) {
-      let obj = {};
-      for (let j = 0; j < headers.length; j++) {
-        if (headers[j]) obj[headers[j]] = data[i][j];
-      }
-      userLogs.push(obj);
-    }
-  }
+  const userLogs = legacyLogs.concat(srsLogs);
+  userLogs.sort(compareLogTimestamp_);
 
   return sendResponse({ status: "success", data: userLogs });
 }
