@@ -35,7 +35,7 @@ textarea{min-height:60px;resize:vertical}
 <body>
   <div class="header-title">英語学習総合ツール 管理ダッシュボード</div>
   <p style="text-align:center;font-size:.9em;margin:-8px 0 12px;">
-    <a id="pages-link" href="<?= PAGES_URL ?>" target="_blank" rel="noopener">GitHub Pages 学習画面を開く</a>
+    <a id="pages-link" href="#">GitHub Pages 学習画面を開く（要認証）</a>
   </p>
   <div id="status-banner" style="display:none;" class="alert-box"></div>
 
@@ -259,7 +259,12 @@ async function startLearning() {
     if (result.status !== 'success') throw new Error(result.message);
     var pagesUrl = result.pagesUrl || PAGES_URL;
     var sep = pagesUrl.indexOf('?') >= 0 ? '&' : '?';
-    window.top.location.href = pagesUrl + sep + 'token=' + encodeURIComponent(result.token) + '&mode=' + encodeURIComponent(mode);
+    var dest = pagesUrl + sep;
+    if (result.authToken) {
+      dest += 'auth=' + encodeURIComponent(result.authToken) + '&';
+    }
+    dest += 'token=' + encodeURIComponent(result.token) + '&mode=' + encodeURIComponent(mode);
+    window.top.location.href = dest;
   } catch (e) {
     alert('エラー: ' + e.message);
     btn.disabled = false;
@@ -287,6 +292,12 @@ document.addEventListener('DOMContentLoaded', function() {
   buildRegisterForm();
   loadSets();
   loadLogs();
+
+  var pagesLink = document.getElementById('pages-link');
+  if (pagesLink) {
+    var authUrl = window.location.href.split('?')[0] + '?action=auth';
+    pagesLink.href = authUrl;
+  }
 
   document.getElementById('start-learning-btn').addEventListener('click', startLearning);
 

@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>英語学習総合ツール</title>
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>/* =========================================
    基本設計（モバイルファースト）
    ========================================= */
@@ -185,25 +184,9 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
   <div id="login-screen">
     <div class="header-title">英語学習総合ツール ログイン</div>
     <div class="setting-section" style="text-align: center; padding: 40px 10px;">
-      <p style="margin-bottom: 20px; font-size: 1.1em; color: #555;">システムを利用するにはGoogleアカウント認証が必要です。</p>
-      
-      <!-- Googleログインボタン -->
-      <div id="g_id_onload"
-         data-client_id="505252303455-84r495bnnsgiefcrv24ro2qtohlgbk2h.apps.googleusercontent.com"
-         data-context="signin"
-         data-ux_mode="popup"
-         data-callback="handleCredentialResponse"
-         data-auto_prompt="false">
-      </div>
-      <div class="g_id_signin"
-         data-type="standard"
-         data-shape="rectangular"
-         data-theme="outline"
-         data-text="signin_with"
-         data-size="large"
-         data-logo_alignment="left"
-         style="display: flex; justify-content: center;">
-      </div>
+      <p style="margin-bottom: 20px; font-size: 1.1em; color: #555;">システムを利用するには Google アカウントで認証が必要です。</p>
+      <p style="margin-bottom: 24px; font-size: 0.9em; color: #777;">管理ダッシュボード（GAS）で本人確認とホワイトリスト照合を行い、学習画面へ戻ります。</p>
+      <button type="button" id="login-via-gas-btn" class="btn-primary" style="max-width:320px;margin:0 auto;">Googleアカウントでログイン</button>
       <div id="login-msg" style="margin-top: 15px; color: #f44336; font-weight: bold;"></div>
     </div>
   </div>
@@ -518,12 +501,99 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script>
-/** false: 認証なしでゲスト利用 / true: Google ログイン必須（whitelist は GAS② 側で照合） */
+/** true: GAS① 認証ゲート必須（短命 auth トークン） */
 const AUTH_ENABLED = true;
+/** 認証トークン有効期間（1時間半） */
+const AUTH_TTL_MS = 90 * 60 * 1000;
 
 /** Webアプリ URL（GAS② JSON API） */
 window.API_URL = (window.BRIGHTSTAGE_CONFIG && window.BRIGHTSTAGE_CONFIG.API_URL) || window.API_URL || '';
 window.DASHBOARD_URL = (window.BRIGHTSTAGE_CONFIG && window.BRIGHTSTAGE_CONFIG.DASHBOARD_URL) || window.DASHBOARD_URL || '';
+
+/** GAS① 認証入口 URL */
+function getAuthLoginUrl_() {
+  var base = window.DASHBOARD_URL;
+  if (!base) return '';
+  var sep = base.indexOf('?') >= 0 ? '&' : '?';
+  return base + sep + 'action=auth';
+}
+
+/** 認証トークン管理（GAS① で発行 → Pages で保持） */
+const AuthGateService = {
+  TOKEN_KEY: 'brightstage_auth_token',
+  USER_KEY: 'brightstage_auth_user',
+  ISSUED_KEY: 'brightstage_auth_issued',
+
+  getToken() {
+    return localStorage.getItem(this.TOKEN_KEY) || '';
+  },
+
+  getUser() {
+    try {
+      var raw = localStorage.getItem(this.USER_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  },
+
+  isValid() {
+    var token = this.getToken();
+    var issued = parseInt(localStorage.getItem(this.ISSUED_KEY) || '0', 10);
+    if (!token || !issued) return false;
+    return Date.now() - issued < AUTH_TTL_MS;
+  },
+
+  save(token, user) {
+    localStorage.setItem(this.TOKEN_KEY, token);
+    localStorage.setItem(this.ISSUED_KEY, String(Date.now()));
+    if (user) localStorage.setItem(this.USER_KEY, JSON.stringify(user));
+  },
+
+  clear() {
+    localStorage.removeItem(this.TOKEN_KEY);
+    localStorage.removeItem(this.USER_KEY);
+    localStorage.removeItem(this.ISSUED_KEY);
+    localStorage.removeItem('brightstage_user_data');
+    localStorage.removeItem('brightstage_login_time');
+  },
+
+  async fetchUserIfNeeded() {
+    if (!this.isValid()) return null;
+    if (this.getUser()) return this.getUser();
+    try {
+      var url = window.API_URL + '?action=getAuthUser&token=' + encodeURIComponent(this.getToken());
+      var res = await fetch(url, { redirect: 'follow' });
+      var data = await parseGasJson_(res);
+      if (data.status === 'success' && data.user) {
+        localStorage.setItem(this.USER_KEY, JSON.stringify(data.user));
+        return data.user;
+      }
+    } catch (e) {
+      console.warn('getAuthUser failed', e);
+    }
+    return null;
+  },
+
+  async logout() {
+    var token = this.getToken();
+    this.clear();
+    if (token && window.API_URL) {
+      try {
+        await fetch(window.API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'logout', authToken: token })
+        });
+      } catch (e) {}
+    }
+  }
+};
+
+window.AuthGateService = AuthGateService;
+/** 後方互換: 成績記録等が参照 */
+window.AuthService = {
+  get currentUser() { return AuthGateService.getUser(); },
+  clearSession() { AuthGateService.clear(); }
+};
 
 /** GAS サーバー呼び出し（GitHub Pages は fetch のみ） */
 function gasRun(fnName) {
@@ -547,22 +617,19 @@ async function gasFetch_(fnName, args) {
     throw new Error('API URL が取得できません。GAS の Webアプリ URL（/exec）から開いてください。');
   }
 
+  function authToken_() {
+    return AuthGateService.isValid() ? AuthGateService.getToken() : '';
+  }
+
   if (fnName === 'apiGetQuestions') {
     var qUrl = url + '?action=getQuestions&subject=' + encodeURIComponent(args[0]) + '&unit=' + encodeURIComponent(args[1]);
     return parseGasJson_(await fetch(qUrl, { redirect: 'follow' }));
-  }
-  if (fnName === 'apiLogin') {
-    return parseGasJson_(await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'login', idToken: args[0] })
-    }));
   }
   if (fnName === 'apiSaveResult') {
     return parseGasJson_(await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'saveResult', results: args[0] })
+      body: JSON.stringify({ action: 'saveResult', authToken: authToken_(), results: args[0] })
     }));
   }
   if (fnName === 'apiSaveSessionLog') {
@@ -571,10 +638,10 @@ async function gasFetch_(fnName, args) {
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         action: 'saveSessionLog',
-        email: args[0],
-        setName: args[1],
-        correctRate: args[2],
-        timeTaken: args[3]
+        authToken: authToken_(),
+        setName: args[0],
+        correctRate: args[1],
+        timeTaken: args[2]
       })
     }));
   }
@@ -582,7 +649,7 @@ async function gasFetch_(fnName, args) {
     return parseGasJson_(await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'getUserLogs', email: args[0] })
+      body: JSON.stringify({ action: 'getUserLogs', authToken: authToken_() })
     }));
   }
   if (fnName === 'apiGetVocabCatalog') {
@@ -599,7 +666,7 @@ async function gasFetch_(fnName, args) {
     return parseGasJson_(await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'registerVocabWords', sheetName: args[0], rows: args[1] })
+      body: JSON.stringify({ action: 'registerVocabWords', authToken: authToken_(), sheetName: args[0], rows: args[1] })
     }));
   }
   if (fnName === 'apiGetSession') {
@@ -609,7 +676,7 @@ async function gasFetch_(fnName, args) {
     return parseGasJson_(await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'scoreReading', token: args[0], transcript: args[1] })
+      body: JSON.stringify({ action: 'scoreReading', authToken: authToken_(), token: args[0], transcript: args[1] })
     }));
   }
   if (fnName === 'apiGetResult') {
@@ -938,96 +1005,7 @@ const KeyboardModule = (() => {
 // エクスポート
 window.KeyboardModule = KeyboardModule;
 
-// authService.js
-// Google認証機能の分離モジュール
-
-const AuthService = {
-    currentUser: null,
-
-    async loginWithToken(idToken) {
-        try {
-            const data = await gasRun('apiLogin', idToken);
-            
-            if (data.status === "success") {
-                this.currentUser = data.user;
-                this.saveSession(); // セッションをローカルストレージに保存
-                return { success: true, user: this.currentUser };
-            } else {
-                return { success: false, message: data.message || "認証に失敗しました。" };
-            }
-        } catch (error) {
-            console.error("AuthService Login Error:", error);
-            return { success: false, message: "通信エラーが発生しました。" };
-        }
-    },
-
-    saveSession() {
-        if (this.currentUser) {
-            localStorage.setItem('brightstage_user_data', JSON.stringify(this.currentUser));
-            localStorage.setItem('brightstage_login_time', Date.now().toString());
-        }
-    },
-
-    loadSession() {
-        try {
-            const dataStr = localStorage.getItem('brightstage_user_data');
-            const timeStr = localStorage.getItem('brightstage_login_time');
-            if (dataStr && timeStr) {
-                const loginTime = parseInt(timeStr, 10);
-                const thirtyDays = 30 * 24 * 60 * 60 * 1000; // 30日間の有効期限（任意に調整可能）
-                if (Date.now() - loginTime < thirtyDays) {
-                    this.currentUser = JSON.parse(dataStr);
-                    return true;
-                } else {
-                    this.clearSession();
-                }
-            }
-        } catch (e) {
-            console.error("Session load error", e);
-            this.clearSession();
-        }
-        return false;
-    },
-
-    clearSession() {
-        this.currentUser = null;
-        localStorage.removeItem('brightstage_user_data');
-        localStorage.removeItem('brightstage_login_time');
-    },
-
-    isLoggedIn() {
-        return this.currentUser !== null;
-    }
-};
-
-window.AuthService = AuthService;
-
-// Google Identity Servicesが期待するグローバルコールバック
-window.handleCredentialResponse = async function(response) {
-    if (!AUTH_ENABLED) return;
-
-    const msgEl = document.getElementById('login-msg');
-    if (msgEl) {
-        msgEl.textContent = "認証中...";
-        msgEl.style.color = "#555";
-    }
-
-    const result = await AuthService.loginWithToken(response.credential);
-
-    if (result.success) {
-        if (msgEl) msgEl.textContent = "";
-        
-        // メイン側（app.jsなど）に定義された処理を呼び出す
-        if (typeof window.onLoginSuccess === 'function') {
-            window.onLoginSuccess(result.user);
-        }
-    } else {
-        if (msgEl) {
-            msgEl.textContent = "エラー: " + result.message;
-            msgEl.style.color = "#f44336";
-        }
-    }
-};
+// authService.js — GAS① 認証ゲート方式（AuthGateService を使用）
 
 // choice.js
 // 4択問題制御モジュール
@@ -2502,7 +2480,7 @@ async function sendSessionLogToGAS() {
   }
 
   try {
-    const data = await gasRun('apiSaveSessionLog', currentUserId, setName, correctRate, timeTaken);
+    const data = await gasRun('apiSaveSessionLog', setName, correctRate, timeTaken);
     console.log("Session Log Response:", data);
   } catch(e) {
     console.error("Session Log Error:", e);
@@ -2648,13 +2626,57 @@ window.onLoginSuccess = function(user) {
   renderUnits(getSelectedSubjectName());
   initModeTabs();
   initVocabModules();
-  fetchUserLogs(currentUserId);
+  fetchUserLogs();
 };
 
+/** URL の ?auth= を取り込み、クエリから除去 */
+function captureAuthFromUrl_(params) {
+  var auth = params.get('auth');
+  if (!auth) return false;
+  AuthGateService.save(auth, null);
+  params.delete('auth');
+  var qs = params.toString();
+  var newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+  window.history.replaceState({}, '', newUrl);
+  return true;
+}
+
+async function tryRestoreAuthSession_() {
+  if (!AUTH_ENABLED) {
+    enterAppAsGuest();
+    return true;
+  }
+  if (!AuthGateService.isValid()) {
+    AuthGateService.clear();
+    return false;
+  }
+  var user = await AuthGateService.fetchUserIfNeeded();
+  if (!user) {
+    AuthGateService.clear();
+    return false;
+  }
+  window.onLoginSuccess(user);
+  return true;
+}
+
+function bindLoginScreen_() {
+  var btn = document.getElementById('login-via-gas-btn');
+  if (!btn) return;
+  btn.addEventListener('click', function () {
+    var url = getAuthLoginUrl_();
+    if (!url) {
+      var msgEl = document.getElementById('login-msg');
+      if (msgEl) msgEl.textContent = 'DASHBOARD_URL が設定されていません（config.js）';
+      return;
+    }
+    window.location.href = url;
+  });
+}
+
 // ログ取得とマイページ描画
-async function fetchUserLogs(email) {
+async function fetchUserLogs() {
   try {
-    const data = await gasRun('apiGetUserLogs', email);
+    const data = await gasRun('apiGetUserLogs');
     if (data.status === "success") {
       renderMyPage(data.data);
     }
@@ -2752,13 +2774,12 @@ function renderMyPage(logs) {
 
 // ログアウト機能
 document.addEventListener('DOMContentLoaded', () => {
+  bindLoginScreen_();
   const logoutBtn = document.getElementById('logout-btn');
   if (logoutBtn) {
-    logoutBtn.addEventListener('click', () => {
+    logoutBtn.addEventListener('click', async () => {
       if (!AUTH_ENABLED) return;
-      if (window.AuthService) {
-        window.AuthService.clearSession();
-      }
+      await AuthGateService.logout();
       location.reload();
     });
   }
@@ -2769,26 +2790,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (window.ReadingSessionModule) ReadingSessionModule.bindEvents();
 
   const params = new URLSearchParams(window.location.search);
+  captureAuthFromUrl_(params);
+
   if (params.get('token') && params.get('mode') === 'reading') {
+    if (AUTH_ENABLED && !AuthGateService.isValid()) {
+      alert('ログインが必要です。認証後、ダッシュボードから再度学習スタートしてください。');
+      screens.login.style.display = 'block';
+      return;
+    }
     await ReadingSessionModule.initFromUrl();
     return;
   }
   if (params.get('token') && params.get('mode') === 'vocab') {
+    if (AUTH_ENABLED && !AuthGateService.isValid()) {
+      alert('ログインが必要です。認証後、ダッシュボードから再度学習スタートしてください。');
+      screens.login.style.display = 'block';
+      return;
+    }
     await initVocabSessionFromUrl();
     return;
   }
 
-  if (!AUTH_ENABLED) {
-    enterAppAsGuest();
-    return;
-  }
-  // 自動ログイン（セッション復元）の試行
-  if (window.AuthService && window.AuthService.loadSession()) {
-    console.log("前回ログインしたユーザー情報からセッションを復元中...", window.AuthService.currentUser);
-    window.onLoginSuccess(window.AuthService.currentUser);
-  } else {
-    // セッションがない場合はLogin画面を表示したまま待機。
-    // GSIライブラリが自動でボタンを描画します。
+  const restored = await tryRestoreAuthSession_();
+  if (!restored) {
+    screens.login.style.display = 'block';
+    screens.settings.style.display = 'none';
   }
 });
 </script>

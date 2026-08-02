@@ -148,19 +148,43 @@ clasp deploy -i <GAS1_DEPLOYMENT_ID> --description "Dashboard update"
 
 ---
 
-## 10. ホワイトリスト（利用者制限）
+## 10. 認証フロー（GAS① 認証ゲート + 短命トークン）
+
+GitHub Pages 上では Google Session を直接取得できないため、**GAS① で本人確認 → 短命トークン → Pages** の流れです。
+
+```text
+1. 利用者が Pages を開く（未ログインならログイン画面）
+2. 「Googleアカウントでログイン」→ GAS① ?action=auth
+3. GAS①: Session.getActiveUser + whitelist 照合
+4. 成功: auth トークン（TTL 90分）を CacheService に保存 → Pages?auth=TOKEN へリダイレクト
+5. Pages: トークンを localStorage に保存し学習画面へ
+6. 成績・記録の保存時のみ GAS② に authToken を付与（identity はサーバー側でトークンから解決）
+```
+
+| 項目 | 値 |
+|---|---|
+| 認証入口 | `DASHBOARD_URL?action=auth` |
+| トークン TTL | **90分（5400秒）** |
+| 読み取り API | 匿名のまま（問題取得・カタログ等） |
+| 保護 API | `saveResult`, `saveSessionLog`, `getUserLogs`, `scoreReading`, `save`, `registerVocabWords` 等 |
+
+ダッシュボードから「学習スタート」した場合も `authToken` が URL に付与されます。
+
+---
+
+## 11. ホワイトリスト（利用者制限）
 
 ホワイトリストに登録されたユーザーと管理者のみがアプリを利用できます。
 
 - **登録方法**: 管理ブック（作成者Drive の `BrightStage管理`）の `whitelist` シートに、`account` 列へ利用者の Google メールアドレスを追記
-- **GitHub Pages 学習画面**: Google ログイン必須。ログイン時に GAS② が whitelist と照合し、未登録ユーザーは拒否
-- **GAS① ダッシュボード**: アクセス時に whitelist（Script Properties キャッシュ）と照合し、未登録ユーザーにはアクセス拒否画面を表示
+- **GitHub Pages 学習画面**: GAS① 認証ゲート経由。未登録ユーザーは `?action=auth` で拒否
+- **GAS① ダッシュボード**: アクセス時に whitelist（Script Properties キャッシュ）と照合
 - **管理者**: セットアップ実行者（`ADMIN_EMAIL`）は whitelist 登録不要で常に利用可
-- **キャッシュ**: whitelist は GAS② のリクエスト時に約10分間隔で Script Properties へ同期されます。シート編集直後に反映したい場合は GAS② の任意の API（例: `?action=getCatalog`）へ1回アクセスするか、エディタで `syncWhitelistCache_()` を実行してください
+- **キャッシュ**: whitelist は GAS② のリクエスト時に約10分間隔で Script Properties へ同期されます
 
 ---
 
-## 11. Script Properties（任意）
+## 12. Script Properties（任意）
 
 Apps Script → プロジェクトの設定 → スクリプト プロパティ:
 
@@ -174,7 +198,9 @@ Apps Script → プロジェクトの設定 → スクリプト プロパティ:
 
 ## トラブルシューティング
 
-- **「利用が許可されていないアカウントです」**: 管理ブックの `whitelist` シートにそのメールアドレスがあるか確認。追加直後は GAS② に1回アクセスしてキャッシュを更新
+- **「利用が許可されていないアカウントです」**: 管理ブックの `whitelist` シートを確認
+- **「認証トークンが無効」**: 90分経過後は再ログイン（GAS① `?action=auth`）
+- **成績が保存されない**: Pages でログイン済みか確認（authToken 必須）
 - **dashboard が真っ白**: GAS① のデプロイが「ユーザーとして実行」になっているか確認
 - **API が 403**: GAS② が「全員（匿名）」アクセスになっているか確認
 - **セッションが見つからない**: CacheService TTL は6時間。再スタートしてください
