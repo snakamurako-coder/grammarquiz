@@ -159,6 +159,8 @@ function doGet(e) {
   const template = HtmlService.createTemplateFromFile('dashboard');
   template.PAGES_URL = getPagesUrl_();
   template.RESULT_TOKEN = (e && e.parameter && e.parameter.result_token) ? e.parameter.result_token : '';
+  // googleusercontent の echo URL ではなく /exec の正規 URL を使う（クエリ破壊・白紙防止）
+  template.AUTH_URL = ScriptApp.getService().getUrl() + '?action=auth';
   return template.evaluate()
     .setTitle(APP_NAME + ' 管理')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -554,19 +556,21 @@ function handleAuthRedirect_() {
   }
 }
 
-/** Pages への即時リダイレクト HTML */
+/** Pages への即時リダイレクト HTML（GAS iframe 外の top へ遷移） */
 function renderAuthRedirectPage_(targetUrl) {
-  const safeUrl = String(targetUrl)
+  const hrefAttr = String(targetUrl)
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;');
+  // JS 文字列用（JSON.stringify で安全にエスケープ）
+  const jsUrl = JSON.stringify(String(targetUrl));
   const html =
     '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">' +
-    '<meta http-equiv="refresh" content="0;url=' + safeUrl + '">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1.0"></head>' +
     '<body style="font-family:sans-serif;text-align:center;padding:40px;">' +
     '<p>認証成功。学習画面へ移動しています...</p>' +
-    '<p><a href="' + safeUrl + '">移動しない場合はこちら</a></p>' +
+    '<p><a id="auth-go" target="_top" rel="noopener" href="' + hrefAttr + '">移動しない場合はこちら</a></p>' +
+    '<script>(function(){var u=' + jsUrl + ';try{window.top.location.href=u;}catch(e){window.location.href=u;}})();</script>' +
     '</body></html>';
   return HtmlService.createHtmlOutput(html)
     .setTitle(APP_NAME + ' - 認証中')

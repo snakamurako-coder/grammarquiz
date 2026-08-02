@@ -35,7 +35,7 @@ textarea{min-height:60px;resize:vertical}
 <body>
   <div class="header-title">英語学習総合ツール 管理ダッシュボード</div>
   <p style="text-align:center;font-size:.9em;margin:-8px 0 12px;">
-    <a id="pages-link" href="#">GitHub Pages 学習画面を開く（要認証）</a>
+    <a id="pages-link" href="<?= AUTH_URL ?>" target="_top" rel="noopener">GitHub Pages 学習画面を開く（要認証）</a>
   </p>
   <div id="status-banner" style="display:none;" class="alert-box"></div>
 
@@ -111,6 +111,7 @@ const VOCAB_REGISTER_FIELDS = [
 ];
 const PAGES_URL = '<?= PAGES_URL ?>';
 const RESULT_TOKEN = '<?= RESULT_TOKEN ?>';
+const AUTH_URL = '<?= AUTH_URL ?>';
 
 function gasRun(fnName) {
   var args = Array.prototype.slice.call(arguments, 1);
@@ -294,9 +295,9 @@ document.addEventListener('DOMContentLoaded', function() {
   loadLogs();
 
   var pagesLink = document.getElementById('pages-link');
-  if (pagesLink) {
-    var authUrl = window.location.href.split('?')[0] + '?action=auth';
-    pagesLink.href = authUrl;
+  if (pagesLink && AUTH_URL) {
+    pagesLink.href = AUTH_URL;
+    pagesLink.target = '_top';
   }
 
   document.getElementById('start-learning-btn').addEventListener('click', startLearning);
