@@ -31,8 +31,10 @@ const USER_LOG_BOOK_NAME = 'BrightStage学習記録';
 const SESSION_CACHE_PREFIX = 'sess_';
 const RESULT_CACHE_PREFIX = 'result_';
 const AUTH_CACHE_PREFIX = 'auth_';
+const SRS_SYNC_CACHE_PREFIX = 'srs_sync_';
 const SESSION_CACHE_TTL = 21600;
 const RESULT_CACHE_TTL = 21600;
+const SRS_SYNC_CACHE_TTL = 3600;
 /** 認証トークン有効期間: 1時間半（5400秒） */
 const AUTH_CACHE_TTL = 5400;
 const DEFAULT_PAGES_URL = 'https://snakamurako-coder.github.io/grammarquiz/';
@@ -47,6 +49,10 @@ const VOCABULARY_FOLDER_NAME = 'vocabulary';
 const MANAGEMENT_BOOK_NAME = 'BrightStage管理';
 const MY_VOCAB_BOOK_NAME = 'マイ単語帳';
 const UNREGISTERED = '(未登録)';
+const USER_SRS_SHEET_NAME = 'SRS状態';
+const ADMIN_SRS_LOG_SHEET = 'SRSログ';
+const SRS_STATE_HEADERS = ['Word_ID', 'Step_Index', 'EF', 'Next_Review', 'History', 'Avg_Time'];
+const ADMIN_SRS_HEADERS = ['Log_ID', 'User_ID', 'Set_ID', 'Score', 'Attempts', 'Timestamp'];
 
 /** 単語帳22列ヘッダ（管理者配布・ユーザー登録共通） */
 const VOCAB_HEADERS = [
@@ -69,6 +75,10 @@ function doOptions(e) {
 
 function doGet(e) {
   const action = e && e.parameter ? e.parameter.action : null;
+
+  if (action === 'applySrsSync') {
+    return handleApplySrsSync_(e);
+  }
 
   if (action) {
     ensureEnvironment();
@@ -291,6 +301,10 @@ function doPost(e) {
     } else if (action === "logout") {
       if (requestData.authToken) invalidateAuthToken_(requestData.authToken);
       return sendResponse({ status: "success", message: "ログアウトしました" });
+    } else if (action === "saveSrsLog") {
+      return handleSaveSrsLog_(requestData);
+    } else if (action === "queueSrsBulk") {
+      return handleQueueSrsBulk_(requestData);
     } else {
       return sendResponse({ status: "error", message: "無効なactionです" });
     }
@@ -1070,6 +1084,16 @@ function ensureManagementSheets_(ss) {
     logs.clear();
     logs.appendRow(['タイムスタンプ', 'メールアドレス', '学習セット名', '実施回数', '正答率', '解答時間']);
     logs.getRange(1, 1, 1, 6).setFontWeight('bold');
+  }
+
+  let srsLog = ss.getSheetByName(ADMIN_SRS_LOG_SHEET);
+  if (!srsLog) {
+    srsLog = ss.insertSheet(ADMIN_SRS_LOG_SHEET);
+  }
+  if (srsLog.getLastRow() === 0 || srsLog.getRange(1, 1).getValue() === '') {
+    srsLog.clear();
+    srsLog.appendRow(ADMIN_SRS_HEADERS);
+    srsLog.getRange(1, 1, 1, ADMIN_SRS_HEADERS.length).setFontWeight('bold');
   }
 
   // 作成直後の「シート1」が残っていれば削除
@@ -2055,6 +2079,233 @@ function fetchUserLearningLogs_() {
   return logs;
 }
 
+// =========================================================
+// SRS: ユーザー側状態シート
+// =========================================================
+
+function buildWordId_(bookName, sheetName, serialNo) {
+  return String(bookName || UNREGISTERED) + '|' + String(sheetName || UNREGISTERED) + '|' + String(serialNo || UNREGISTERED);
+}
+
+function srsNormField_(value) {
+  if (value === null || value === undefined || value === '') return UNREGISTERED;
+  return String(value);
+}
+
+function ensureUserSrsSheet_() {
+  const ss = getUserLogBook_();
+  let sheet = ss.getSheetByName(USER_SRS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(USER_SRS_SHEET_NAME);
+  }
+  if (sheet.getLastRow() === 0 || sheet.getRange(1, 1).getValue() === '') {
+    sheet.clear();
+    sheet.appendRow(SRS_STATE_HEADERS);
+    sheet.getRange(1, 1, 1, SRS_STATE_HEADERS.length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function fetchUserSrsStates_() {
+  const sheet = ensureUserSrsSheet_();
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return {};
+
+  const headers = data[0];
+  const idx = {};
+  SRS_STATE_HEADERS.forEach(function (h) {
+    idx[h] = headers.indexOf(h);
+  });
+
+  const states = {};
+  for (let r = 1; r < data.length; r++) {
+    const wordId = srsNormField_(data[r][idx['Word_ID']]);
+    if (wordId === UNREGISTERED) continue;
+    states[wordId] = {
+      Word_ID: wordId,
+      Step_Index: data[r][idx['Step_Index']],
+      EF: data[r][idx['EF']],
+      Next_Review: data[r][idx['Next_Review']],
+      History: data[r][idx['History']],
+      Avg_Time: data[r][idx['Avg_Time']]
+    };
+  }
+  return states;
+}
+
+function fetchUserSrsStatesForWords_(bookName, sheetName, words) {
+  const allStates = fetchUserSrsStates_();
+  const result = {};
+  (words || []).forEach(function (wordObj) {
+    const wordId = buildWordId_(bookName, sheetName, wordObj['通し番号']);
+    if (allStates[wordId]) {
+      result[wordId] = allStates[wordId];
+    }
+  });
+  return result;
+}
+
+function srsRowToValues_(row) {
+  return SRS_STATE_HEADERS.map(function (header) {
+    return srsNormField_(row[header]);
+  });
+}
+
+function upsertUserSrsRows_(rows) {
+  if (!rows || rows.length === 0) return { updated: 0, inserted: 0 };
+
+  const sheet = ensureUserSrsSheet_();
+  const data = sheet.getDataRange().getValues();
+  const headers = data.length > 0 ? data[0] : SRS_STATE_HEADERS;
+  const wordIdCol = headers.indexOf('Word_ID');
+
+  const rowMap = {};
+  for (let r = 1; r < data.length; r++) {
+    const wordId = srsNormField_(data[r][wordIdCol]);
+    if (wordId !== UNREGISTERED) rowMap[wordId] = r + 1;
+  }
+
+  let updated = 0;
+  let inserted = 0;
+  const newRows = [];
+
+  rows.forEach(function (row) {
+    const wordId = srsNormField_(row.Word_ID);
+    if (wordId === UNREGISTERED) return;
+    const values = srsRowToValues_(row);
+    const existingRow = rowMap[wordId];
+    if (existingRow) {
+      sheet.getRange(existingRow, 1, existingRow, SRS_STATE_HEADERS.length).setValues([values]);
+      updated++;
+    } else {
+      newRows.push(values);
+      inserted++;
+    }
+  });
+
+  if (newRows.length > 0) {
+    const startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, newRows.length, SRS_STATE_HEADERS.length).setValues(newRows);
+  }
+
+  return { updated: updated, inserted: inserted };
+}
+
+function handleApplySrsSync_(e) {
+  const token = e && e.parameter ? e.parameter.token : null;
+  if (!token) {
+    return renderSrsSyncResultHtml_(false, 'syncToken が必要です');
+  }
+
+  try {
+    const raw = CacheService.getScriptCache().get(SRS_SYNC_CACHE_PREFIX + token);
+    if (!raw) {
+      return renderSrsSyncResultHtml_(false, '同期データが見つかりません（期限切れの可能性）');
+    }
+
+    const payload = JSON.parse(raw);
+    const activeEmail = Session.getActiveUser().getEmail() || '';
+    if (payload.email && activeEmail && payload.email !== activeEmail) {
+      return renderSrsSyncResultHtml_(false, 'ログインユーザーが一致しません');
+    }
+
+    const result = upsertUserSrsRows_(payload.rows || []);
+    CacheService.getScriptCache().remove(SRS_SYNC_CACHE_PREFIX + token);
+    return renderSrsSyncResultHtml_(true, 'SRS状態を保存しました', result);
+  } catch (error) {
+    return renderSrsSyncResultHtml_(false, error.toString());
+  }
+}
+
+function renderSrsSyncResultHtml_(success, message, data) {
+  const payload = JSON.stringify({ type: 'srsSyncComplete', success: success, message: message, data: data || null });
+  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>SRS Sync</title></head><body>'
+    + '<p>' + (success ? '同期完了' : '同期失敗') + '</p>'
+    + '<script>try{window.parent.postMessage(' + payload + ',"*");}catch(e){}</script>'
+    + '</body></html>';
+  return HtmlService.createHtmlOutput(html)
+    .setTitle('SRS Sync')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// =========================================================
+// SRS: 管理者側メタログ + 差分キュー
+// =========================================================
+
+function ensureAdminSrsLogSheet_() {
+  const spreadId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  if (!spreadId) throw new Error('SPREADSHEET_IDが設定されていません。');
+  const ss = SpreadsheetApp.openById(spreadId);
+  let sheet = ss.getSheetByName(ADMIN_SRS_LOG_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(ADMIN_SRS_LOG_SHEET);
+    sheet.appendRow(ADMIN_SRS_HEADERS);
+    sheet.getRange(1, 1, 1, ADMIN_SRS_HEADERS.length).setFontWeight('bold');
+  }
+  return sheet;
+}
+
+function handleSaveSrsLog_(requestData) {
+  const authCheck = requireAuthToken_(requestData);
+  if (!authCheck.ok) return sendResponse({ status: 'error', message: authCheck.error });
+
+  const setId = requestData.setId || requestData.setName;
+  const score = requestData.score != null ? requestData.score : requestData.correctRate;
+  if (!setId) return sendResponse({ status: 'error', message: 'setId が必要です' });
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    return sendResponse({ status: 'error', message: '書き込みロック取得に失敗しました' });
+  }
+
+  try {
+    const sheet = ensureAdminSrsLogSheet_();
+    const email = authCheck.auth.email;
+    const data = sheet.getDataRange().getValues();
+    let attempts = 0;
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][1] === email && data[i][2] === setId) attempts++;
+    }
+    attempts++;
+
+    const logId = Utilities.getUuid();
+    const timeStr = Utilities.formatDate(new Date(), 'JST', 'yyyy/MM/dd HH:mm:ss');
+    sheet.appendRow([
+      srsNormField_(logId),
+      srsNormField_(email),
+      srsNormField_(setId),
+      srsNormField_(score),
+      srsNormField_(attempts),
+      srsNormField_(timeStr)
+    ]);
+
+    return sendResponse({ status: 'success', message: 'SRSログを保存しました', logId: logId, attempts: attempts });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleQueueSrsBulk_(requestData) {
+  const authCheck = requireAuthToken_(requestData);
+  if (!authCheck.ok) return sendResponse({ status: 'error', message: authCheck.error });
+
+  const rows = requestData.rows;
+  if (!rows || !Array.isArray(rows)) {
+    return sendResponse({ status: 'error', message: 'rows が必要です' });
+  }
+
+  const syncToken = generateSessionToken_();
+  const payload = { email: authCheck.auth.email, rows: rows };
+  const json = JSON.stringify(payload);
+  if (json.length > 95000) {
+    return sendResponse({ status: 'error', message: 'データが大きすぎます（CacheService 100KB上限）' });
+  }
+
+  CacheService.getScriptCache().put(SRS_SYNC_CACHE_PREFIX + syncToken, json, SRS_SYNC_CACHE_TTL);
+  return sendResponse({ status: 'success', syncToken: syncToken });
+}
+
 function buildSessionPayload_(params) {
   const mode = params.mode || 'reading';
   const sheetName = params.sheetName;
@@ -2071,15 +2322,19 @@ function buildSessionPayload_(params) {
     throw new Error('出題できる単語がありません');
   }
 
+  const bookName = MY_VOCAB_BOOK_NAME;
+  const srsStates = fetchUserSrsStatesForWords_(bookName, sheetName, wordData.words);
+
   return {
     mode: mode,
     setName: MY_VOCAB_BOOK_NAME + ' / ' + sheetName,
-    bookName: MY_VOCAB_BOOK_NAME,
+    bookName: bookName,
     sheetName: sheetName,
     filters: filters,
     words: wordData.words,
     pool: wordData.pool,
     bookPool: wordData.bookPool,
+    srsStates: srsStates,
     options: params.options || {},
     createdAt: new Date().toISOString(),
     userEmail: Session.getActiveUser().getEmail() || ''
