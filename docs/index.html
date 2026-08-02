@@ -2880,6 +2880,9 @@ function showResultScreen() {
 document.getElementById('return-settings-btn').addEventListener('click', () => {
   document.getElementById('result-screen').style.display = 'none';
   screens.settings.style.display = 'block';
+  if (AuthGateService.isValid()) {
+    fetchUserLogs();
+  }
 });
 
 // ======= AuthService連携 =======
@@ -3050,6 +3053,14 @@ async function fetchUserLogs() {
   }
 }
 
+function formatLogDuration_(log) {
+  const t = log['解答時間'];
+  if (t === null || t === undefined || t === '') {
+    return log.source === 'vocab' ? '単語SRS' : '';
+  }
+  return String(t) + '秒';
+}
+
 function renderMyPage(logs) {
   const container = document.getElementById('mypage-container');
   if (container) container.style.display = 'block';
@@ -3061,17 +3072,20 @@ function renderMyPage(logs) {
     return;
   }
 
-  // 1. 最近の学習履歴 (直近5件)
+  // 1. 最近の学習履歴 (直近5件) — API側は古い順で返す想定
   const recentLogs = [...logs].reverse().slice(0, 5);
   let recentHtml = '';
   recentLogs.forEach(log => {
-    const rate = parseInt(log['正答率']) || 0;
+    const rate = parseInt(log['正答率'], 10) || 0;
     const scoreClass = rate >= 80 ? 'score-perfect' : rate >= 60 ? 'score-good' : rate >= 40 ? 'score-warn' : 'score-poor';
+    const duration = formatLogDuration_(log);
+    const metaParts = [log['タイムスタンプ'] || ''];
+    if (duration) metaParts.push(duration);
     recentHtml += `
       <div class="log-item">
         <div>
-          <div class="log-title">${log['学習セット名']}</div>
-          <div class="log-meta">${log['タイムスタンプ']} - ${log['解答時間']}秒</div>
+          <div class="log-title">${log['学習セット名'] || '(未登録)'}</div>
+          <div class="log-meta">${metaParts.join(' - ')}</div>
         </div>
         <div class="log-score ${scoreClass}">${rate}%</div>
       </div>
