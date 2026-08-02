@@ -30,8 +30,11 @@ const USER_DATA_FOLDER_NAME = 'BrightStage_MyData';
 const USER_LOG_BOOK_NAME = 'BrightStage学習記録';
 const SESSION_CACHE_PREFIX = 'sess_';
 const RESULT_CACHE_PREFIX = 'result_';
+const AUTH_CACHE_PREFIX = 'auth_';
 const SESSION_CACHE_TTL = 21600;
 const RESULT_CACHE_TTL = 21600;
+/** 認証トークン有効期間: 1時間半（5400秒） */
+const AUTH_CACHE_TTL = 5400;
 const DEFAULT_PAGES_URL = 'https://snakamurako-coder.github.io/grammarquiz/';
 
 /** index.html の GSI client_id と揃える既定値（未設定時のみ書き込む） */
@@ -129,6 +132,21 @@ function doGet(e) {
       } catch (error) {
         return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
       }
+    } else if (action === 'auth') {
+      return handleAuthRedirect_();
+    } else if (action === 'getAuthUser') {
+      try {
+        const token = e.parameter.token;
+        const auth = validateAuthToken_(token);
+        if (!auth) return sendResponse({ status: "error", message: "認証トークンが無効または期限切れです" });
+        return sendResponse({ status: "success", user: auth.user, email: auth.email });
+      } catch (error) {
+        return sendResponse({ status: "error", message: error.toString() });
+      }
+    } else if (action === 'logout') {
+      const token = e.parameter.token;
+      if (token) invalidateAuthToken_(token);
+      return sendResponse({ status: "success", message: "ログアウトしました" });
     }
     return sendResponse({ status: "error", message: "無効なactionです: " + action });
   }
@@ -268,6 +286,9 @@ function doPost(e) {
       return handleSave(requestData);       // 既存利用用
     } else if (action === "get_csv_data") {
       return handleGetData(requestData);    // 既存利用用
+    } else if (action === "logout") {
+      if (requestData.authToken) invalidateAuthToken_(requestData.authToken);
+      return sendResponse({ status: "success", message: "ログアウトしました" });
     } else {
       return sendResponse({ status: "error", message: "無効なactionです" });
     }
@@ -435,9 +456,131 @@ function renderAccessDeniedPage_(email) {
 }
 
 // =========================================================
+// ①-3 GAS① 認証ゲート＋短命トークン（Pages 連携）
+// =========================================================
+
+/** whitelist / 管理者からユーザープロフィールを取得 */
+function getWhitelistUserProfile_(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (isAdminEmail_(normalized)) {
+    return { account: normalized, name: '管理者', grade: '', class: '', role: 'admin' };
+  }
+  const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
+  if (!spreadId) return { account: normalized, name: '', grade: '', class: '' };
+  try {
+    const sheet = SpreadsheetApp.openById(spreadId).getSheetByName('whitelist');
+    if (!sheet) return { account: normalized, name: '', grade: '', class: '' };
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const accountIdx = headers.indexOf('account');
+    if (accountIdx === -1) return { account: normalized, name: '', grade: '', class: '' };
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][accountIdx] || '').trim().toLowerCase() === normalized) {
+        const user = {};
+        for (let j = 0; j < headers.length; j++) {
+          if (headers[j]) user[headers[j]] = data[i][j];
+        }
+        return user;
+      }
+    }
+  } catch (e) {
+    // GAS① 実行文脈など
+  }
+  return { account: normalized, name: '', grade: '', class: '' };
+}
+
+/** 認証トークンを発行して CacheService に保存 */
+function issueAuthToken_(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) throw new Error('メールアドレスを取得できません');
+  if (!isWhitelistedOrAdmin_(normalized)) throw new Error('許可されていないユーザーです');
+  const user = getWhitelistUserProfile_(normalized);
+  const token = generateSessionToken_();
+  const now = Date.now();
+  const payload = {
+    email: normalized,
+    user: user,
+    issuedAt: now,
+    expiresAt: now + AUTH_CACHE_TTL * 1000
+  };
+  CacheService.getScriptCache().put(AUTH_CACHE_PREFIX + token, JSON.stringify(payload), AUTH_CACHE_TTL);
+  return token;
+}
+
+/** 認証トークンを検証（無効・期限切れなら null） */
+function validateAuthToken_(token) {
+  if (!token) return null;
+  const raw = CacheService.getScriptCache().get(AUTH_CACHE_PREFIX + token);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+/** 認証トークンを無効化（ログアウト用） */
+function invalidateAuthToken_(token) {
+  if (token) CacheService.getScriptCache().remove(AUTH_CACHE_PREFIX + token);
+}
+
+/**
+ * POST 書き込みAPI用: authToken を検証
+ * @return {{ok:boolean, auth?:Object, error?:string}}
+ */
+function requireAuthToken_(requestData) {
+  const token = requestData.authToken;
+  if (!token) return { ok: false, error: '認証トークンがありません' };
+  const auth = validateAuthToken_(token);
+  if (!auth) return { ok: false, error: '認証トークンが無効または期限切れです' };
+  return { ok: true, auth: auth };
+}
+
+/** GAS① ?action=auth → whitelist 確認後 Pages へリダイレクト */
+function handleAuthRedirect_() {
+  const access = checkDashboardAccess_();
+  if (!access.allowed) {
+    return renderAccessDeniedPage_(access.email);
+  }
+  try {
+    const token = issueAuthToken_(access.email);
+    const pagesUrl = getPagesUrl_();
+    const sep = pagesUrl.indexOf('?') >= 0 ? '&' : '?';
+    const target = pagesUrl + sep + 'auth=' + encodeURIComponent(token);
+    return renderAuthRedirectPage_(target);
+  } catch (e) {
+    return renderAccessDeniedPage_(access.email);
+  }
+}
+
+/** Pages への即時リダイレクト HTML */
+function renderAuthRedirectPage_(targetUrl) {
+  const safeUrl = String(targetUrl)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
+  const html =
+    '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">' +
+    '<meta http-equiv="refresh" content="0;url=' + safeUrl + '">' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1.0"></head>' +
+    '<body style="font-family:sans-serif;text-align:center;padding:40px;">' +
+    '<p>認証成功。学習画面へ移動しています...</p>' +
+    '<p><a href="' + safeUrl + '">移動しない場合はこちら</a></p>' +
+    '</body></html>';
+  return HtmlService.createHtmlOutput(html)
+    .setTitle(APP_NAME + ' - 認証中')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// =========================================================
 // 成績保存処理（Phase 5用・リファクタ版）
 // =========================================================
 function handleSaveResult(requestData) {
+  const authCheck = requireAuthToken_(requestData);
+  if (!authCheck.ok) return sendResponse({ status: "error", message: authCheck.error });
+  const email = authCheck.auth.email;
+
   const results = requestData.results;
   if (!results || results.length === 0) return sendResponse({ status: "success" });
 
@@ -461,7 +604,7 @@ function handleSaveResult(requestData) {
     const r = results[i];
     rows.push([
       r.timestamp, 
-      r.userId, 
+      email,
       r.questionId, 
       r.subject, 
       r.unit, 
@@ -479,10 +622,14 @@ function handleSaveResult(requestData) {
 // ② 汎用データ保存処理（どんなアプリからでも使える）
 // =========================================================
 function handleSave(requestData) {
-  const sheetName = requestData.sheetName; // アプリ側から「保存先シート名」を指定させる
-  const record = requestData.record;       // 保存したいデータ本体（オブジェクト）
+  const authCheck = requireAuthToken_(requestData);
+  if (!authCheck.ok) return sendResponse({ status: "error", message: authCheck.error });
+
+  const sheetName = requestData.sheetName;
+  const record = requestData.record;
 
   if (!sheetName || !record) return sendResponse({ status: "error", message: "sheetNameとrecordが必要です" });
+  if (record.account !== undefined) record.account = authCheck.auth.email;
 
   const ss = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID'));
   let sheet = ss.getSheetByName(sheetName);
@@ -509,10 +656,12 @@ function handleSave(requestData) {
 // ③ 汎用データ取得処理（CSV等用・自分のデータだけを抽出）
 // =========================================================
 function handleGetData(requestData) {
-  const sheetName = requestData.sheetName;
-  const targetEmail = requestData.userEmail;
+  const authCheck = requireAuthToken_(requestData);
+  if (!authCheck.ok) return sendResponse({ status: "error", message: authCheck.error });
+  const targetEmail = authCheck.auth.email;
 
-  if (!sheetName || !targetEmail) return sendResponse({ status: "error", message: "sheetNameとuserEmailが必要です" });
+  const sheetName = requestData.sheetName;
+  if (!sheetName) return sendResponse({ status: "error", message: "sheetNameが必要です" });
 
   const ss = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID'));
   const sheet = ss.getSheetByName(sheetName);
@@ -544,9 +693,12 @@ function handleGetData(requestData) {
 // ④ セッションログ保存処理（マイページ用）
 // =========================================================
 function handleSaveSessionLog(requestData) {
-  const { email, setName, correctRate, timeTaken } = requestData;
-  if (!email || !setName) return sendResponse({ status: "error", message: "必須パラメータがありません" });
-  if (!isWhitelistedOrAdmin_(email)) return sendResponse({ status: "error", message: "許可されていないユーザーです" });
+  const authCheck = requireAuthToken_(requestData);
+  if (!authCheck.ok) return sendResponse({ status: "error", message: authCheck.error });
+  const email = authCheck.auth.email;
+
+  const { setName, correctRate, timeTaken } = requestData;
+  if (!setName) return sendResponse({ status: "error", message: "必須パラメータがありません" });
 
   const spreadId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   if (!spreadId) return sendResponse({ status: "error", message: "SPREADSHEET_IDが設定されていません。" });
@@ -579,9 +731,9 @@ function handleSaveSessionLog(requestData) {
 // ⑤ マイページ用ログ取得処理
 // =========================================================
 function handleGetUserLogs(requestData) {
-  const email = requestData.email;
-  if (!email) return sendResponse({ status: "error", message: "emailが必要です" });
-  if (!isWhitelistedOrAdmin_(email)) return sendResponse({ status: "error", message: "許可されていないユーザーです" });
+  const authCheck = requireAuthToken_(requestData);
+  if (!authCheck.ok) return sendResponse({ status: "error", message: authCheck.error });
+  const email = authCheck.auth.email;
 
   const spreadId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   if (!spreadId) return sendResponse({ status: "error", message: "SPREADSHEET_IDが設定されていません。" });
@@ -612,6 +764,9 @@ function handleGetUserLogs(requestData) {
 }
 
 function handleRegisterVocabWords(requestData) {
+  const authCheck = requireAuthToken_(requestData);
+  if (!authCheck.ok) return sendResponse({ status: "error", message: authCheck.error });
+
   try {
     const sheetName = requestData.sheetName;
     const rows = requestData.rows;
@@ -1694,12 +1849,16 @@ function scoreReadingTranscript_(sessionData, transcript) {
 }
 
 function handleScoreReading(requestData) {
+  const authCheck = requireAuthToken_(requestData);
+  if (!authCheck.ok) return sendResponse({ status: "error", message: authCheck.error });
+
   try {
     const token = requestData.token;
     const transcript = requestData.transcript || '';
     const session = getSessionFromCache_(token);
     if (!session) return sendResponse({ status: "error", message: "セッションが見つかりません" });
     const result = scoreReadingTranscript_(session, transcript);
+    result.userEmail = authCheck.auth.email;
     const resultToken = generateSessionToken_();
     result.sessionToken = token;
     saveResultToCache_(resultToken, result);
@@ -2061,7 +2220,17 @@ function apiStartSession(payloadJson) {
     const payload = buildSessionPayload_(params);
     const token = generateSessionToken_();
     saveSessionToCache_(token, payload);
-    return { status: 'success', token: token, pagesUrl: getPagesUrl_() };
+
+    let authToken = null;
+    const access = checkDashboardAccess_();
+    if (access.allowed) {
+      try {
+        authToken = issueAuthToken_(access.email);
+      } catch (e) {
+        // auth 発行失敗時も学習セッションは返す
+      }
+    }
+    return { status: 'success', token: token, authToken: authToken, pagesUrl: getPagesUrl_() };
   } catch (e) {
     return { status: 'error', message: e.toString() };
   }
@@ -2082,4 +2251,17 @@ function apiSaveSessionResult(resultToken) {
 
 function apiGetPagesUrl() {
   return { status: 'success', url: getPagesUrl_() };
+}
+
+/** GAS①: 認証トークン発行（dashboard から Pages へ引き渡し） */
+function apiIssueAuthToken() {
+  try {
+    const access = checkDashboardAccess_();
+    if (!access.allowed) return { status: 'error', message: 'アクセスが許可されていません' };
+    const token = issueAuthToken_(access.email);
+    const user = getWhitelistUserProfile_(access.email);
+    return { status: 'success', token: token, user: user, pagesUrl: getPagesUrl_() };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
 }
