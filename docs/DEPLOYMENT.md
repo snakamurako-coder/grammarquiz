@@ -123,7 +123,20 @@ GitHub Pages から直接（GAS② API + キャッシュ）
 
 ---
 
-## 9. clasp deploy の更新
+## 9. 一括反映（推奨）
+
+Cursor / VS Code の **Tasks: Run Task** から次を実行:
+
+| タスク | 内容 |
+|---|---|
+| **★ Deploy All (Pages + GAS① + GAS②)** | `clasp push` → 両デプロイ更新 → `git commit`（必要時）→ `git push` |
+| Deploy: GAS only | GAS①②のみ |
+| Deploy: Pages only | GitHub Pages のみ |
+
+実装: [`scripts/deploy-all.ps1`](../scripts/deploy-all.ps1)  
+デプロイIDは [`docs/config.js`](config.js) から自動取得します（URL・権限設定は維持）。
+
+手動の場合:
 
 ```bash
 # GAS② を更新
