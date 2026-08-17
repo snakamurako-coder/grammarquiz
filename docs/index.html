@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>英語学習総合ツール</title>
+  <title>DigitalDrill（デジドリ）</title>
   <style>/* =========================================
    基本設計（モバイルファースト）
    ========================================= */
@@ -185,7 +185,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 <body>
 <!-- Login Screen -->
   <div id="login-screen">
-    <div class="header-title">英語学習総合ツール ログイン</div>
+    <div class="header-title">DigitalDrill（デジドリ） ログイン</div>
     <div class="setting-section" style="text-align: center; padding: 40px 10px;">
       <p style="margin-bottom: 20px; font-size: 1.1em; color: #555;">システムを利用するには Google アカウントで認証が必要です。</p>
       <p style="margin-bottom: 24px; font-size: 0.9em; color: #777;">管理ダッシュボード（GAS）で本人確認とホワイトリスト照合を行い、学習画面へ戻ります。</p>
@@ -196,7 +196,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 
   <!-- Game Settings & Modes -->
   <div id="settings-screen" style="display: none;">
-    <div class="header-title">英語学習総合ツール 学習</div>
+    <div class="header-title">DigitalDrill（デジドリ） 学習</div>
     <p style="text-align:center;margin:-8px 0 12px;font-size:0.9em;">
       <a id="dashboard-link" href="#" target="_blank" rel="noopener">管理ダッシュボード（単語登録・学習スタート）</a>
       &nbsp;|&nbsp;
@@ -542,8 +542,8 @@ const AUTH_ENABLED = true;
 const AUTH_TTL_MS = 90 * 60 * 1000;
 
 /** Webアプリ URL（GAS② JSON API） */
-window.API_URL = (window.BRIGHTSTAGE_CONFIG && window.BRIGHTSTAGE_CONFIG.API_URL) || window.API_URL || '';
-window.DASHBOARD_URL = (window.BRIGHTSTAGE_CONFIG && window.BRIGHTSTAGE_CONFIG.DASHBOARD_URL) || window.DASHBOARD_URL || '';
+window.API_URL = (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.API_URL) || window.API_URL || '';
+window.DASHBOARD_URL = (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.DASHBOARD_URL) || window.DASHBOARD_URL || '';
 
 /** GAS① 認証入口 URL */
 function getAuthLoginUrl_() {
@@ -555,9 +555,9 @@ function getAuthLoginUrl_() {
 
 /** 認証トークン管理（GAS① で発行 → Pages で保持） */
 const AuthGateService = {
-  TOKEN_KEY: 'brightstage_auth_token',
-  USER_KEY: 'brightstage_auth_user',
-  ISSUED_KEY: 'brightstage_auth_issued',
+  TOKEN_KEY: 'digitaldrill_auth_token',
+  USER_KEY: 'digitaldrill_auth_user',
+  ISSUED_KEY: 'digitaldrill_auth_issued',
 
   getToken() {
     return localStorage.getItem(this.TOKEN_KEY) || '';
@@ -587,8 +587,6 @@ const AuthGateService = {
     localStorage.removeItem(this.TOKEN_KEY);
     localStorage.removeItem(this.USER_KEY);
     localStorage.removeItem(this.ISSUED_KEY);
-    localStorage.removeItem('brightstage_user_data');
-    localStorage.removeItem('brightstage_login_time');
   },
 
   async fetchUserIfNeeded() {
@@ -747,7 +745,7 @@ async function gasFetch_(fnName, args) {
 // presetCache.js
 const PresetCacheModule = (() => {
   const TTL_MS = 24 * 60 * 60 * 1000;
-  const PREFIX = 'bs_cache_';
+  const PREFIX = 'dd_cache_';
 
   function get(key) {
     try {
@@ -818,7 +816,7 @@ window.PresetCacheModule = PresetCacheModule;
 // 出題アルゴリズム・成績記録モジュール
 
 const AlgorithmModule = (() => {
-  const STORAGE_KEY = 'brightstage_history';
+  const STORAGE_KEY = 'digitaldrill_history';
 
   function getHistory() {
     try {
@@ -909,7 +907,7 @@ window.AlgorithmModule = AlgorithmModule;
 
 // srsModule.js — 固定間隔 × SM-2 ハイブリッド SRS
 const SrsModule = (() => {
-  const STORAGE_KEY = 'brightstage_srs_state';
+  const STORAGE_KEY = 'digitaldrill_srs_state';
   const INTERVALS = [0, 1, 7, 30, 90, 180, 365];
   const EF_MIN = 1.3;
   const EF_DEFAULT = 2.5;
@@ -2894,9 +2892,9 @@ elements.startBtn.addEventListener('click', async () => {
   const unInput = document.getElementById('username-input');
   if (unInput && unInput.value.trim() !== '') {
     currentUserId = unInput.value.trim();
-    localStorage.setItem('brightstage_username', currentUserId);
+    localStorage.setItem('digitaldrill_username', currentUserId);
   } else {
-    currentUserId = localStorage.getItem('brightstage_username') || "Guest";
+    currentUserId = localStorage.getItem('digitaldrill_username') || "Guest";
     if (unInput && currentUserId !== "Guest") unInput.value = currentUserId;
   }
   
@@ -3303,7 +3301,7 @@ window.onLoginSuccess = function(user) {
   currentUserId = user.account;
   const unInput = document.getElementById('username-input');
   if (unInput) unInput.value = currentUserId;
-  localStorage.setItem('brightstage_username', currentUserId);
+  localStorage.setItem('digitaldrill_username', currentUserId);
 
   // プロフィールUIへの反映
   const elName = document.getElementById('profile-name');

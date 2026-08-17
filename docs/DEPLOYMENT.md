@@ -1,4 +1,4 @@
-# 英語学習総合ツール デプロイ手順（2UI構成）
+# DigitalDrill（デジドリ） デプロイ手順（2UI構成）
 
 ## 構成概要
 
@@ -68,7 +68,7 @@ GAS① にアクセスすると `dashboard.html` が表示されます（`doGet`
 [docs/config.js](config.js) を編集:
 
 ```javascript
-window.BRIGHTSTAGE_CONFIG = {
+window.DIGITALDRILL_CONFIG = {
   API_URL: 'https://script.google.com/macros/s/GAS2_DEPLOYMENT_ID/exec',
   DASHBOARD_URL: 'https://script.google.com/macros/s/GAS1_DEPLOYMENT_ID/exec'
 };
@@ -97,9 +97,9 @@ https://script.google.com/macros/s/.../exec?action=setup
 
 GAS① ダッシュボードに初回アクセスすると、**ユーザー自身のマイドライブ** に以下が自動作成されます:
 
-- `BrightStage_MyData/` フォルダ
+- `DigitalDrill_MyData/` フォルダ
 - `マイ単語帳`（「サンプル」シートに10語、「デフォルト」空シート）
-- `BrightStage学習記録`
+- `DigitalDrill学習記録`
 
 ---
 
@@ -176,7 +176,7 @@ GitHub Pages 上では Google Session を直接取得できないため、**GAS�
 
 ホワイトリストに登録されたユーザーと管理者のみがアプリを利用できます。
 
-- **登録方法**: 管理ブック（作成者Drive の `BrightStage管理`）の `whitelist` シートに、`account` 列へ利用者の Google メールアドレスを追記
+- **登録方法**: 管理ブック（作成者Drive の `DigitalDrill管理`）の `whitelist` シートに、`account` 列へ利用者の Google メールアドレスを追記
 - **GitHub Pages 学習画面**: GAS① 認証ゲート経由。未登録ユーザーは `?action=auth` で拒否
 - **GAS① ダッシュボード**: アクセス時に whitelist（Script Properties キャッシュ）と照合
 - **管理者**: セットアップ実行者（`ADMIN_EMAIL`）は whitelist 登録不要で常に利用可

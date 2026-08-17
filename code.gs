@@ -1,7 +1,7 @@
 // code.gs 統合版
 
 /** アプリ表示名 */
-const APP_NAME = '英語学習総合ツール';
+const APP_NAME = 'DigitalDrill（デジドリ）';
 
 /** スクリプトプロパティキー */
 const PROP = {
@@ -26,8 +26,8 @@ const USER_PROP = {
   MY_LOG_BOOK_ID: 'MY_LOG_BOOK_ID'
 };
 
-const USER_DATA_FOLDER_NAME = 'BrightStage_MyData';
-const USER_LOG_BOOK_NAME = 'BrightStage学習記録';
+const USER_DATA_FOLDER_NAME = 'DigitalDrill_MyData';
+const USER_LOG_BOOK_NAME = 'DigitalDrill学習記録';
 const SESSION_CACHE_PREFIX = 'sess_';
 const RESULT_CACHE_PREFIX = 'result_';
 const AUTH_CACHE_PREFIX = 'auth_';
@@ -46,7 +46,11 @@ const MATERIALS_FOLDER_NAME = 'grammarquizzes';
 /** 旧フォルダ名（既存環境からの自動リネーム用） */
 const LEGACY_MATERIALS_FOLDER_NAME = 'materials';
 const VOCABULARY_FOLDER_NAME = 'vocabulary';
-const MANAGEMENT_BOOK_NAME = 'BrightStage管理';
+const MANAGEMENT_BOOK_NAME = 'DigitalDrill管理';
+/** 旧名称（Drive 上の既存リソースを改名して再利用する） */
+const LEGACY_MANAGEMENT_BOOK_NAME = 'BrightStage管理';
+const LEGACY_USER_DATA_FOLDER_NAME = 'BrightStage_MyData';
+const LEGACY_USER_LOG_BOOK_NAME = 'BrightStage学習記録';
 const MY_VOCAB_BOOK_NAME = 'マイ単語帳';
 const UNREGISTERED = '(未登録)';
 const USER_SRS_SHEET_NAME = 'SRS状態';
@@ -1054,6 +1058,46 @@ function getMaterialsFolder() {
   throw new Error(MATERIALS_FOLDER_NAME + "フォルダが見つかりません。setupEnvironment() を実行してください。");
 }
 
+function findChildSpreadsheetWithMigration_(parentFolder, name, legacyName) {
+  let file = findChildSpreadsheetByName_(parentFolder, name);
+  if (file) return file;
+  file = findChildSpreadsheetByName_(parentFolder, legacyName);
+  if (file) {
+    file.setName(name);
+    return file;
+  }
+  return null;
+}
+
+function findChildFolderWithMigration_(parentFolder, name, legacyName) {
+  let folder = findChildFolderByName_(parentFolder, name);
+  if (folder) return folder;
+  folder = findChildFolderByName_(parentFolder, legacyName);
+  if (folder) {
+    folder.setName(name);
+    return folder;
+  }
+  return null;
+}
+
+function findFolderByNameWithMigration_(name, legacyName, preferredParentId) {
+  let fallback = null;
+  const names = [name, legacyName];
+  for (let n = 0; n < names.length; n++) {
+    const it = DriveApp.getFoldersByName(names[n]);
+    while (it.hasNext()) {
+      const candidate = it.next();
+      if (names[n] === legacyName) candidate.setName(name);
+      if (!fallback) fallback = candidate;
+      const parents = candidate.getParents();
+      while (parents.hasNext()) {
+        if (parents.next().getId() === preferredParentId) return candidate;
+      }
+    }
+  }
+  return fallback;
+}
+
 /** 旧名 materials のフォルダを grammarquizzes に改名して返す（改名済みならそのまま） */
 function migrateMaterialsFolderName_(folder) {
   if (folder.getName() === LEGACY_MATERIALS_FOLDER_NAME) {
@@ -1139,6 +1183,8 @@ function getOrCreateManagementBook_(parentFolder, force, created, reused) {
     const existingId = props.getProperty(PROP.SPREADSHEET_ID);
     if (existingId) {
       try {
+        const file = DriveApp.getFileById(existingId);
+        if (file.getName() === LEGACY_MANAGEMENT_BOOK_NAME) file.setName(MANAGEMENT_BOOK_NAME);
         reused.push(MANAGEMENT_BOOK_NAME);
         return SpreadsheetApp.openById(existingId);
       } catch (e) {
@@ -1146,7 +1192,18 @@ function getOrCreateManagementBook_(parentFolder, force, created, reused) {
       }
     }
 
-    const existingFile = findChildSpreadsheetByName_(parentFolder, MANAGEMENT_BOOK_NAME);
+    const existingFile = findChildSpreadsheetWithMigration_(
+      parentFolder, MANAGEMENT_BOOK_NAME, LEGACY_MANAGEMENT_BOOK_NAME
+    );
+    if (existingFile) {
+      props.setProperty(PROP.SPREADSHEET_ID, existingFile.getId());
+      reused.push(MANAGEMENT_BOOK_NAME);
+      return SpreadsheetApp.open(existingFile);
+    }
+  } else {
+    const existingFile = findChildSpreadsheetWithMigration_(
+      parentFolder, MANAGEMENT_BOOK_NAME, LEGACY_MANAGEMENT_BOOK_NAME
+    );
     if (existingFile) {
       props.setProperty(PROP.SPREADSHEET_ID, existingFile.getId());
       reused.push(MANAGEMENT_BOOK_NAME);
@@ -2084,7 +2141,7 @@ function resolveAppParentFolder_() {
 }
 
 /**
- * BrightStage_MyData をアプリ親フォルダ内に1つだけ確保する。
+ * DigitalDrill_MyData をアプリ親フォルダ内に1つだけ確保する。
  * 既存フォルダ（名前一致）があれば再利用し、重複生成しない。
  */
 function ensureUserDataFolder_() {
@@ -2095,6 +2152,9 @@ function ensureUserDataFolder_() {
   if (folderId) {
     try {
       folder = DriveApp.getFolderById(folderId);
+      if (folder.getName() === LEGACY_USER_DATA_FOLDER_NAME) {
+        folder.setName(USER_DATA_FOLDER_NAME);
+      }
     } catch (e) {
       folder = null;
     }
@@ -2104,26 +2164,13 @@ function ensureUserDataFolder_() {
   const parentId = parent.getId();
 
   if (!folder) {
-    folder = findChildFolderByName_(parent, USER_DATA_FOLDER_NAME);
+    folder = findChildFolderWithMigration_(
+      parent, USER_DATA_FOLDER_NAME, LEGACY_USER_DATA_FOLDER_NAME
+    );
   }
 
   if (!folder) {
-    // Drive 内の同名フォルダを再利用（マイドライブ直下の重複など）
-    const it = DriveApp.getFoldersByName(USER_DATA_FOLDER_NAME);
-    let fallback = null;
-    while (it.hasNext()) {
-      const candidate = it.next();
-      if (!fallback) fallback = candidate;
-      const parents = candidate.getParents();
-      while (parents.hasNext()) {
-        if (parents.next().getId() === parentId) {
-          folder = candidate;
-          break;
-        }
-      }
-      if (folder) break;
-    }
-    if (!folder) folder = fallback;
+    folder = findFolderByNameWithMigration_(USER_DATA_FOLDER_NAME, LEGACY_USER_DATA_FOLDER_NAME, parentId);
   }
 
   if (!folder) {
@@ -2186,7 +2233,9 @@ function getOrCreateUserLogBook_(folder, userProps) {
     }
   }
 
-  const existing = findChildSpreadsheetByName_(folder, USER_LOG_BOOK_NAME);
+  const existing = findChildSpreadsheetWithMigration_(
+    folder, USER_LOG_BOOK_NAME, LEGACY_USER_LOG_BOOK_NAME
+  );
   if (existing) return SpreadsheetApp.open(existing);
 
   const ss = createSpreadsheetInFolder_(USER_LOG_BOOK_NAME, folder);
