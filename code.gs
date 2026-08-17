@@ -53,6 +53,17 @@ const USER_SRS_SHEET_NAME = 'SRS状態';
 const ADMIN_SRS_LOG_SHEET = 'SRSログ';
 const SRS_STATE_HEADERS = ['Word_ID', 'Step_Index', 'EF', 'Next_Review', 'History', 'Avg_Time'];
 const ADMIN_SRS_HEADERS = ['Log_ID', 'User_ID', 'Set_ID', 'Score', 'Attempts', 'Timestamp'];
+const SCORE_HEADERS = [
+  'タイムスタンプ', 'ユーザーID', '問題ID', '学年科目', '単元', '正誤判定', '出題モード',
+  '出題形式', '難易度', 'ターゲット文法領域'
+];
+
+/** 文法データセット11列ヘッダ。1行が形式A〜Hすべての素材になる */
+const GRAMMAR_HEADERS = [
+  '通し番号', '大単元', '小単元', '英文全文', '日本語訳',
+  '並び替え文', '並び替えダミー', 'N択文', 'N択ダミー',
+  'ターゲット文法領域', '解説'
+];
 
 /** 単語帳22列ヘッダ（管理者配布・ユーザー登録共通） */
 const VOCAB_HEADERS = [
@@ -176,6 +187,45 @@ function doGet(e) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+const GRAMMAR_BRACKET_RE = /[(（][^)）]*[)）]/;
+
+/** "He wants (a,b,c)." → { prefix: 'He wants', inner: 'a,b,c', suffix: '.' } */
+function parseBracketSentence_(text) {
+  const s = (text || '').toString().replace(/\s+/g, ' ').trim();
+  if (!s) return null;
+  const m = s.match(GRAMMAR_BRACKET_RE);
+  if (!m) return null;
+  return {
+    prefix: s.slice(0, m.index).trim(),
+    inner: m[0].slice(1, -1).trim(),
+    suffix: s.slice(m.index + m[0].length).trim()
+  };
+}
+
+/** カンマ区切り文字列を語句配列に */
+function splitGrammarList_(text) {
+  return (text || '').toString().split(/[,、，]/)
+    .map(function (s) { return s.replace(/\s+/g, ' ').trim(); })
+    .filter(function (s) { return s !== ''; });
+}
+
+/** prefix + 中身 + suffix を英文として連結（句読点は詰めて連結） */
+function joinGrammarSentence_(prefix, inner, suffix) {
+  let s = prefix ? (inner ? prefix + ' ' + inner : prefix) : inner;
+  if (suffix) {
+    s += /^[.,!?;:]/.test(suffix) ? suffix : ' ' + suffix;
+  }
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+/** 整合性チェック用のゆるい正規化 */
+function normalizeGrammarSentence_(s) {
+  return (s || '').toString().toLowerCase()
+    .replace(/[.,!?;:"]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function fetchQuestionsFromSheet(params) {
   const subject = params.subject;
   const unit = params.unit;
@@ -202,54 +252,72 @@ function fetchQuestionsFromSheet(params) {
     const data = sheet.getDataRange().getValues();
     if (data.length <= 1) continue;
 
-    const headers = data[0];
+    const headers = data[0].map(function (h) { return (h === null || h === undefined) ? '' : h.toString().trim(); });
+    const colIndex = {};
+    GRAMMAR_HEADERS.forEach(function (name) { colIndex[name] = headers.indexOf(name); });
+
     for (let r = 1; r < data.length; r++) {
       const row = data[r];
-
-      function getValue(headerName) {
-        const idx = headers.indexOf(headerName);
-        return idx !== -1 ? row[idx] : "";
-      }
-
-      const id = getValue("通し番号");
-      const format = getValue("問題形式");
-
-      if (id === "" || format === "") continue;
-
-      const japanese = getValue("日本語訳・和文") || getValue("和文（空所有）");
-      const sentence_template = getValue("並び替え用英文") || getValue("英文（空所有）");
-      const correct_answer = getValue("正答") || getValue("英文");
-      const dummy_selection_method = getValue("ダミー選出方法");
-
-      const poolWords = [];
-      const dummies = [];
-
-      for (let c = 0; c < headers.length; c++) {
-        const h = headers[c] ? headers[c].toString() : "";
-        if (h.startsWith("並び替え語句") && !h.includes("ダミー")) {
-          if (row[c] !== "") poolWords.push(row[c]);
-        } else if (h.includes("ダミー") && !h.includes("選出方法")) {
-          if (row[c] !== "") dummies.push(row[c]);
-        }
-      }
-
-      const assembledCorrectWords = correct_answer ? correct_answer.toString().split(' ') : [];
-
-      const q = {
-        id: id,
-        unit: sheetName,
-        format: format,
-        japanese: japanese,
-        sentence_template: sentence_template,
-        correct_answer: correct_answer,
-        all_correct_words: poolWords.length > 0 ? assembledCorrectWords : assembledCorrectWords, 
-        pool_words: poolWords.length > 0 ? poolWords : assembledCorrectWords,
-        dummies: dummies,
-        dummy_selection_method: dummy_selection_method,
-        explanation: getValue("その他説明やヒント")
+      const cell = function (name) {
+        const i = colIndex[name];
+        if (i === -1) return '';
+        const v = row[i];
+        return (v === null || v === undefined) ? '' : v.toString().replace(/\s+/g, ' ').trim();
       };
 
-      questions.push(q);
+      const id = cell('通し番号');
+      const fullSentence = cell('英文全文');
+      const japanese = cell('日本語訳');
+      if (!id || !fullSentence || !japanese) continue;
+
+      const sort = parseBracketSentence_(cell('並び替え文'));
+      const mcq = parseBracketSentence_(cell('N択文'));
+      const sortTokens = sort ? splitGrammarList_(sort.inner) : [];
+      const sortDummy = cell('並び替えダミー');
+      const mcqAnswer = mcq ? mcq.inner : '';
+      const mcqDummies = splitGrammarList_(cell('N択ダミー'));
+
+      const warnings = [];
+      if (sort && normalizeGrammarSentence_(joinGrammarSentence_(sort.prefix, sortTokens.join(' '), sort.suffix)) !== normalizeGrammarSentence_(fullSentence)) {
+        warnings.push('並び替え文を組み立てても英文全文と一致しません');
+      }
+      if (mcq && normalizeGrammarSentence_(joinGrammarSentence_(mcq.prefix, mcqAnswer, mcq.suffix)) !== normalizeGrammarSentence_(fullSentence)) {
+        warnings.push('N択文を組み立てても英文全文と一致しません');
+      }
+
+      const hasSort = sortTokens.length > 0;
+      const hasMcq = mcqAnswer !== '';
+
+      questions.push({
+        rowId: sheetName + '#' + id,
+        id: id,
+        unit: sheetName,
+        daiUnit: cell('大単元'),
+        shoUnit: cell('小単元'),
+        fullSentence: fullSentence,
+        japanese: japanese,
+        grammarArea: cell('ターゲット文法領域'),
+        explanation: cell('解説'),
+        sortPrefix: sort ? sort.prefix : '',
+        sortTokens: sortTokens,
+        sortSuffix: sort ? sort.suffix : '',
+        sortDummy: sortDummy,
+        mcqPrefix: mcq ? mcq.prefix : '',
+        mcqAnswer: mcqAnswer,
+        mcqSuffix: mcq ? mcq.suffix : '',
+        mcqDummies: mcqDummies,
+        available: {
+          A: true,
+          B: hasSort,
+          C: sortTokens.length >= 2,
+          D: hasSort && sortDummy !== '',
+          E: hasSort,
+          F: hasMcq,
+          G: hasMcq && mcqDummies.length >= 1,
+          H: hasMcq && mcqDummies.length >= 1
+        },
+        warnings: warnings
+      });
     }
   }
 
@@ -614,7 +682,7 @@ function handleSaveResult(requestData) {
   
   if (!sheet) {
     sheet = ss.insertSheet("成績記録");
-    sheet.appendRow(["タイムスタンプ", "ユーザーID", "問題ID", "学年科目", "単元", "正誤判定", "出題モード"]);
+    sheet.appendRow(SCORE_HEADERS);
   }
 
   const rows = [];
@@ -627,7 +695,10 @@ function handleSaveResult(requestData) {
       r.subject, 
       r.unit, 
       r.isCorrect, 
-      r.mode
+      r.mode,
+      r.questionFormat || '',
+      r.difficulty || '',
+      r.grammarArea || ''
     ]);
   }
   const startRow = sheet.getLastRow() + 1;
@@ -1110,8 +1181,8 @@ function ensureManagementSheets_(ss) {
   }
   if (scores.getLastRow() === 0 || scores.getRange(1, 1).getValue() === '') {
     scores.clear();
-    scores.appendRow(['タイムスタンプ', 'ユーザーID', '問題ID', '学年科目', '単元', '正誤判定', '出題モード']);
-    scores.getRange(1, 1, 1, 7).setFontWeight('bold');
+    scores.appendRow(SCORE_HEADERS);
+    scores.getRange(1, 1, 1, SCORE_HEADERS.length).setFontWeight('bold');
   }
 
   let logs = ss.getSheetByName('ログ');
@@ -1142,7 +1213,7 @@ function ensureManagementSheets_(ss) {
 }
 
 /**
- * app.js の unitData と揃えたサンプル問題ブックを grammarquizzes 内に用意する。
+ * index.html の GRAMMAR_UNITS と揃えたサンプル問題ブックを grammarquizzes 内に用意する。
  * @return {Object} 科目名 → スプレッドシートID
  */
 function ensureSampleQuestionBooks_(materialsFolder, force, created, reused) {
@@ -1171,6 +1242,13 @@ function ensureSampleQuestionBooks_(materialsFolder, force, created, reused) {
   return bookIds;
 }
 
+function hasGrammarHeaders_(sheet) {
+  if (sheet.getLastRow() < 1 || sheet.getLastColumn() < GRAMMAR_HEADERS.length) return false;
+  const current = sheet.getRange(1, 1, 1, GRAMMAR_HEADERS.length).getValues()[0]
+    .map(function (h) { return (h === null || h === undefined) ? '' : h.toString().trim(); });
+  return GRAMMAR_HEADERS.every(function (h, i) { return current[i] === h; });
+}
+
 function ensureSampleUnitSheets_(ss, units) {
   const unitNames = Object.keys(units);
   unitNames.forEach(function (unitName, index) {
@@ -1184,10 +1262,8 @@ function ensureSampleUnitSheets_(ss, units) {
       }
     }
 
-    // 空、またはヘッダのみならサンプルを流し込む（既存データは上書きしない）
-    const lastRow = sheet.getLastRow();
-    const firstCell = lastRow > 0 ? sheet.getRange(1, 1).getValue() : '';
-    if (lastRow <= 1 && (firstCell === '' || firstCell === '通し番号')) {
+    // ヘッダが GRAMMAR_HEADERS と一致しないシート（空 or 旧スキーマ）はサンプルで作り直す
+    if (!hasGrammarHeaders_(sheet)) {
       const rows = units[unitName];
       sheet.clear();
       sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
@@ -1202,97 +1278,149 @@ function ensureSampleUnitSheets_(ss, units) {
   }
 }
 
-/** サンプル問題定義（ヘッダ行 + データ行）。全形式共通の広いヘッダを使う */
+/**
+ * サンプル問題定義（ヘッダ行 + データ行）。1行が形式A〜Hすべての素材になる。
+ * 列は GRAMMAR_HEADERS の11列のみ。
+ */
 function getSampleQuestionCatalog_() {
-  // fetchQuestionsFromSheet はヘッダ名で参照するため、全列を1行にまとめる
-  const headers = [
-    '通し番号', '問題形式', '日本語訳・和文', '並び替え用英文', '英文（空所有）', '正答',
-    '並び替え語句1', '並び替え語句2', '並び替え語句3', '並び替え語句4', '並び替え語句5',
-    'ダミー1', 'ダミー2', 'ダミー3', 'ダミー選出方法', 'その他説明やヒント'
-  ];
+  const headers = GRAMMAR_HEADERS;
 
-  function row(id, format, ja, sortTpl, blankTpl, answer, words, dummies, method, hint) {
-    const w = (words || []).concat(['', '', '', '', '']).slice(0, 5);
-    const d = (dummies || []).concat(['', '', '']).slice(0, 3);
-    return [
-      id, format, ja, sortTpl || '', blankTpl || '', answer || ''
-    ].concat(w).concat(d).concat([method || '', hint || '']);
-  }
-
-  function sorting(id, ja, template, answer, words, dummies, method, hint) {
-    return row(id, '並び替え', ja, template, '', answer, words, dummies, method || '無作為', hint);
-  }
-  function choice(id, ja, template, answer, dummies, method, hint) {
-    return row(id, '4択', ja, '', template, answer, [], dummies, method || '無作為', hint);
-  }
-  function typing(id, ja, template, answer, hint) {
-    return row(id, '英訳', ja, '', template, answer, [], [], '', hint);
-  }
-  // 正誤判断指摘訂正: 4択と同じデータ形式。空所に正答かダミーを当てはめた英文を提示し、
-  // ユーザーが最終確定した英文が正答文と一致するかで判定する
-  function correction(id, ja, template, answer, dummies, hint) {
-    return row(id, '正誤判断指摘訂正', ja, '', template, answer, [], dummies, '', hint);
+  function row(id, dai, sho, full, ja, sortTpl, sortDummy, mcqTpl, mcqDummies, area, note) {
+    return [id, dai, sho, full, ja, sortTpl, sortDummy, mcqTpl, mcqDummies, area, note];
   }
 
   return {
     '中学1年 英語': {
       '単元A': [
         headers,
-        sorting(1, '私は学生です。', 'I ( ) a student.', 'am', ['am'], ['is', 'are'], '無作為', 'be動詞の基本'),
-        sorting(2, '彼女は先生です。', 'She ( ) a teacher.', 'is', ['is'], ['am', 'are'], '無作為', ''),
-        choice(3, '彼らは友達です。', 'They ( ) friends.', 'are', ['am', 'is', 'be'], '順番', ''),
-        typing(4, 'あなたは生徒です。', 'You ( ) a student.', 'are', '主語に合わせて be 動詞を選ぶ')
+        row(1, 'be動詞', '肯定文', 'I am a student.', '私は学生です。',
+          'I (am,a,student).', 'is', 'I (am) a student.', 'is,are,be,being',
+          'be動詞', '主語が I のときの be 動詞は am。'),
+        row(2, 'be動詞', '肯定文', 'She is a teacher.', '彼女は先生です。',
+          'She (is,a,teacher).', 'am', 'She (is) a teacher.', 'am,are,be,was',
+          'be動詞', '三人称単数が主語のときの be 動詞は is。'),
+        row(3, 'be動詞', '肯定文', 'They are my friends.', '彼らは私の友達です。',
+          'They (are,my,friends).', 'is', 'They (are) my friends.', 'am,is,be,was',
+          'be動詞', '主語が複数のときの be 動詞は are。'),
+        row(4, 'be動詞', '否定文', 'You are not late.', 'あなたは遅刻していません。',
+          'You (are,not,late).', 'is', 'You (are not) late.', 'is not,am not,not are,do not',
+          'be動詞', 'be動詞の否定文は be動詞のすぐ後ろに not を置く。')
       ],
       '単元B': [
         headers,
-        sorting(1, 'これは本です。', 'This ( ) a book.', 'is', ['is'], ['am', 'are'], '無作為', 'This/That'),
-        choice(2, 'あれはペンです。', 'That ( ) a pen.', 'is', ['am', 'are', 'be'], '無作為', ''),
-        typing(3, 'これらは机です。', 'These ( ) desks.', 'are', '')
+        row(1, '指示語', 'this / that', 'This is a book.', 'これは本です。',
+          'This (is,a,book).', 'are', 'This (is) a book.', 'are,am,be,were',
+          'be動詞', 'this は単数扱いなので is。'),
+        row(2, '指示語', '所有代名詞', 'That pen is mine.', 'あのペンは私のものです。',
+          'That (pen,is,mine).', 'my', 'That pen is (mine).', 'my,me,I,myself',
+          '代名詞', '「私のもの」は所有代名詞 mine。my は名詞を伴う。'),
+        row(3, '指示語', 'these / those', 'These are new desks.', 'これらは新しい机です。',
+          'These (are,new,desks).', 'is', 'These (are) new desks.', 'is,am,be,was',
+          'be動詞', 'these は複数扱いなので are。')
       ],
       'be動詞': [
         headers,
-        sorting(1, '私は元気です。', 'I ( ) fine.', 'am', ['am'], ['is', 'are'], '無作為', 'be動詞'),
-        sorting(2, '彼は忙しいです。', 'He ( ) busy.', 'is', ['is'], ['am', 'are'], '無作為', ''),
-        choice(3, '私たちは日本人です。', 'We ( ) Japanese.', 'are', ['am', 'is', 'be'], '順番', ''),
-        choice(4, 'あなたは学生ですか。', '( ) you a student?', 'Are', ['Is', 'Am', 'Be'], '無作為', '疑問文'),
-        typing(5, '彼女は歌手です。', 'She ( ) a singer.', 'is', ''),
-        correction(6, '彼らは野球選手です。', 'They ( ) baseball players.', 'are', ['is', 'am'], '主語が複数のときの be 動詞')
+        row(1, 'be動詞', '肯定文', 'I am fine today.', '私は今日元気です。',
+          'I (am,fine,today).', 'is', 'I (am) fine today.', 'is,are,be,was',
+          'be動詞', ''),
+        row(2, 'be動詞', '肯定文', 'He is very busy.', '彼はとても忙しいです。',
+          'He (is,very,busy).', 'are', 'He (is) very busy.', 'am,are,be,being',
+          'be動詞', ''),
+        row(3, 'be動詞', '肯定文', 'We are Japanese.', '私たちは日本人です。',
+          'We (are,Japanese).', 'is', 'We (are) Japanese.', 'am,is,be,being',
+          'be動詞', ''),
+        row(4, 'be動詞', '疑問文', 'Are you a student?', 'あなたは学生ですか。',
+          '(Are,you,a,student)?', 'Is', '(Are) you a student?', 'Is,Am,Be,Do',
+          'be動詞', 'be動詞の疑問文は be動詞を主語の前に出す。'),
+        row(5, 'be動詞', '過去形', 'She was a singer.', '彼女は歌手でした。',
+          'She (was,a,singer).', 'were', 'She (was) a singer.', 'were,is,been,be',
+          'be動詞', 'is の過去形は was。')
       ],
       '一般動詞': [
         headers,
-        sorting(1, '私はテニスをします。', 'I ( ) tennis.', 'play', ['play'], ['plays', 'playing'], '無作為', '一般動詞'),
-        sorting(2, '彼はサッカーをします。', 'He ( ) soccer.', 'plays', ['plays'], ['play', 'playing'], '無作為', '三人称単数'),
-        choice(3, '彼女は本を読みます。', 'She ( ) a book.', 'reads', ['read', 'reading', 'to read'], '順番', ''),
-        typing(4, '私たちは英語を勉強します。', 'We ( ) English.', 'study', '')
+        row(1, '一般動詞', '現在形', 'I play tennis every day.', '私は毎日テニスをします。',
+          'I (play,tennis,every day).', 'plays', 'I (play) tennis every day.', 'plays,playing,to play,played',
+          '一般動詞', ''),
+        row(2, '一般動詞', '三人称単数現在', 'He plays soccer after school.', '彼は放課後にサッカーをします。',
+          'He (plays,soccer,after school).', 'play', 'He (plays) soccer after school.', 'play,playing,to play,is playing',
+          '一般動詞', '三人称単数が主語で現在のことをいうときは動詞に s を付ける。'),
+        row(3, '一般動詞', '三人称単数現在', 'She reads a book every night.', '彼女は毎晩本を読みます。',
+          'She (reads,a,book,every night).', 'read', 'She (reads) a book every night.', 'read,reading,to read,is read',
+          '一般動詞', ''),
+        row(4, '一般動詞', '否定文', 'We do not study French.', '私たちはフランス語を勉強しません。',
+          'We (do,not,study,French).', 'does', 'We (do not) study French.', 'does not,are not,not do,do not to',
+          '一般動詞', '一般動詞の否定文は do not / does not を動詞の前に置き、動詞は原形にする。')
       ]
     },
     '中学2年 英語': {
       '単元A': [
         headers,
-        sorting(1, '私は昨日公園へ行きました。', 'I ( ) to the park yesterday.', 'went', ['went'], ['go', 'goes'], '無作為', '過去形'),
-        choice(2, '彼は昨日テレビを見ました。', 'He ( ) TV yesterday.', 'watched', ['watch', 'watches', 'watching'], '無作為', ''),
-        typing(3, '彼女は昨日家にいました。', 'She ( ) home yesterday.', 'was', '')
+        row(1, '時制', '過去形', 'I went to the park yesterday.', '私は昨日公園へ行きました。',
+          'I (went,to,the park,yesterday).', 'go', 'I (went) to the park yesterday.', 'go,goes,going,have gone',
+          '過去形', 'go の過去形は went。'),
+        row(2, '時制', '過去形', 'He watched TV last night.', '彼は昨夜テレビを見ました。',
+          'He (watched,TV,last night).', 'watch', 'He (watched) TV last night.', 'watch,watches,watching,is watched',
+          '過去形', ''),
+        row(3, '時制', '過去形', 'She was at home yesterday.', '彼女は昨日家にいました。',
+          'She (was,at,home,yesterday).', 'were', 'She (was) at home yesterday.', 'were,is,been,did',
+          'be動詞', '')
       ],
       '単元B': [
         headers,
-        sorting(1, '私は宿題をしなければなりません。', 'I ( ) do my homework.', 'must', ['must'], ['can', 'will'], '無作為', '助動詞'),
-        choice(2, '彼は泳ぐことができます。', 'He ( ) swim.', 'can', ['must', 'will', 'should'], '順番', ''),
-        typing(3, 'あなたは早く寝るべきです。', 'You ( ) go to bed early.', 'should', '')
+        row(1, '助動詞', 'must', 'I must do my homework.', '私は宿題をしなければなりません。',
+          'I (must,do,my homework).', 'can', 'I (must) do my homework.', 'can,will,may,am',
+          '助動詞', '助動詞の後ろの動詞は原形。'),
+        row(2, '助動詞', 'can', 'He can swim very fast.', '彼はとても速く泳げます。',
+          'He (can,swim,very fast).', 'swims', 'He (can) swim very fast.', 'is,does,cans,will can',
+          '助動詞', ''),
+        row(3, '助動詞', 'should', 'You should go to bed early.', 'あなたは早く寝るべきです。',
+          'You (should,go,to bed,early).', 'going', 'You (should go) to bed early.', 'should to go,should going,should went,are going',
+          '助動詞', '')
       ],
       '過去形': [
         headers,
-        sorting(1, '私はきのう走った。', 'I ( ) yesterday.', 'ran', ['ran'], ['run', 'runs'], '無作為', '不規則動詞'),
-        sorting(2, '彼らはきのう遊んだ。', 'They ( ) yesterday.', 'played', ['played'], ['play', 'plays'], '無作為', ''),
-        choice(3, '彼女はきのう来た。', 'She ( ) yesterday.', 'came', ['come', 'comes', 'coming'], '無作為', ''),
-        typing(4, '私たちはきのう食べた。', 'We ( ) yesterday.', 'ate', 'eat の過去形'),
-        correction(5, '彼はきのうそこへ行った。', 'He ( ) there yesterday.', 'went', ['go', 'goes'], '過去形に注意')
+        row(1, '時制', '不規則動詞', 'I ran in the park yesterday.', '私はきのう公園で走りました。',
+          'I (ran,in,the park,yesterday).', 'run', 'I (ran) in the park yesterday.', 'run,runs,running,have run',
+          '過去形', 'run の過去形は ran。'),
+        row(2, '時制', '規則動詞', 'They played baseball last Sunday.', '彼らは先週の日曜日に野球をしました。',
+          'They (played,baseball,last Sunday).', 'play', 'They (played) baseball last Sunday.', 'play,plays,playing,are played',
+          '過去形', ''),
+        row(3, '時制', '不規則動詞', 'She came here an hour ago.', '彼女は1時間前にここへ来ました。',
+          'She (came,here,an hour ago).', 'come', 'She (came) here an hour ago.', 'come,comes,coming,has came',
+          '過去形', ''),
+        row(4, '時制', '不規則動詞', 'We ate lunch at noon.', '私たちは正午に昼食を食べました。',
+          'We (ate,lunch,at noon).', 'eat', 'We (ate) lunch at noon.', 'eat,eats,eaten,eating',
+          '過去形', 'eat の過去形は ate。')
       ],
       '助動詞': [
         headers,
-        sorting(1, '私はピアノを弾けます。', 'I ( ) play the piano.', 'can', ['can'], ['must', 'will'], '無作為', 'can'),
-        choice(2, 'あなたはここに来てもよい。', 'You ( ) come here.', 'may', ['can', 'must', 'will'], '順番', ''),
-        choice(3, '私たちは急ぐべきだ。', 'We ( ) hurry.', 'should', ['can', 'may', 'will'], '無作為', ''),
-        typing(4, '彼は明日来るでしょう。', 'He ( ) come tomorrow.', 'will', '')
+        row(1, '助動詞', 'can', 'I can play the piano.', '私はピアノを弾けます。',
+          'I (can,play,the piano).', 'to play', 'I (can) play the piano.', 'am,do,will can,can to',
+          '助動詞', ''),
+        row(2, '助動詞', 'may', 'You may come here.', 'あなたはここに来てもよい。',
+          'You (may,come,here).', 'coming', 'You (may) come here.', 'are,do,mays,may to',
+          '助動詞', 'may は許可「〜してもよい」を表す。'),
+        row(3, '助動詞', 'should', 'We should hurry now.', '私たちは今急ぐべきだ。',
+          'We (should,hurry,now).', 'hurrying', 'We (should) hurry now.', 'are,do,shoulds,should to',
+          '助動詞', ''),
+        row(4, '助動詞', 'will', 'He will come tomorrow.', '彼は明日来るでしょう。',
+          'He (will,come,tomorrow).', 'comes', 'He (will come) tomorrow.', 'will comes,will came,is come,will to come',
+          '助動詞', '')
+      ],
+      '不定詞': [
+        headers,
+        row(1, '不定詞', 'SVO to do', 'He wants his daughter to be a doctor in the future.', '彼は娘に将来医者になってほしいと思っている。',
+          'He wants (his,daughter,to,be,a,doctor,in,the future).', 'being',
+          'He wants his daughter (to be) a doctor in the future.', 'to being,being,be,become,will become',
+          '不定詞', '動詞 want を SVO to do という形で用いると不定詞の動作主が O となり、「O が to do することを S は欲する」⇒「S は O に do してほしい」という意味になる。'),
+        row(2, '不定詞', '副詞的用法', 'I went to the library to study math.', '私は数学を勉強するために図書館へ行きました。',
+          'I went to the library (to,study,math).', 'studying',
+          'I went to the library (to study) math.', 'studying,study,for study,for studying',
+          '不定詞', '「〜するために」と目的を表す副詞的用法。'),
+        row(3, '不定詞', '名詞的用法', 'It is important to read many books.', '多くの本を読むことは大切です。',
+          'It is important (to,read,many,books).', 'reading',
+          'It is important (to read) many books.', 'reading,read,for read,to reading',
+          '不定詞', '形式主語 It を立て、真主語の不定詞句を後ろに置く形。')
       ]
     }
   };

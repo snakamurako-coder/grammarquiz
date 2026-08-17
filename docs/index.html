@@ -72,7 +72,10 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
    ゲーム画面（並び替えUI & 不足語入力）
    ========================================= */
 .question-box { background: #fff; padding: 14px 16px; border-radius: 10px; box-shadow: var(--shadow); margin-bottom: 14px; }
+.question-instruction { font-size: 0.85em; color: var(--c-text-sub); line-height: 1.5; margin-bottom: 8px; }
 .question-ja { font-size: clamp(1.1em, 4.2vw, 1.3em); font-weight: bold; color: var(--c-text); }
+#question-explanation { background: #fff8e1; border-left: 4px solid #ffb300; padding: 12px 14px; border-radius: 8px; margin-top: 12px; font-size: 0.9em; line-height: 1.6; color: var(--c-text); text-align: left; }
+#question-explanation .explanation-area { font-weight: bold; display: block; margin-bottom: 4px; color: var(--c-text-sub); font-size: 0.9em; }
 .area-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 5px; }
 .area-label { font-size: 0.85em; font-weight: bold; color: var(--c-text-sub); }
 
@@ -255,13 +258,42 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
       <div class="unit-grid" id="unit-container"></div>
     </div>
     <div class="setting-section">
-      <div class="section-title">3. 詳細オプション</div>
+      <div class="section-title">3. 大単元・小単元で絞り込み（任意）</div>
+      <div class="form-group">
+        <label>大単元</label>
+        <div class="division-grid" id="grammar-dai-container"></div>
+      </div>
+      <div class="form-group">
+        <label>小単元</label>
+        <div class="division-grid" id="grammar-sho-container"></div>
+      </div>
+      <div id="grammar-division-note" style="font-size:0.85em;color:#666;"></div>
+    </div>
+    <div class="setting-section">
+      <div class="section-title">4. 出題形式を選択</div>
+      <div class="check-list" id="format-check-list"></div>
+      <div class="form-group" id="format-g-options" style="display:none;">
+        <label>【形式G】選択肢数（データのダミー数が足りない場合は自動で減ります）</label>
+        <select id="g-choice-count">
+          <option value="2">2択</option>
+          <option value="3">3択</option>
+          <option value="4" selected>4択</option>
+          <option value="5">5択</option>
+          <option value="6">6択</option>
+          <option value="7">7択</option>
+          <option value="8">8択</option>
+          <option value="9">9択</option>
+        </select>
+        <div class="check-list">
+          <label class="check-item"><input type="checkbox" id="g-include-none" checked> 「この中に正答はない」を選択肢に含める（難易度+1）</label>
+        </div>
+      </div>
       <div class="check-list">
-        <label class="check-item"><input type="checkbox" id="dummy-option" checked> [上級] ダミー（不要語）を混入する</label>
+        <label class="check-item"><input type="checkbox" id="include-unknown" checked> 選択式の問題に「わからない・自信がない」を含める</label>
       </div>
     </div>
     <div class="setting-section">
-      <div class="section-title">4. 出題モード</div>
+      <div class="section-title">5. 出題モード</div>
       <div class="check-list">
         <label class="check-item"><input type="radio" name="play-mode" value="normal" checked> 順番通り（選択した全問）</label>
         <label class="check-item"><input type="radio" name="play-mode" value="random10"> ランダム演習（10問）</label>
@@ -383,18 +415,18 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
   <div id="game-screen" style="display: none;">
     <button id="back-btn" class="btn-small" style="margin-bottom: 10px;">← 設定に戻る</button>
     <div class="question-box">
+      <div class="question-instruction" id="question-instruction"></div>
       <div class="question-ja" id="question-ja"></div>
-    </div>
-
-    <!-- Missing Word Input Area -->
-    <div id="missing-word-input-area">
-      <div class="input-label">不足語:</div>
-      <div id="missing-word-display" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
-      <button id="create-card-btn" disabled>カードを作成</button>
     </div>
 
     <!-- 並び替え用 UI -->
     <div id="sort-ui" style="display:none;">
+      <!-- 不足カード作成（形式Cのみ） -->
+      <div id="missing-word-input-area">
+        <div class="input-label">不足語:</div>
+        <div id="missing-word-display" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
+        <button id="create-card-btn" disabled>カードを作成</button>
+      </div>
       <div class="area-header">
         <div class="area-label">▼ 回答欄（並べてください）</div>
       </div>
@@ -408,10 +440,12 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
         <button id="move-all-btn" class="btn-small">↑ 流し込む</button>
       </div>
       <div id="word-pool" class="sortable-area"></div>
-      <div class="area-header">
-        <div class="area-label">▼ 除外置き場</div>
+      <div id="trash-area">
+        <div class="area-header">
+          <div class="area-label">▼ 除外置き場（使わないカード）</div>
+        </div>
+        <div id="trash-slot" class="sortable-area"></div>
       </div>
-      <div id="trash-slot" class="sortable-area"></div>
       <button id="submit-btn" style="display: none; width: 100%; padding: 15px; font-size: 1.2em; background-color: #4caf50; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px;">これで回答する</button>
     </div>
 
@@ -442,8 +476,8 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 
       <!-- STEP1: 誤りの有無を判断 -->
       <div id="correction-judge-area" class="correction-actions">
-        <button id="correction-no-error-btn" class="choice-btn">✅ 誤りはない（この英文で正しい）</button>
-        <button id="correction-has-error-btn" class="choice-btn unknown">⚠️ 誤りがある</button>
+        <button id="correction-no-error-btn" class="choice-btn">✅ 正しい</button>
+        <button id="correction-has-error-btn" class="choice-btn unknown">⚠️ 誤っている</button>
       </div>
 
       <!-- STEP2: 誤り箇所を指摘 -->
@@ -468,6 +502,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
     </div>
 
     <div id="result-msg"></div>
+    <div id="question-explanation" style="display: none;"></div>
     <button id="next-btn" class="btn-primary" style="display: none; margin-top: 15px;">次の問題へ進む</button>
   </div>
 
@@ -829,10 +864,12 @@ const AlgorithmModule = (() => {
       return pool.slice(0, 10);
     }
 
+    const entry = (q) => history[q.rowId] || { correct: 0, incorrect: 0, lastPlayed: 0 };
+
     if (mode === "weakness") {
       pool.sort((a, b) => {
-        const ha = history[a.id] || { correct: 0, incorrect: 0, lastPlayed: 0 };
-        const hb = history[b.id] || { correct: 0, incorrect: 0, lastPlayed: 0 };
+        const ha = entry(a);
+        const hb = entry(b);
         const errorRateA = ha.incorrect > 0 ? (ha.incorrect / (ha.correct + ha.incorrect)) : -1;
         const errorRateB = hb.incorrect > 0 ? (hb.incorrect / (hb.correct + hb.incorrect)) : -1;
         
@@ -846,8 +883,8 @@ const AlgorithmModule = (() => {
 
     if (mode === "unseen") {
       pool.sort((a, b) => {
-        const ha = history[a.id] || { correct: 0, incorrect: 0, lastPlayed: 0 };
-        const hb = history[b.id] || { correct: 0, incorrect: 0, lastPlayed: 0 };
+        const ha = entry(a);
+        const hb = entry(b);
         const playsA = ha.correct + ha.incorrect;
         const playsB = hb.correct + hb.incorrect;
         
@@ -1241,8 +1278,195 @@ window.KeyboardModule = KeyboardModule;
 
 // authService.js — GAS① 認証ゲート方式（AuthGateService を使用）
 
+// grammarFormats.js
+// 文法演習の出題形式A〜Hの定義と共通ユーティリティ
+
+const CHOICE_NONE = 'この中に正答はない';
+const CHOICE_UNKNOWN = 'わからない・自信がない';
+const BLANK_MARK = '(________)';
+
+const GRAMMAR_FORMATS = [
+  {
+    key: 'A', label: '和文英訳', difficulty: 10, difficultyLabel: '10',
+    instruction: '次の日本語を英語に直してください。'
+  },
+  {
+    key: 'B', label: '空所補充【長い】', difficulty: 9, difficultyLabel: '9',
+    instruction: '次の日本語と同じ意味を持つ英文となるように空所に英語の語句を補ってください。'
+  },
+  {
+    key: 'C', label: '並び替え（不足語句カード追加）', difficulty: 8, difficultyLabel: '8',
+    instruction: '次の日本語と同じ意味を持つ英文となるように空所に以下の語句カードを並べ替え、あてはめなさい。ただし、並べ替え用カードが一枚足りないのでそのカードを自分で入力し作成し使用してください。'
+  },
+  {
+    key: 'D', label: '並び替え（不要語句カード排除）', difficulty: 7, difficultyLabel: '7',
+    instruction: '次の日本語と同じ意味を持つ英文となるように空所に以下の語句カードを並べ替え、あてはめなさい。ただし、使用しない語句カードが一枚あるのでそれは使用せずに回答しなさい。'
+  },
+  {
+    key: 'E', label: '並び替え（通常）', difficulty: 6, difficultyLabel: '6',
+    instruction: '次の日本語と同じ意味を持つ英文となるように空所に以下の語句カードを並べ替え、あてはめなさい。'
+  },
+  {
+    key: 'F', label: '語句補完【短い記述】', difficulty: 6, difficultyLabel: '6',
+    instruction: '次の日本語と同じ意味を持つ英文となるように空所に英語の語句を補ってください。'
+  },
+  {
+    key: 'G', label: '語句補完【選択方式】', difficulty: 3, difficultyLabel: '1〜5（選択肢数で変動）',
+    instruction: '次の日本語と同じ意味を持つ英文となるように空所にあてはまる英語の語句を選びなさい。'
+  },
+  {
+    key: 'H', label: '正誤判断【判断・指摘訂正】', difficulty: 7, difficultyLabel: '7',
+    instruction: '次の日本語と同じ意味を持つ自然な英文となっている場合は「正しい」を、そうでない場合は「誤っている」を選びなさい。'
+  }
+];
+
+const GRAMMAR_FORMAT_MAP = {};
+GRAMMAR_FORMATS.forEach(function (f) { GRAMMAR_FORMAT_MAP[f.key] = f; });
+
+/** 英文比較用の正規化（空白圧縮・小文字化・引用符統一・文末句読点の無視） */
+function normalizeEnglish(s) {
+  return (s || '').toString()
+    .replace(/[’‘]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/[.,!?;:]+$/, '');
+}
+
+/** prefix + 中身 + suffix を英文として連結（句読点は詰めて連結） */
+function joinEnglish(prefix, inner, suffix) {
+  let s = prefix ? (inner ? prefix + ' ' + inner : prefix) : inner;
+  if (suffix) s += /^[.,!?;:]/.test(suffix) ? suffix : ' ' + suffix;
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+function shuffleArray(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+  }
+  return a;
+}
+
+// grammarQuizGenerator.js
+// 1行のデータ（サーバーで派生済み）から、選択された形式のうち1つを適用して問題を生成する
+
+const GrammarQuizGenerator = (() => {
+  function gDifficulty(wordChoiceCount, includeNone) {
+    let d;
+    if (wordChoiceCount <= 2) d = 1;
+    else if (wordChoiceCount === 3) d = 2;
+    else if (wordChoiceCount === 4) d = 3;
+    else d = 4;
+    return d + (includeNone ? 1 : 0);
+  }
+
+  function baseQuestion(row, format) {
+    return {
+      id: row.rowId + '#' + format,
+      rowId: row.rowId,
+      format: format,
+      unit: row.unit,
+      daiUnit: row.daiUnit,
+      shoUnit: row.shoUnit,
+      grammarArea: row.grammarArea,
+      explanation: row.explanation,
+      japanese: row.japanese,
+      fullSentence: row.fullSentence,
+      difficulty: GRAMMAR_FORMAT_MAP[format].difficulty
+    };
+  }
+
+  /** 形式A/B/F/C/D/E 共通: 回答は「answerPrefix + 入力 + answerSuffix」を英文全文と比較して採点する */
+  function withAnswerFrame(q, prefix, inner, suffix) {
+    q.answerPrefix = prefix;
+    q.answerSuffix = suffix;
+    q.expectedInner = inner;
+    return q;
+  }
+
+  function buildQuestion(row, format, options) {
+    const q = baseQuestion(row, format);
+    const sortInner = row.sortTokens.join(' ');
+
+    if (format === 'A') {
+      return withAnswerFrame(q, '', row.fullSentence, '');
+    }
+    if (format === 'B') {
+      return withAnswerFrame(q, row.sortPrefix, sortInner, row.sortSuffix);
+    }
+    if (format === 'F') {
+      return withAnswerFrame(q, row.mcqPrefix, row.mcqAnswer, row.mcqSuffix);
+    }
+    if (format === 'C' || format === 'D' || format === 'E') {
+      withAnswerFrame(q, row.sortPrefix, sortInner, row.sortSuffix);
+      q.slotCount = row.sortTokens.length;
+      if (format === 'C') {
+        // カードを1枚ランダムに抜き、それは学習者が自分で入力して作る
+        const missingIndex = Math.floor(Math.random() * row.sortTokens.length);
+        q.poolTokens = shuffleArray(row.sortTokens.filter(function (_, i) { return i !== missingIndex; }));
+      } else if (format === 'D') {
+        q.poolTokens = shuffleArray(row.sortTokens.concat([row.sortDummy]));
+      } else {
+        q.poolTokens = shuffleArray(row.sortTokens);
+      }
+      return q;
+    }
+    if (format === 'G') {
+      const maxWords = 1 + row.mcqDummies.length;
+      const wordCount = Math.max(2, Math.min(options.choiceCount, maxWords));
+      const includeNone = !!options.includeNone;
+      // 「この中に正答はない」を含めるときは 1/3 の確率で正答を選択肢から除く
+      const hideCorrect = includeNone && row.mcqDummies.length >= wordCount && Math.random() < 1 / 3;
+      const dummies = shuffleArray(row.mcqDummies);
+
+      let entries;
+      if (hideCorrect) {
+        entries = dummies.slice(0, wordCount).map(function (t) { return { text: t, isCorrect: false }; });
+      } else {
+        entries = [{ text: row.mcqAnswer, isCorrect: true }].concat(
+          dummies.slice(0, wordCount - 1).map(function (t) { return { text: t, isCorrect: false }; })
+        );
+      }
+      const choices = shuffleArray(entries);
+      if (includeNone) choices.push({ text: CHOICE_NONE, isCorrect: hideCorrect, isSpecial: true });
+      if (options.includeUnknown) choices.push({ text: CHOICE_UNKNOWN, isCorrect: false, isSpecial: true, isUnknown: true });
+
+      q.choices = choices;
+      q.mcqPrefix = row.mcqPrefix;
+      q.mcqSuffix = row.mcqSuffix;
+      q.correctText = hideCorrect ? CHOICE_NONE : row.mcqAnswer;
+      q.difficulty = gDifficulty(entries.length, includeNone);
+      return q;
+    }
+    // 形式H: 正答またはダミーのいずれかを空所に当てはめた英文を提示する
+    const candidates = [row.mcqAnswer].concat(row.mcqDummies);
+    const picked = candidates[Math.floor(Math.random() * candidates.length)];
+    q.presentedSentence = joinEnglish(row.mcqPrefix, picked, row.mcqSuffix);
+    q.correctSentence = joinEnglish(row.mcqPrefix, row.mcqAnswer, row.mcqSuffix);
+    return q;
+  }
+
+  function buildQuestions(rows, options) {
+    const out = [];
+    rows.forEach(function (row) {
+      const candidates = options.formats.filter(function (f) { return row.available[f]; });
+      if (candidates.length === 0) return;
+      const format = candidates[Math.floor(Math.random() * candidates.length)];
+      out.push(buildQuestion(row, format, options));
+    });
+    return out;
+  }
+
+  return { buildQuestions };
+})();
+
+window.GrammarQuizGenerator = GrammarQuizGenerator;
+
 // choice.js
-// 4択問題制御モジュール
+// N択問題制御モジュール
 
 const ChoiceModule = (() => {
   const container = document.getElementById('choice-sentence-container');
@@ -1250,71 +1474,48 @@ const ChoiceModule = (() => {
   const resultMsg = document.getElementById('result-msg');
   
   let qData = null;
+  let answered = false;
 
   function initGame(questionData) {
     qData = questionData;
-    container.innerHTML = '';
+    answered = false;
     buttonsContainer.innerHTML = '';
     resultMsg.textContent = '';
 
-    if (qData.sentence_template) {
-      container.textContent = qData.sentence_template;
-    } else {
-      container.textContent = "";
-    }
+    container.textContent = joinEnglish(qData.mcqPrefix, BLANK_MARK, qData.mcqSuffix);
 
-    let choices = [qData.correct_answer];
-    
-    // ダミー選出方法
-    let dummiesToUse = [];
-    if (qData.dummy_selection_method === "順番" || qData.dummy_selection_method === "sequential") {
-       dummiesToUse = qData.dummies.slice(0, 3);
-    } else {
-       // 無作為
-       let shuffled = [...qData.dummies].sort(() => Math.random() - 0.5);
-       dummiesToUse = shuffled.slice(0, 3);
-    }
-    
-    choices = choices.concat(dummiesToUse);
-    choices.sort(() => Math.random() - 0.5);
-
-    // 第5の選択肢
-    choices.push("わからない・自信がない");
-
-    choices.forEach((choiceText) => {
-      if (!choiceText) return;
+    qData.choices.forEach((choice) => {
       const btn = document.createElement('button');
       btn.className = 'choice-btn';
-      btn.textContent = choiceText;
-      
-      if (choiceText === "わからない・自信がない") {
-        btn.classList.add('unknown');
-      }
-
-      btn.onclick = () => handleChoice(choiceText, btn);
+      btn.textContent = choice.text;
+      if (choice.isSpecial) btn.classList.add('unknown');
+      btn.onclick = () => handleChoice(choice, btn);
       buttonsContainer.appendChild(btn);
     });
   }
 
-  function handleChoice(selectedText, btn) {
-    if (resultMsg.textContent !== '') return;
+  function handleChoice(choice, btn) {
+    if (answered) return;
+    answered = true;
 
     Array.from(buttonsContainer.children).forEach(b => b.classList.remove('selected'));
     btn.classList.add('selected');
 
-    if (selectedText === qData.correct_answer) {
+    if (choice.isCorrect) {
       resultMsg.textContent = "⭕️ 正解！";
       resultMsg.style.color = "#4caf50";
-      if(window.onQuestionCompleted) window.onQuestionCompleted(true);
-    } else if (selectedText === "わからない・自信がない") {
-      resultMsg.textContent = "復習しましょう。正答: " + qData.correct_answer;
-      resultMsg.style.color = "#ff9800";
-      if(window.onQuestionCompleted) window.onQuestionCompleted(false);
-    } else {
-      resultMsg.textContent = "❌ 不正解...";
-      resultMsg.style.color = "#f44336";
-      if(window.onQuestionCompleted) window.onQuestionCompleted(false);
+      if (window.onQuestionCompleted) window.onQuestionCompleted(true);
+      return;
     }
+
+    if (choice.isUnknown) {
+      resultMsg.textContent = "復習しましょう。正答: " + qData.correctText;
+      resultMsg.style.color = "#ff9800";
+    } else {
+      resultMsg.textContent = "❌ 不正解... 正答: " + qData.correctText;
+      resultMsg.style.color = "#f44336";
+    }
+    if (window.onQuestionCompleted) window.onQuestionCompleted(false, { isUnknown: !!choice.isUnknown });
   }
 
   return { initGame };
@@ -1332,6 +1533,7 @@ const TypingModule = (() => {
   const resultMsg = document.getElementById('result-msg');
   
   let qData = null;
+  let answered = false;
 
   document.body.addEventListener('click', (e) => {
     if (window.KeyboardModule && document.getElementById('typing-ui').style.display === 'block') {
@@ -1343,16 +1545,15 @@ const TypingModule = (() => {
 
   function initGame(questionData) {
     qData = questionData;
-    container.innerHTML = '';
+    answered = false;
     resultMsg.textContent = '';
     inputDisplay.textContent = "タップして入力";
     submitBtn.style.display = 'none';
 
-    if (qData.sentence_template) {
-      container.textContent = qData.sentence_template;
-    } else {
-      container.textContent = "（訳を入力してください）";
-    }
+    // 形式A（和文英訳）は前後の英文がないため空所テンプレートを表示しない
+    container.textContent = (qData.answerPrefix || qData.answerSuffix)
+      ? joinEnglish(qData.answerPrefix, BLANK_MARK, qData.answerSuffix)
+      : '';
 
     if (window.KeyboardModule) {
       window.KeyboardModule.init(
@@ -1390,13 +1591,18 @@ const TypingModule = (() => {
     };
   }
 
+  // 入力を空所に当てはめた英文が英文全文と一致すれば正解
   function checkAnswer(userAnswer) {
-    if (userAnswer.trim().toLowerCase() === qData.correct_answer.trim().toLowerCase()) {
+    if (answered) return;
+    answered = true;
+
+    const assembled = joinEnglish(qData.answerPrefix, userAnswer, qData.answerSuffix);
+    if (normalizeEnglish(assembled) === normalizeEnglish(qData.fullSentence)) {
       resultMsg.textContent = "⭕️ 正解！";
       resultMsg.style.color = "#4caf50";
       if(window.onQuestionCompleted) window.onQuestionCompleted(true);
     } else {
-      resultMsg.textContent = "❌ 惜しい！ 正答: " + qData.correct_answer;
+      resultMsg.textContent = "❌ 惜しい！ 正答: " + qData.expectedInner;
       resultMsg.style.color = "#f44336";
       if(window.onQuestionCompleted) window.onQuestionCompleted(false);
     }
@@ -1436,12 +1642,6 @@ const CorrectionModule = (() => {
   let finalSentence = "";
   let phase = "judge";        // judge → locate → edit → preview → done
 
-  const BLANK_RE = /[(\[（［<＜][^)\]）］>＞]*[)\]）］>＞]/;
-
-  function normalize(s) {
-    return (s || "").toString().replace(/\s+/g, " ").trim().toLowerCase();
-  }
-
   document.body.addEventListener('click', (e) => {
     if (window.KeyboardModule && document.getElementById('correction-ui').style.display === 'block') {
       if (!e.target.closest('#correction-edit-area') && !e.target.closest('#keyboard-container')) {
@@ -1454,23 +1654,8 @@ const CorrectionModule = (() => {
     qData = questionData;
     resultMsg.textContent = '';
 
-    // 出題文の組み立て：
-    // ・テンプレートに空所 ( ) がある場合（4択からのコンバート）:
-    //   正答またはダミーのどれかを無作為に当てはめた英文を提示。
-    //   正答文 = 正答を当てはめた英文。
-    // ・空所がない場合: 提示文 = テンプレート、正答文 = 正答（フルセンテンス）。
-    const tpl = (qData.sentence_template || "").toString();
-    if (BLANK_RE.test(tpl)) {
-      correctSentence = tpl.replace(BLANK_RE, qData.correct_answer).replace(/\s+/g, " ").trim();
-      const options = [qData.correct_answer].concat(qData.dummies || []);
-      const pick = options[Math.floor(Math.random() * options.length)];
-      presentedSentence = tpl.replace(BLANK_RE, pick).replace(/\s+/g, " ").trim();
-    } else {
-      presentedSentence = tpl.replace(/\s+/g, " ").trim();
-      correctSentence = (qData.correct_answer || "").toString().replace(/\s+/g, " ").trim();
-      if (!presentedSentence) presentedSentence = correctSentence;
-    }
-
+    presentedSentence = qData.presentedSentence;
+    correctSentence = qData.correctSentence;
     tokens = presentedSentence.split(" ");
     resetToJudge();
   }
@@ -1480,7 +1665,7 @@ const CorrectionModule = (() => {
     selected = new Set();
     finalSentence = "";
     renderTokens();
-    hintEl.textContent = "この英文は正しいですか？";
+    hintEl.textContent = "この英文は日本語と同じ意味の自然な英文になっていますか？";
     judgeArea.style.display = 'flex';
     locateBtn.style.display = 'none';
     editArea.style.display = 'none';
@@ -1602,7 +1787,7 @@ const CorrectionModule = (() => {
     previewArea.style.display = 'none';
     if (window.KeyboardModule) window.KeyboardModule.hide();
 
-    if (normalize(finalSentence) === normalize(correctSentence)) {
+    if (normalizeEnglish(finalSentence) === normalizeEnglish(correctSentence)) {
       resultMsg.textContent = "⭕️ 正解！ " + correctSentence;
       resultMsg.style.color = "#4caf50";
       if (window.onQuestionCompleted) window.onQuestionCompleted(true);
@@ -2361,8 +2546,12 @@ const SortingModule = (() => {
   const missDisplay = document.getElementById('missing-word-display');
   const createCardBtn = document.getElementById('create-card-btn');
   const missingWordArea = document.getElementById('missing-word-input-area');
+  const trashArea = document.getElementById('trash-area');
+  const prefixText = document.getElementById('prefix-text');
+  const suffixText = document.getElementById('suffix-text');
   
   let qData = null;
+  let answered = false;
 
   document.body.addEventListener('click', (e) => {
     if (window.KeyboardModule && document.getElementById('sort-ui').style.display === 'block') {
@@ -2374,16 +2563,24 @@ const SortingModule = (() => {
 
   function initGame(questionData) {
     qData = questionData;
-    
+    answered = false;
+
     answerSlot.innerHTML = '';
     wordPool.innerHTML = '';
     trashSlot.innerHTML = '';
     resultMsg.textContent = '';
-    
-    let initialPool = [...qData.pool_words, ...qData.dummies];
-    initialPool.sort(() => Math.random() - 0.5);
-    initialPool.forEach(w => createCard(w, wordPool));
-    
+
+    prefixText.textContent = qData.answerPrefix;
+    suffixText.textContent = qData.answerSuffix;
+
+    // 形式Cのみ不足カードを自分で作る。形式Dのみ除外置き場を使う。
+    missingWordArea.style.display = (qData.format === 'C') ? 'flex' : 'none';
+    trashArea.style.display = (qData.format === 'D') ? 'block' : 'none';
+    missDisplay.textContent = '';
+    createCardBtn.disabled = true;
+
+    qData.poolTokens.forEach(w => createCard(w, wordPool));
+
     // キーボード機能の初期化
     if (window.KeyboardModule) {
       window.KeyboardModule.init(
@@ -2437,8 +2634,8 @@ const SortingModule = (() => {
   new Sortable(trashSlot, sortOptions);
 
   function checkSubmitVisibility() {
-    if (!qData) return;
-    submitBtn.style.display = (answerSlot.children.length === qData.all_correct_words.length) ? 'block' : 'none';
+    if (!qData || answered) return;
+    submitBtn.style.display = (answerSlot.children.length === qData.slotCount) ? 'block' : 'none';
     resultMsg.textContent = "";
   }
 
@@ -2447,27 +2644,26 @@ const SortingModule = (() => {
     checkSubmitVisibility();
   });
 
+  // 空所に当てはめた英文が英文全文と一致すれば正解（同じ語句のカードが複数あっても判定できる）
   submitBtn.addEventListener('click', () => {
-    if (!qData) return;
-    const userAnswer = Array.from(answerSlot.children).map(c => c.textContent).join(' ');
-    if (userAnswer === qData.correct_answer) {
+    if (!qData || answered) return;
+    answered = true;
+    submitBtn.style.display = 'none';
+
+    const inner = Array.from(answerSlot.children).map(c => c.textContent).join(' ');
+    const assembled = joinEnglish(qData.answerPrefix, inner, qData.answerSuffix);
+    if (normalizeEnglish(assembled) === normalizeEnglish(qData.fullSentence)) {
       resultMsg.textContent = "⭕️ 正解！";
       resultMsg.style.color = "#4caf50";
-      submitBtn.style.display = 'none'; // 正解したら消す
       if(window.onQuestionCompleted) window.onQuestionCompleted(true);
     } else {
-      resultMsg.textContent = "❌ 不正解...";
+      resultMsg.textContent = "❌ 不正解... 正答: " + qData.expectedInner;
       resultMsg.style.color = "#f44336";
       if(window.onQuestionCompleted) window.onQuestionCompleted(false);
     }
   });
 
-  return {
-    initGame,
-    createCard,
-    getPool: () => wordPool,
-    checkSubmitVisibility
-  };
+  return { initGame };
 })();
 
 // エクスポート（グローバルスコープ）
@@ -2488,10 +2684,10 @@ let currentVocabSetName = '';
 let currentVocabBookName = '';
 let currentVocabSheetName = '';
 
-// GASへ送信するテキスト値
-const unitData = { 
-  "中学1年 英語": ["単元A", "単元B", "be動詞", "一般動詞"], 
-  "中学2年 英語": ["単元A", "単元B", "過去形", "助動詞"] 
+// 科目（スプレッドシート名）ごとの単元（シート名）
+const GRAMMAR_UNITS = {
+  "中学1年 英語": ["単元A", "単元B", "be動詞", "一般動詞"],
+  "中学2年 英語": ["単元A", "単元B", "過去形", "助動詞", "不定詞"]
 };
 
 // UI要素
@@ -2502,12 +2698,9 @@ const screens = {
 };
 const elements = {
   subject: document.getElementById('subject-select'),
-  units: document.getElementById('unit-container'),
   startBtn: document.getElementById('start-btn'),
   backBtn: document.getElementById('back-btn'),
-  qJa: document.getElementById('question-ja'),
-  prefix: document.getElementById('prefix-text'),
-  suffix: document.getElementById('suffix-text')
+  qJa: document.getElementById('question-ja')
 };
 
 // セレクトボックスの表示テキスト（実際のスプレッドシート名として使われるもの）を取得
@@ -2516,33 +2709,184 @@ function getSelectedSubjectName() {
   return select.options[select.selectedIndex].text;
 }
 
-function renderUnits(subjectText) {
-  elements.units.innerHTML = '';
-  // フォールバック付きで単元リストを取得
-  const units = unitData[subjectText] || ["単元A", "単元B"];
-  
-  units.forEach(unit => {
-    const lbl = document.createElement('label');
-    lbl.className = 'unit-card selected';
-    lbl.innerHTML = `<input type="checkbox" value="${unit}" checked style="display:none;"> ${unit}`;
-    lbl.querySelector('input').addEventListener('change', e => {
-      lbl.classList.toggle('selected', e.target.checked);
-    });
-    elements.units.appendChild(lbl);
-  });
-}
+// grammarSettings.js
+// 単元選択・大単元/小単元フィルタ・出題形式の選択を管理する
+const GrammarSettingsModule = (() => {
+  const unitContainer = document.getElementById('unit-container');
+  const daiContainer = document.getElementById('grammar-dai-container');
+  const shoContainer = document.getElementById('grammar-sho-container');
+  const note = document.getElementById('grammar-division-note');
+  const formatList = document.getElementById('format-check-list');
+  const gOptions = document.getElementById('format-g-options');
 
-elements.subject.addEventListener('change', e => {
-  renderUnits(getSelectedSubjectName());
-});
+  let rows = [];
+  let loadedKey = '';
+
+  function selectionKey() {
+    return getSelectedSubjectName() + '|' + getSelectedUnits().join(',');
+  }
+
+  function getSelectedUnits() {
+    return Array.from(unitContainer.querySelectorAll('input:checked')).map(el => el.value);
+  }
+
+  function renderUnits() {
+    unitContainer.innerHTML = '';
+    GRAMMAR_UNITS[getSelectedSubjectName()].forEach(unit => {
+      const lbl = document.createElement('label');
+      lbl.className = 'unit-card selected';
+      lbl.innerHTML = `<input type="checkbox" value="${unit}" checked style="display:none;"> ${unit}`;
+      lbl.querySelector('input').addEventListener('change', e => {
+        lbl.classList.toggle('selected', e.target.checked);
+        refreshDivisions();
+      });
+      unitContainer.appendChild(lbl);
+    });
+  }
+
+  function renderFormatChecks() {
+    formatList.innerHTML = '';
+    GRAMMAR_FORMATS.forEach(f => {
+      const lbl = document.createElement('label');
+      lbl.className = 'check-item';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = f.key;
+      input.checked = true;
+      input.addEventListener('change', updateFormatOptions);
+      const span = document.createElement('span');
+      span.textContent = `【形式${f.key}】${f.label}（難易度 ${f.difficultyLabel}）`;
+      lbl.appendChild(input);
+      lbl.appendChild(span);
+      formatList.appendChild(lbl);
+    });
+    updateFormatOptions();
+  }
+
+  function updateFormatOptions() {
+    gOptions.style.display = getSelectedFormats().indexOf('G') !== -1 ? 'block' : 'none';
+  }
+
+  function getSelectedFormats() {
+    return Array.from(formatList.querySelectorAll('input:checked')).map(el => el.value);
+  }
+
+  function renderDivisionChecks(container, items) {
+    container.innerHTML = '';
+    items.forEach(item => {
+      const lbl = document.createElement('label');
+      lbl.className = 'check-item';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = item;
+      input.checked = true;
+      const span = document.createElement('span');
+      span.textContent = item;
+      lbl.appendChild(input);
+      lbl.appendChild(span);
+      container.appendChild(lbl);
+    });
+  }
+
+  /** 全選択は「絞り込みなし」として空配列を返す */
+  function selectedDivisions(container) {
+    const inputs = Array.from(container.querySelectorAll('input'));
+    const checked = inputs.filter(el => el.checked).map(el => el.value);
+    return checked.length === inputs.length ? [] : checked;
+  }
+
+  function uniqueValues(list, key) {
+    const out = [];
+    list.forEach(r => { if (r[key] && out.indexOf(r[key]) === -1) out.push(r[key]); });
+    return out;
+  }
+
+  function resetRows() {
+    rows = [];
+    loadedKey = '';
+    daiContainer.innerHTML = '';
+    shoContainer.innerHTML = '';
+  }
+
+  async function loadRows() {
+    const key = selectionKey();
+    const loaded = await fetchGrammarRows(getSelectedSubjectName(), getSelectedUnits().join(','));
+    if (key !== selectionKey()) return; // 読み込み中に選択が変わっていたら破棄
+    rows = loaded;
+    loadedKey = key;
+    renderDivisionChecks(daiContainer, uniqueValues(rows, 'daiUnit'));
+    renderDivisionChecks(shoContainer, uniqueValues(rows, 'shoUnit'));
+    const broken = rows.filter(r => r.warnings.length > 0);
+    note.textContent = `${rows.length}件のデータを読み込みました。`
+      + (broken.length ? ` ⚠️ 英文全文と組み立て結果が一致しないデータ ${broken.length}件（通し番号: ${broken.map(r => r.id).join(', ')}）` : '');
+  }
+
+  async function refreshDivisions() {
+    resetRows();
+    if (getSelectedUnits().length === 0) {
+      note.textContent = '単元を1つ以上選択してください。';
+      return;
+    }
+    note.textContent = 'データを読み込み中...';
+    try {
+      await loadRows();
+    } catch (e) {
+      note.textContent = 'データの読み込みに失敗しました: ' + e.message;
+    }
+  }
+
+  /** 学習開始時に使う。失敗は呼び出し側で通知するため throw する */
+  async function ensureLoaded() {
+    if (loadedKey === selectionKey()) return;
+    resetRows();
+    await loadRows();
+  }
+
+  function getFilteredRows() {
+    const dai = selectedDivisions(daiContainer);
+    const sho = selectedDivisions(shoContainer);
+    return rows.filter(r =>
+      (dai.length === 0 || dai.indexOf(r.daiUnit) !== -1) &&
+      (sho.length === 0 || sho.indexOf(r.shoUnit) !== -1)
+    );
+  }
+
+  function getQuizOptions() {
+    return {
+      formats: getSelectedFormats(),
+      choiceCount: parseInt(document.getElementById('g-choice-count').value, 10),
+      includeNone: document.getElementById('g-include-none').checked,
+      includeUnknown: document.getElementById('include-unknown').checked
+    };
+  }
+
+  function init() {
+    renderFormatChecks();
+    renderUnits();
+    refreshDivisions();
+  }
+
+  elements.subject.addEventListener('change', () => {
+    renderUnits();
+    refreshDivisions();
+  });
+
+  return { init, refreshDivisions, ensureLoaded, getSelectedUnits, getFilteredRows, getQuizOptions };
+})();
+
+window.GrammarSettingsModule = GrammarSettingsModule;
 
 elements.startBtn.addEventListener('click', async () => {
   currentAppMode = 'grammar';
-  const subjectName = getSelectedSubjectName();
-  const checkedUnits = Array.from(elements.units.querySelectorAll('input:checked')).map(el => el.value);
-  
-  if (checkedUnits.length === 0) {
+
+  if (GrammarSettingsModule.getSelectedUnits().length === 0) {
     alert("単元を1つ以上選択してください。");
+    return;
+  }
+
+  const options = GrammarSettingsModule.getQuizOptions();
+  if (options.formats.length === 0) {
+    alert("出題形式を1つ以上選択してください。");
     return;
   }
 
@@ -2564,14 +2908,14 @@ elements.startBtn.addEventListener('click', async () => {
   elements.startBtn.textContent = "問題を読み込み中...";
 
   try {
-    const unitParam = checkedUnits.join(",");
-    const rawQuestions = await fetchQuestionsFromGAS(subjectName, unitParam);
+    await GrammarSettingsModule.ensureLoaded();
+    const rows = GrammarSettingsModule.getFilteredRows();
     const mode = document.querySelector('input[name="play-mode"]:checked').value;
+
+    const generated = GrammarQuizGenerator.buildQuestions(rows, options);
+    const questions = AlgorithmModule.buildQuestionSet(generated, mode);
     
-    // アルゴリズムモジュールを通す
-    const questions = window.AlgorithmModule ? window.AlgorithmModule.buildQuestionSet(rawQuestions, mode) : rawQuestions;
-    
-    if (questions && questions.length > 0) {
+    if (questions.length > 0) {
       currentQuestionDataList = questions;
       totalQuestionsCount = questions.length;
       currentQuestionIndex = 0;
@@ -2582,7 +2926,7 @@ elements.startBtn.addEventListener('click', async () => {
       document.getElementById('result-screen').style.display = 'none';
       screens.game.style.display = 'block';
     } else {
-      alert("問題が見つからない、またはシートに有効なデータがありません。");
+      alert("選択した条件で出題できる問題がありません。単元・絞り込み・出題形式を確認してください。");
     }
   } catch (error) {
     console.error(error);
@@ -2655,7 +2999,7 @@ elements.backBtn.addEventListener('click', () => {
   screens.settings.style.display = 'block';
 });
 
-async function fetchQuestionsFromGAS(subject, unit) {
+async function fetchGrammarRows(subject, unit) {
   const result = await window.PresetCacheModule.getQuestions(subject, unit, false);
   if (result.status === "success") {
     return result.data;
@@ -2663,65 +3007,57 @@ async function fetchQuestionsFromGAS(subject, unit) {
   throw new Error(result.message || "問題の取得に失敗しました");
 }
 
+const QUESTION_UI_IDS = ['typing-ui', 'sort-ui', 'choice-ui', 'correction-ui', 'vocab-quiz-ui'];
+
+const QUESTION_HANDLERS = {
+  A: { ui: 'typing-ui', module: TypingModule },
+  B: { ui: 'typing-ui', module: TypingModule },
+  F: { ui: 'typing-ui', module: TypingModule },
+  C: { ui: 'sort-ui', module: SortingModule },
+  D: { ui: 'sort-ui', module: SortingModule },
+  E: { ui: 'sort-ui', module: SortingModule },
+  G: { ui: 'choice-ui', module: ChoiceModule },
+  H: { ui: 'correction-ui', module: CorrectionModule },
+  'vocab-enja': { ui: 'vocab-quiz-ui', module: VocabQuizModule }
+};
+
 function loadQuestionToGame(qData) {
-  elements.qJa.textContent = qData.format === 'vocab-enja'
-    ? '単語学習（英日） ' + (currentQuestionIndex + 1) + ' / ' + totalQuestionsCount
-    : qData.japanese;
-  
-  // UIの初期化・非表示化
-  document.getElementById('sort-ui').style.display = 'none';
-  document.getElementById('choice-ui').style.display = 'none';
-  document.getElementById('typing-ui').style.display = 'none';
-  document.getElementById('correction-ui').style.display = 'none';
-  document.getElementById('vocab-quiz-ui').style.display = 'none';
-  const missingWordArea = document.getElementById('missing-word-input-area');
-  if (missingWordArea) missingWordArea.style.display = 'none';
-  document.getElementById('result-msg').textContent = '';
+  const instructionEl = document.getElementById('question-instruction');
+  const explanationEl = document.getElementById('question-explanation');
 
-  const format = qData.format || "並び替え";
-
-  if (format === 'vocab-enja') {
-    document.getElementById('vocab-quiz-ui').style.display = 'block';
-    if (window.VocabQuizModule) window.VocabQuizModule.initGame(qData);
-  } else if (format.includes("正誤")) {
-    // 正誤判断指摘訂正
-    document.getElementById('correction-ui').style.display = 'block';
-    if (window.CorrectionModule) window.CorrectionModule.initGame(qData);
-  } else if (format.includes("4択") || format.includes("４択")) {
-    // 4択問題
-    document.getElementById('choice-ui').style.display = 'block';
-    if (window.ChoiceModule) window.ChoiceModule.initGame(qData);
-  } else if (format.includes("英訳") || format.includes("空所")) {
-    // 和文英訳・空所入力
-    document.getElementById('typing-ui').style.display = 'block';
-    if (window.TypingModule) window.TypingModule.initGame(qData);
+  if (qData.format === 'vocab-enja') {
+    instructionEl.textContent = '';
+    elements.qJa.textContent = '単語学習（英日） ' + (currentQuestionIndex + 1) + ' / ' + totalQuestionsCount;
   } else {
-    // 並び替え問題
-    document.getElementById('sort-ui').style.display = 'block';
-    if (missingWordArea) missingWordArea.style.display = 'flex';
-
-    if (qData.sentence_template) {
-      const match = qData.sentence_template.match(/[(\[（［<＜][^)\]）］>＞]*[)\]）］>＞]/);
-      if (match) {
-        elements.prefix.textContent = qData.sentence_template.substring(0, match.index).trim();
-        elements.suffix.textContent = qData.sentence_template.substring(match.index + match[0].length).trim();
-      } else {
-        elements.prefix.textContent = qData.sentence_template;
-        elements.suffix.textContent = "";
-      }
-    } else {
-      elements.prefix.textContent = "";
-      elements.suffix.textContent = "";
-    }
-    
-    if (!document.getElementById('dummy-option').checked) {
-      qData.dummies = [];
-    }
-    
-    if (window.SortingModule) {
-      window.SortingModule.initGame(qData);
-    }
+    const def = GRAMMAR_FORMAT_MAP[qData.format];
+    instructionEl.textContent = `【形式${def.key}】難易度${qData.difficulty}　${def.instruction}`;
+    elements.qJa.textContent = qData.japanese;
   }
+
+  QUESTION_UI_IDS.forEach(id => { document.getElementById(id).style.display = 'none'; });
+  document.getElementById('result-msg').textContent = '';
+  explanationEl.style.display = 'none';
+  explanationEl.innerHTML = '';
+
+  const handler = QUESTION_HANDLERS[qData.format];
+  document.getElementById(handler.ui).style.display = 'block';
+  handler.module.initGame(qData);
+}
+
+/** 回答後に解説（ターゲット文法領域つき）を表示する */
+function showExplanation(qData) {
+  if (!qData.explanation && !qData.grammarArea) return;
+  const el = document.getElementById('question-explanation');
+  if (qData.grammarArea) {
+    const area = document.createElement('span');
+    area.className = 'explanation-area';
+    area.textContent = 'ターゲット文法領域: ' + qData.grammarArea;
+    el.appendChild(area);
+  }
+  if (qData.explanation) {
+    el.appendChild(document.createTextNode(qData.explanation));
+  }
+  el.style.display = 'block';
 }
 
 // モジュールからのコールバック
@@ -2729,24 +3065,18 @@ window.onQuestionCompleted = (isCorrect, meta) => {
   meta = meta || {};
   const currentQ = currentQuestionDataList[currentQuestionIndex];
 
-  if (currentAppMode === 'vocab' && window.SrsModule && currentQ.wordId) {
-    window.SrsModule.update(
-      currentQ.wordId,
-      isCorrect,
-      meta.answerMs || 0,
-      !!meta.isUnknown
-    );
-  }
-
-  if (window.AlgorithmModule) {
-    window.AlgorithmModule.recordResult(currentQ.id, isCorrect);
+  if (currentAppMode === 'vocab') {
+    if (window.SrsModule && currentQ.wordId) {
+      window.SrsModule.update(currentQ.wordId, isCorrect, meta.answerMs || 0, !!meta.isUnknown);
+    }
+  } else {
+    // 履歴は「行」単位で集計する（同じ英文を別形式で出題しても苦手判定が継続する）
+    AlgorithmModule.recordResult(currentQ.rowId, isCorrect);
+    showExplanation(currentQ);
   }
   if (isCorrect) currentScore++;
   
-  let modeDesc = "通常";
-  const modeRadio = document.querySelector('input[name="play-mode"]:checked');
-  if (modeRadio) modeDesc = modeRadio.value;
-  
+  const modeDesc = document.querySelector('input[name="play-mode"]:checked').value;
   const user = window.AuthService && window.AuthService.currentUser ? window.AuthService.currentUser : {};
   
   sessionResults.push({
@@ -2756,10 +3086,13 @@ window.onQuestionCompleted = (isCorrect, meta) => {
     grade: user.grade || "",
     userClass: user.class || "",
     questionId: currentQ.id,
-    subject: currentAppMode === 'vocab' ? '単語学習' : elements.subject.options[elements.subject.selectedIndex].text,
+    subject: currentAppMode === 'vocab' ? '単語学習' : getSelectedSubjectName(),
     unit: currentQ.unit || "",
     isCorrect: isCorrect ? "正解" : "不正解",
-    mode: currentAppMode === 'vocab' ? 'vocab-enja' : modeDesc
+    mode: currentAppMode === 'vocab' ? 'vocab-enja' : modeDesc,
+    questionFormat: currentQ.format,
+    difficulty: currentQ.difficulty || '',
+    grammarArea: currentQ.grammarArea || ''
   });
   
   document.getElementById('next-btn').style.display = 'block';
@@ -2782,8 +3115,7 @@ async function sendSessionLogToGAS() {
   if (currentAppMode === 'vocab') {
     setName = '単語学習: ' + (currentVocabSetName || 'セット');
   } else {
-    const checkedUnits = Array.from(elements.units.querySelectorAll('input:checked')).map(el => el.value);
-    setName = `${getSelectedSubjectName()} - ${checkedUnits.join(',')}`;
+    setName = `${getSelectedSubjectName()} - ${GrammarSettingsModule.getSelectedUnits().join(',')}`;
   }
 
   try {
@@ -2908,7 +3240,7 @@ function enterAppAsGuest() {
 
   screens.login.style.display = 'none';
   screens.settings.style.display = 'block';
-  renderUnits(getSelectedSubjectName());
+  GrammarSettingsModule.init();
   initModeTabs();
   initVocabModules();
 }
@@ -2940,6 +3272,7 @@ function initModeTabs() {
 
   document.getElementById('cache-refresh-btn').addEventListener('click', async function () {
     if (window.PresetCacheModule) window.PresetCacheModule.clearAll();
+    await GrammarSettingsModule.refreshDivisions();
     if (window.VocabSettingsModule) {
       try {
         await window.VocabSettingsModule.loadCatalog(true);
@@ -2991,7 +3324,7 @@ window.onLoginSuccess = function(user) {
   screens.login.style.display = 'none';
   screens.settings.style.display = 'block';
   
-  renderUnits(getSelectedSubjectName());
+  GrammarSettingsModule.init();
   initModeTabs();
   initVocabModules();
   fetchUserLogs();
