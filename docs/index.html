@@ -796,7 +796,7 @@ const PresetCacheModule = (() => {
   }
 
   async function getQuestions(subject, unit, force) {
-    const key = 'questions_' + subject + '_' + unit;
+    const key = 'questions_v11_' + subject + '_' + unit;
     if (!force) {
       const cached = get(key);
       if (cached) return { status: 'success', data: cached };
@@ -2748,7 +2748,7 @@ const GrammarSettingsModule = (() => {
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.value = f.key;
-      input.checked = true;
+      input.checked = false;
       input.addEventListener('change', updateFormatOptions);
       const span = document.createElement('span');
       span.textContent = `【形式${f.key}】${f.label}（難易度 ${f.difficultyLabel}）`;
@@ -2775,7 +2775,7 @@ const GrammarSettingsModule = (() => {
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.value = item;
-      input.checked = true;
+      input.checked = false;
       const span = document.createElement('span');
       span.textContent = item;
       lbl.appendChild(input);
@@ -2784,11 +2784,9 @@ const GrammarSettingsModule = (() => {
     });
   }
 
-  /** 全選択は「絞り込みなし」として空配列を返す */
+  /** チェックした項目だけで絞り込む。未選択＝絞り込みなし */
   function selectedDivisions(container) {
-    const inputs = Array.from(container.querySelectorAll('input'));
-    const checked = inputs.filter(el => el.checked).map(el => el.value);
-    return checked.length === inputs.length ? [] : checked;
+    return Array.from(container.querySelectorAll('input:checked')).map(el => el.value);
   }
 
   function uniqueValues(list, key) {
@@ -2804,16 +2802,16 @@ const GrammarSettingsModule = (() => {
     shoContainer.innerHTML = '';
   }
 
-  async function loadRows() {
+  async function loadRows(forceRefresh) {
     const key = selectionKey();
-    const loaded = await fetchGrammarRows(getSelectedSubjectName(), getSelectedUnits().join(','));
+    const loaded = await fetchGrammarRows(getSelectedSubjectName(), getSelectedUnits().join(','), forceRefresh);
     if (key !== selectionKey()) return; // 読み込み中に選択が変わっていたら破棄
     rows = loaded;
     loadedKey = key;
     renderDivisionChecks(daiContainer, uniqueValues(rows, 'daiUnit'));
     renderDivisionChecks(shoContainer, uniqueValues(rows, 'shoUnit'));
-    const broken = rows.filter(r => r.warnings.length > 0);
-    note.textContent = `${rows.length}件のデータを読み込みました。`
+    const broken = rows.filter(r => (r.warnings || []).length > 0);
+    note.textContent = `${rows.length}件のデータを読み込みました。（大単元・小単元は未選択＝絞り込みなし）`
       + (broken.length ? ` ⚠️ 英文全文と組み立て結果が一致しないデータ ${broken.length}件（通し番号: ${broken.map(r => r.id).join(', ')}）` : '');
   }
 
@@ -2831,11 +2829,16 @@ const GrammarSettingsModule = (() => {
     }
   }
 
-  /** 学習開始時に使う。失敗は呼び出し側で通知するため throw する */
-  async function ensureLoaded() {
-    if (loadedKey === selectionKey()) return;
+  /** 学習開始時に使う。最新データを API から再取得する */
+  async function prepareForStart() {
     resetRows();
-    await loadRows();
+    if (getSelectedUnits().length === 0) {
+      throw new Error('単元を1つ以上選択してください。');
+    }
+    await loadRows(true);
+    if (rows.length === 0) {
+      throw new Error('問題データが0件です。キャッシュ更新後に再度お試しください。');
+    }
   }
 
   function getFilteredRows() {
@@ -2867,7 +2870,7 @@ const GrammarSettingsModule = (() => {
     refreshDivisions();
   });
 
-  return { init, refreshDivisions, ensureLoaded, getSelectedUnits, getFilteredRows, getQuizOptions };
+  return { init, refreshDivisions, prepareForStart, getSelectedUnits, getFilteredRows, getQuizOptions };
 })();
 
 window.GrammarSettingsModule = GrammarSettingsModule;
@@ -2904,11 +2907,15 @@ elements.startBtn.addEventListener('click', async () => {
   elements.startBtn.textContent = "問題を読み込み中...";
 
   try {
-    await GrammarSettingsModule.ensureLoaded();
+    await GrammarSettingsModule.prepareForStart();
     const rows = GrammarSettingsModule.getFilteredRows();
     const mode = document.querySelector('input[name="play-mode"]:checked').value;
 
     const generated = GrammarQuizGenerator.buildQuestions(rows, options);
+    if (generated.length === 0) {
+      alert("選択した出題形式で生成できる問題がありません。形式の選択か大単元・小単元の絞り込みを見直してください。");
+      return;
+    }
     const questions = AlgorithmModule.buildQuestionSet(generated, mode);
     
     if (questions.length > 0) {
@@ -2995,10 +3002,35 @@ elements.backBtn.addEventListener('click', () => {
   screens.settings.style.display = 'block';
 });
 
-async function fetchGrammarRows(subject, unit) {
-  const result = await window.PresetCacheModule.getQuestions(subject, unit, false);
+function normalizeGrammarRow(row) {
+  if (!row.warnings) row.warnings = [];
+  if (!row.sortTokens) row.sortTokens = [];
+  if (!row.mcqDummies) row.mcqDummies = [];
+  const sortTokens = row.sortTokens;
+  const sortDummy = row.sortDummy || '';
+  const mcqAnswer = row.mcqAnswer || '';
+  const mcqDummies = row.mcqDummies;
+  const hasSort = sortTokens.length > 0;
+  const hasMcq = mcqAnswer !== '';
+  if (!row.available || typeof row.available !== 'object') {
+    row.available = {
+      A: true,
+      B: hasSort,
+      C: sortTokens.length >= 2,
+      D: hasSort && sortDummy !== '',
+      E: hasSort,
+      F: hasMcq,
+      G: hasMcq && mcqDummies.length >= 1,
+      H: hasMcq && mcqDummies.length >= 1
+    };
+  }
+  return row;
+}
+
+async function fetchGrammarRows(subject, unit, forceRefresh) {
+  const result = await window.PresetCacheModule.getQuestions(subject, unit, !!forceRefresh);
   if (result.status === "success") {
-    return result.data;
+    return (result.data || []).map(normalizeGrammarRow);
   }
   throw new Error(result.message || "問題の取得に失敗しました");
 }
@@ -3036,6 +3068,11 @@ function loadQuestionToGame(qData) {
   explanationEl.innerHTML = '';
 
   const handler = QUESTION_HANDLERS[qData.format];
+  if (!handler) {
+    console.error('未対応の出題形式:', qData.format);
+    document.getElementById('result-msg').textContent = '未対応の出題形式です: ' + qData.format;
+    return;
+  }
   document.getElementById(handler.ui).style.display = 'block';
   handler.module.initGame(qData);
 }
