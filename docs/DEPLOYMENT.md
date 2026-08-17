@@ -4,7 +4,7 @@
 
 | コンポーネント | 配置 | 実行権限 | 役割 |
 |---|---|---|---|
-| GAS① 管理ダッシュボード | `script.google.com/.../exec`（dashboard.html） | **アクセスしているユーザー** | 単語登録・マイ単語帳・学習スタート・成績保存 |
+| GAS① ダッシュボード | `script.google.com/.../exec`（dashboard.html） | **アクセスしているユーザー** | 単語登録・マイ単語帳・学習スタート・成績保存 |
 | GAS② JSON API | `script.google.com/.../exec?action=...` | **作成者（自分）** | プリセット配布・採点API・CacheService |
 | GitHub Pages | `docs/index.html` | 静的 | 単語N択・文法演習・音読プレースホルダ |
 
@@ -42,7 +42,7 @@ clasp push
 
 ---
 
-## 3. GAS①（ユーザー権限・管理ダッシュボード）デプロイ
+## 3. GAS①（ユーザー権限・ダッシュボード）デプロイ
 
 1. 同じプロジェクトで **もう1つ** ウェブアプリデプロイを作成
 2. 設定:
@@ -86,7 +86,7 @@ https://script.google.com/macros/s/.../exec?action=setup
 
 または Apps Script エディタで `setupEnvironment(true)` を実行。
 
-作成者Drive に `grammarquizzes/`（文法演習）、`vocabulary/`（プリセット）、管理ブックが生成されます。
+作成者Drive に `grammarquizzes/`（文法演習）、`vocabulary/`（プリセット）、`DigitalDrill` スプレッドシートが生成されます。
 旧環境の `materials/` フォルダは初回アクセス時に自動で `grammarquizzes/` にリネームされます。
 
 セットアップ実行者のメールアドレスが `ADMIN_EMAIL` として記録され、**管理者はホワイトリスト登録なしで常に利用できます**。
@@ -176,7 +176,7 @@ GitHub Pages 上では Google Session を直接取得できないため、**GAS�
 
 ホワイトリストに登録されたユーザーと管理者のみがアプリを利用できます。
 
-- **登録方法**: 管理ブック（作成者Drive の `DigitalDrill管理`）の `whitelist` シートに、`account` 列へ利用者の Google メールアドレスを追記
+- **登録方法**: 作成者Drive の `DigitalDrill` スプレッドシートの `whitelist` シートに、`account` 列へ利用者の Google メールアドレスを追記
 - **GitHub Pages 学習画面**: GAS① 認証ゲート経由。未登録ユーザーは `?action=auth` で拒否
 - **GAS① ダッシュボード**: アクセス時に whitelist（Script Properties キャッシュ）と照合
 - **管理者**: セットアップ実行者（`ADMIN_EMAIL`）は whitelist 登録不要で常に利用可
@@ -198,7 +198,7 @@ Apps Script → プロジェクトの設定 → スクリプト プロパティ:
 
 ## トラブルシューティング
 
-- **「利用が許可されていないアカウントです」**: 管理ブックの `whitelist` シートを確認
+- **「利用が許可されていないアカウントです」**: `DigitalDrill` スプレッドシートの `whitelist` シートを確認
 - **「認証トークンが無効」**: 90分経過後は再ログイン（GAS① `?action=auth`）
 - **成績が保存されない**: Pages でログイン済みか確認（authToken 必須）
 - **dashboard が真っ白**: GAS① のデプロイが「ユーザーとして実行」になっているか確認

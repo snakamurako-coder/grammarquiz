@@ -46,11 +46,12 @@ const MATERIALS_FOLDER_NAME = 'grammarquizzes';
 /** 旧フォルダ名（既存環境からの自動リネーム用） */
 const LEGACY_MATERIALS_FOLDER_NAME = 'materials';
 const VOCABULARY_FOLDER_NAME = 'vocabulary';
-const MANAGEMENT_BOOK_NAME = 'DigitalDrill管理';
-/** 旧名称（Drive 上の既存リソースを改名して再利用する） */
-const LEGACY_MANAGEMENT_BOOK_NAME = 'BrightStage管理';
-const LEGACY_USER_DATA_FOLDER_NAME = 'BrightStage_MyData';
-const LEGACY_USER_LOG_BOOK_NAME = 'BrightStage学習記録';
+/** 本体スプレッドシート（whitelist・成績・ログ） */
+const APP_BOOK_NAME = 'DigitalDrill';
+/** 旧ファイル名（初回検出時に APP_BOOK_NAME へ改名して再利用） */
+const LEGACY_APP_BOOK_NAMES = ['DigitalDrill管理', 'BrightStage管理'];
+const LEGACY_USER_DATA_FOLDER_NAMES = ['BrightStage_MyData'];
+const LEGACY_USER_LOG_BOOK_NAMES = ['BrightStage学習記録'];
 const MY_VOCAB_BOOK_NAME = 'マイ単語帳';
 const UNREGISTERED = '(未登録)';
 const USER_SRS_SHEET_NAME = 'SRS状態';
@@ -187,7 +188,7 @@ function doGet(e) {
   // googleusercontent の echo URL ではなく /exec の正規 URL を使う（クエリ破壊・白紙防止）
   template.AUTH_URL = ScriptApp.getService().getUrl() + '?action=auth';
   return template.evaluate()
-    .setTitle(APP_NAME + ' 管理')
+    .setTitle(APP_NAME)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -447,7 +448,7 @@ function handleLogin(requestData) {
 
 // =========================================================
 // ①-2 ホワイトリスト認可ヘルパー
-//   GAS①（ユーザー権限実行）は管理ブックを直接開けないため、
+//   GAS①（ユーザー権限実行）は本体スプレッドシートを直接開けないため、
 //   GAS②（作成者権限）実行時に Script Properties へキャッシュしておき、
 //   GAS① はキャッシュを参照して入口で判定する。
 // =========================================================
@@ -462,7 +463,7 @@ function isAdminEmail_(email) {
   return !!admin && String(email || '').trim().toLowerCase() === admin;
 }
 
-/** whitelist シートから許可メール一覧（小文字）を読み取る。管理ブックへのアクセス権が必要 */
+/** whitelist シートから許可メール一覧（小文字）を読み取る。本体スプレッドシートへのアクセス権が必要 */
 function readWhitelistEmailsFromSheet_() {
   const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
   if (!spreadId) throw new Error('SPREADSHEET_IDが設定されていません');
@@ -479,7 +480,7 @@ function readWhitelistEmailsFromSheet_() {
   return emails;
 }
 
-/** whitelist を Script Properties にキャッシュ（管理ブックを開けない実行文脈では何もしない） */
+/** whitelist を Script Properties にキャッシュ（本体スプレッドシートを開けない実行文脈では何もしない） */
 function syncWhitelistCache_() {
   try {
     const emails = readWhitelistEmailsFromSheet_();
@@ -910,7 +911,7 @@ function handleRegisterVocabWords(requestData) {
 }
 
 // =========================================================
-// ⑥ 初回セットアップ（フォルダ・管理ブック・サンプル問題）
+// ⑥ 初回セットアップ（フォルダ・本体スプレッドシート・サンプル問題）
 // =========================================================
 
 /**
@@ -963,7 +964,7 @@ function setupEnvironment(force) {
 }
 
 /**
- * ウェブアプリGASと同じDrive階層に grammarquizzes / 管理ブック / サンプル問題を整える。
+ * ウェブアプリGASと同じDrive階層に grammarquizzes / DigitalDrill / サンプル問題を整える。
  * @param {boolean} force true のとき、欠落リソースを再生成してプロパティを上書き
  * @return {Object} 作成・参照したリソース情報
  */
@@ -986,9 +987,9 @@ function setupEnvironment_(force) {
   const materialsFolder = getOrCreateMaterialsFolder_(parentFolder, force, created, reused);
   props.setProperty(PROP.MATERIALS_FOLDER_ID, materialsFolder.getId());
 
-  const managementSs = getOrCreateManagementBook_(parentFolder, force, created, reused);
-  ensureManagementSheets_(managementSs);
-  props.setProperty(PROP.SPREADSHEET_ID, managementSs.getId());
+  const appSs = getOrCreateAppBook_(parentFolder, force, created, reused);
+  ensureAppBookSheets_(appSs);
+  props.setProperty(PROP.SPREADSHEET_ID, appSs.getId());
 
   // 管理者（setup 実行者）を記録（未設定時のみ）し、whitelist をキャッシュ
   if (!props.getProperty(PROP.ADMIN_EMAIL)) {
@@ -1024,8 +1025,8 @@ function setupEnvironment_(force) {
     materialsFolderId: materialsFolder.getId(),
     vocabularyFolderId: vocabularyFolder.getId(),
     myVocabBookId: myVocabBook.getId(),
-    managementBookId: managementSs.getId(),
-    managementBookUrl: managementSs.getUrl(),
+    managementBookId: appSs.getId(),
+    managementBookUrl: appSs.getUrl(),
     sampleBookIds: sampleBookIds,
     sampleVocabBookIds: sampleVocabBookIds,
     created: created,
@@ -1058,36 +1059,53 @@ function getMaterialsFolder() {
   throw new Error(MATERIALS_FOLDER_NAME + "フォルダが見つかりません。setupEnvironment() を実行してください。");
 }
 
-function findChildSpreadsheetWithMigration_(parentFolder, name, legacyName) {
+function findChildSpreadsheetWithMigration_(parentFolder, name, legacyNames) {
   let file = findChildSpreadsheetByName_(parentFolder, name);
   if (file) return file;
-  file = findChildSpreadsheetByName_(parentFolder, legacyName);
-  if (file) {
-    file.setName(name);
-    return file;
+  const legacyList = Array.isArray(legacyNames) ? legacyNames : [legacyNames];
+  for (let i = 0; i < legacyList.length; i++) {
+    file = findChildSpreadsheetByName_(parentFolder, legacyList[i]);
+    if (file) {
+      file.setName(name);
+      return file;
+    }
   }
   return null;
 }
 
-function findChildFolderWithMigration_(parentFolder, name, legacyName) {
+function migrateAppBookFileName_(file) {
+  const name = file.getName();
+  if (name === APP_BOOK_NAME) return;
+  for (let i = 0; i < LEGACY_APP_BOOK_NAMES.length; i++) {
+    if (name === LEGACY_APP_BOOK_NAMES[i]) {
+      file.setName(APP_BOOK_NAME);
+      return;
+    }
+  }
+}
+
+function findChildFolderWithMigration_(parentFolder, name, legacyNames) {
   let folder = findChildFolderByName_(parentFolder, name);
   if (folder) return folder;
-  folder = findChildFolderByName_(parentFolder, legacyName);
-  if (folder) {
-    folder.setName(name);
-    return folder;
+  const legacyList = Array.isArray(legacyNames) ? legacyNames : [legacyNames];
+  for (let i = 0; i < legacyList.length; i++) {
+    folder = findChildFolderByName_(parentFolder, legacyList[i]);
+    if (folder) {
+      folder.setName(name);
+      return folder;
+    }
   }
   return null;
 }
 
-function findFolderByNameWithMigration_(name, legacyName, preferredParentId) {
+function findFolderByNameWithMigration_(name, legacyNames, preferredParentId) {
   let fallback = null;
-  const names = [name, legacyName];
+  const names = [name].concat(Array.isArray(legacyNames) ? legacyNames : [legacyNames]);
   for (let n = 0; n < names.length; n++) {
     const it = DriveApp.getFoldersByName(names[n]);
     while (it.hasNext()) {
       const candidate = it.next();
-      if (names[n] === legacyName) candidate.setName(name);
+      if (names[n] !== name) candidate.setName(name);
       if (!fallback) fallback = candidate;
       const parents = candidate.getParents();
       while (parents.hasNext()) {
@@ -1176,7 +1194,7 @@ function getOrCreateMaterialsFolder_(parentFolder, force, created, reused) {
   return folder;
 }
 
-function getOrCreateManagementBook_(parentFolder, force, created, reused) {
+function getOrCreateAppBook_(parentFolder, force, created, reused) {
   const props = PropertiesService.getScriptProperties();
 
   if (!force) {
@@ -1184,8 +1202,8 @@ function getOrCreateManagementBook_(parentFolder, force, created, reused) {
     if (existingId) {
       try {
         const file = DriveApp.getFileById(existingId);
-        if (file.getName() === LEGACY_MANAGEMENT_BOOK_NAME) file.setName(MANAGEMENT_BOOK_NAME);
-        reused.push(MANAGEMENT_BOOK_NAME);
+        migrateAppBookFileName_(file);
+        reused.push(APP_BOOK_NAME);
         return SpreadsheetApp.openById(existingId);
       } catch (e) {
         // ID が無効な場合は名前検索へ
@@ -1193,31 +1211,31 @@ function getOrCreateManagementBook_(parentFolder, force, created, reused) {
     }
 
     const existingFile = findChildSpreadsheetWithMigration_(
-      parentFolder, MANAGEMENT_BOOK_NAME, LEGACY_MANAGEMENT_BOOK_NAME
+      parentFolder, APP_BOOK_NAME, LEGACY_APP_BOOK_NAMES
     );
     if (existingFile) {
       props.setProperty(PROP.SPREADSHEET_ID, existingFile.getId());
-      reused.push(MANAGEMENT_BOOK_NAME);
+      reused.push(APP_BOOK_NAME);
       return SpreadsheetApp.open(existingFile);
     }
   } else {
     const existingFile = findChildSpreadsheetWithMigration_(
-      parentFolder, MANAGEMENT_BOOK_NAME, LEGACY_MANAGEMENT_BOOK_NAME
+      parentFolder, APP_BOOK_NAME, LEGACY_APP_BOOK_NAMES
     );
     if (existingFile) {
       props.setProperty(PROP.SPREADSHEET_ID, existingFile.getId());
-      reused.push(MANAGEMENT_BOOK_NAME);
+      reused.push(APP_BOOK_NAME);
       return SpreadsheetApp.open(existingFile);
     }
   }
 
-  const ss = createSpreadsheetInFolder_(MANAGEMENT_BOOK_NAME, parentFolder);
+  const ss = createSpreadsheetInFolder_(APP_BOOK_NAME, parentFolder);
   props.setProperty(PROP.SPREADSHEET_ID, ss.getId());
-  created.push(MANAGEMENT_BOOK_NAME);
+  created.push(APP_BOOK_NAME);
   return ss;
 }
 
-function ensureManagementSheets_(ss) {
+function ensureAppBookSheets_(ss) {
   // whitelist
   let whitelist = ss.getSheetByName('whitelist');
   if (!whitelist) {
@@ -2003,7 +2021,7 @@ function handleScoreReading(requestData) {
 }
 
 /**
- * アプリ本体（grammarquizzes / vocabulary / 管理ブック）と同じ親フォルダを返す。
+ * アプリ本体（grammarquizzes / vocabulary / DigitalDrill）と同じ親フォルダを返す。
  * ScriptProperties → スクリプト親 → マイドライブ直下の順。
  */
 function resolveAppParentFolder_() {
@@ -2035,7 +2053,7 @@ function ensureUserDataFolder_() {
   if (folderId) {
     try {
       folder = DriveApp.getFolderById(folderId);
-      if (folder.getName() === LEGACY_USER_DATA_FOLDER_NAME) {
+      if (folder.getName() === LEGACY_USER_DATA_FOLDER_NAMES[0]) {
         folder.setName(USER_DATA_FOLDER_NAME);
       }
     } catch (e) {
@@ -2048,12 +2066,12 @@ function ensureUserDataFolder_() {
 
   if (!folder) {
     folder = findChildFolderWithMigration_(
-      parent, USER_DATA_FOLDER_NAME, LEGACY_USER_DATA_FOLDER_NAME
+      parent, USER_DATA_FOLDER_NAME, LEGACY_USER_DATA_FOLDER_NAMES
     );
   }
 
   if (!folder) {
-    folder = findFolderByNameWithMigration_(USER_DATA_FOLDER_NAME, LEGACY_USER_DATA_FOLDER_NAME, parentId);
+    folder = findFolderByNameWithMigration_(USER_DATA_FOLDER_NAME, LEGACY_USER_DATA_FOLDER_NAMES, parentId);
   }
 
   if (!folder) {
@@ -2117,7 +2135,7 @@ function getOrCreateUserLogBook_(folder, userProps) {
   }
 
   const existing = findChildSpreadsheetWithMigration_(
-    folder, USER_LOG_BOOK_NAME, LEGACY_USER_LOG_BOOK_NAME
+    folder, USER_LOG_BOOK_NAME, LEGACY_USER_LOG_BOOK_NAMES
   );
   if (existing) return SpreadsheetApp.open(existing);
 

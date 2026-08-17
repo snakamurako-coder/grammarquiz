@@ -188,7 +188,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
     <div class="header-title">DigitalDrill（デジドリ） ログイン</div>
     <div class="setting-section" style="text-align: center; padding: 40px 10px;">
       <p style="margin-bottom: 20px; font-size: 1.1em; color: #555;">システムを利用するには Google アカウントで認証が必要です。</p>
-      <p style="margin-bottom: 24px; font-size: 0.9em; color: #777;">管理ダッシュボード（GAS）で本人確認とホワイトリスト照合を行い、学習画面へ戻ります。</p>
+      <p style="margin-bottom: 24px; font-size: 0.9em; color: #777;">ダッシュボード（GAS）で本人確認とホワイトリスト照合を行い、学習画面へ戻ります。</p>
       <button type="button" id="login-via-gas-btn" class="btn-primary" style="max-width:320px;margin:0 auto;">Googleアカウントでログイン</button>
       <div id="login-msg" style="margin-top: 15px; color: #f44336; font-weight: bold;"></div>
     </div>
@@ -198,7 +198,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
   <div id="settings-screen" style="display: none;">
     <div class="header-title">DigitalDrill（デジドリ） 学習</div>
     <p style="text-align:center;margin:-8px 0 12px;font-size:0.9em;">
-      <a id="dashboard-link" href="#" target="_blank" rel="noopener">管理ダッシュボード（単語登録・学習スタート）</a>
+      <a id="dashboard-link" href="#" target="_blank" rel="noopener">ダッシュボード（単語登録・学習スタート）</a>
       &nbsp;|&nbsp;
       <button type="button" id="cache-refresh-btn" class="btn-small">キャッシュ更新</button>
     </p>
@@ -403,9 +403,9 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
     <div id="reading-info-panel" style="display: none;">
       <div class="setting-section">
         <div class="section-title">音読練習（プレースホルダ）</div>
-        <p style="color:#555;line-height:1.6;">音読学習は<strong>管理ダッシュボード</strong>から「学習スタート」を押して開始してください。ダッシュボードがユーザーのマイ単語帳からデータを読み取り、セッショントークン付きでこの画面に引き渡します。</p>
+        <p style="color:#555;line-height:1.6;">音読学習は<strong>ダッシュボード</strong>から「学習スタート」を押して開始してください。ダッシュボードがユーザーのマイ単語帳からデータを読み取り、セッショントークン付きでこの画面に引き渡します。</p>
         <p style="color:#666;font-size:0.9em;">※ STT（音声認識）は未実装です。テキスト入力によるダミー採点で動作確認できます。</p>
-        <a id="reading-dashboard-link" class="btn-primary" href="#" target="_blank" rel="noopener" style="display:inline-block;text-align:center;text-decoration:none;margin-top:8px;">管理ダッシュボードを開く</a>
+        <a id="reading-dashboard-link" class="btn-primary" href="#" target="_blank" rel="noopener" style="display:inline-block;text-align:center;text-decoration:none;margin-top:8px;">ダッシュボードを開く</a>
       </div>
     </div>
   </div>
