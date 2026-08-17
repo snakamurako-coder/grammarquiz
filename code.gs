@@ -13,6 +13,7 @@ const PROP = {
   SAMPLE_VOCAB_BOOK_IDS: 'SAMPLE_VOCAB_BOOK_IDS',
   PARENT_FOLDER_ID: 'PARENT_FOLDER_ID',
   SAMPLE_BOOK_IDS: 'SAMPLE_BOOK_IDS',
+  SAMPLE_CATALOG_VERSION: 'SAMPLE_CATALOG_VERSION',
   SETUP_COMPLETED: 'SETUP_COMPLETED',
   PAGES_URL: 'PAGES_URL',
   ADMIN_EMAIL: 'ADMIN_EMAIL',
@@ -69,6 +70,9 @@ const GRAMMAR_HEADERS = [
   '並び替え文', '並び替えダミー', 'N択文', 'N択ダミー',
   'ターゲット文法領域', '解説'
 ];
+
+/** 文法サンプルカタログの版。変更時は ensureEnvironment が Drive 上のブックを再同期する */
+const SAMPLE_CATALOG_VERSION = '2026-infinitive-only-v1';
 
 /** 単語帳22列ヘッダ（管理者配布・ユーザー登録共通） */
 const VOCAB_HEADERS = [
@@ -923,6 +927,7 @@ function ensureEnvironment() {
   if (isEnvironmentReady_(props)) {
     ensureVocabularyResources_();
     syncWhitelistCacheIfStale_();
+    syncSampleQuestionBooksIfNeeded_();
     return props.getProperties();
   }
   return setupEnvironmentWithLock_(false);
@@ -1014,6 +1019,7 @@ function setupEnvironment_(force) {
   props.setProperty(PROP.SAMPLE_VOCAB_BOOK_IDS, JSON.stringify(sampleVocabBookIds));
 
   props.setProperty(PROP.SETUP_COMPLETED, 'true');
+  props.setProperty(PROP.SAMPLE_CATALOG_VERSION, SAMPLE_CATALOG_VERSION);
   if (!props.getProperty(PROP.PAGES_URL)) {
     props.setProperty(PROP.PAGES_URL, DEFAULT_PAGES_URL);
     created.push('PAGES_URL');
@@ -1288,14 +1294,42 @@ function ensureAppBookSheets_(ss) {
 }
 
 /**
+ * サンプルカタログ版が古いとき、grammarquizzes 内のブックをカタログ定義に合わせて再同期する。
+ * カタログ外の旧ブック（中学1年 英語 等）は削除する。
+ */
+function syncSampleQuestionBooksIfNeeded_() {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty(PROP.SAMPLE_CATALOG_VERSION) === SAMPLE_CATALOG_VERSION) return;
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return;
+  try {
+    if (props.getProperty(PROP.SAMPLE_CATALOG_VERSION) === SAMPLE_CATALOG_VERSION) return;
+
+    const created = [];
+    const reused = [];
+    const materialsFolder = getMaterialsFolder();
+    const bookIds = ensureSampleQuestionBooks_(materialsFolder, true, created, reused);
+    props.setProperty(PROP.SAMPLE_BOOK_IDS, JSON.stringify(bookIds));
+    props.setProperty(PROP.SAMPLE_CATALOG_VERSION, SAMPLE_CATALOG_VERSION);
+    Logger.log('Sample catalog synced: ' + JSON.stringify({ created: created, reused: reused }));
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
  * index.html の GRAMMAR_UNITS と揃えたサンプル問題ブックを grammarquizzes 内に用意する。
  * @return {Object} 科目名 → スプレッドシートID
  */
 function ensureSampleQuestionBooks_(materialsFolder, force, created, reused) {
   const catalog = getSampleQuestionCatalog_();
+  const subjectNames = Object.keys(catalog);
+  purgeObsoleteSampleQuestionBooks_(materialsFolder, subjectNames, created);
+
   const bookIds = {};
 
-  Object.keys(catalog).forEach(function (subjectName) {
+  subjectNames.forEach(function (subjectName) {
     let file = findChildSpreadsheetByName_(materialsFolder, subjectName);
     let ss;
 
@@ -1315,6 +1349,21 @@ function ensureSampleQuestionBooks_(materialsFolder, force, created, reused) {
   });
 
   return bookIds;
+}
+
+/** grammarquizzes 内でカタログに無いスプレッドシート（旧サンプルブック）をゴミ箱へ移動 */
+function purgeObsoleteSampleQuestionBooks_(materialsFolder, allowedSubjectNames, created) {
+  const allowed = {};
+  allowedSubjectNames.forEach(function (name) { allowed[name] = true; });
+  const files = materialsFolder.getFilesByType(MimeType.GOOGLE_SHEETS);
+  while (files.hasNext()) {
+    const file = files.next();
+    const name = file.getName();
+    if (!allowed[name]) {
+      file.setTrashed(true);
+      if (created) created.push('削除:' + name);
+    }
+  }
 }
 
 function ensureSampleUnitSheets_(ss, units) {

@@ -86,6 +86,14 @@ https://script.google.com/macros/s/.../exec?action=setup
 
 または Apps Script エディタで `setupEnvironment(true)` を実行。
 
+**サンプル問題をカタログ定義（不定詞3問）に揃え直す**場合は `force=1` を付けてください:
+
+```
+https://script.google.com/macros/s/.../exec?action=setup&force=1
+```
+
+初回以降も、GAS コード更新でサンプルカタログの版が上がったときは API アクセス時に自動同期されます（`grammarquizzes` 内のカタログ外ブックは削除されます）。
+
 作成者Drive に `grammarquizzes/`（文法演習）、`vocabulary/`（プリセット）、`DigitalDrill` スプレッドシートが生成されます。
 旧環境の `materials/` フォルダは初回アクセス時に自動で `grammarquizzes/` にリネームされます。
 
