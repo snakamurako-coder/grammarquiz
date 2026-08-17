@@ -1299,13 +1299,6 @@ function ensureSampleQuestionBooks_(materialsFolder, force, created, reused) {
   return bookIds;
 }
 
-function hasGrammarHeaders_(sheet) {
-  if (sheet.getLastRow() < 1 || sheet.getLastColumn() < GRAMMAR_HEADERS.length) return false;
-  const current = sheet.getRange(1, 1, 1, GRAMMAR_HEADERS.length).getValues()[0]
-    .map(function (h) { return (h === null || h === undefined) ? '' : h.toString().trim(); });
-  return GRAMMAR_HEADERS.every(function (h, i) { return current[i] === h; });
-}
-
 function ensureSampleUnitSheets_(ss, units) {
   const unitNames = Object.keys(units);
   unitNames.forEach(function (unitName, index) {
@@ -1319,15 +1312,21 @@ function ensureSampleUnitSheets_(ss, units) {
       }
     }
 
-    // ヘッダが GRAMMAR_HEADERS と一致しないシート（空 or 旧スキーマ）はサンプルで作り直す
-    if (!hasGrammarHeaders_(sheet)) {
-      const rows = units[unitName];
-      sheet.clear();
-      sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
-      sheet.getRange(1, 1, 1, rows[0].length).setFontWeight('bold');
-      sheet.setFrozenRows(1);
-    }
+    const rows = units[unitName];
+    sheet.clear();
+    sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+    sheet.getRange(1, 1, 1, rows[0].length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
   });
+
+  // カタログにないシートは削除（サンプルブックはカタログ定義のみ）
+  const allSheets = ss.getSheets();
+  for (let i = allSheets.length - 1; i >= 0; i--) {
+    const sheet = allSheets[i];
+    if (unitNames.indexOf(sheet.getName()) === -1 && ss.getSheets().length > 1) {
+      ss.deleteSheet(sheet);
+    }
+  }
 
   const leftover = ss.getSheetByName('シート1');
   if (leftover && ss.getSheets().length > 1) {
@@ -1337,7 +1336,7 @@ function ensureSampleUnitSheets_(ss, units) {
 
 /**
  * サンプル問題定義（ヘッダ行 + データ行）。1行が形式A〜Hすべての素材になる。
- * 列は GRAMMAR_HEADERS の11列のみ。
+ * 初回セットアップ時に grammarquizzes へ投入するサンプルは「不定詞」のみ。
  */
 function getSampleQuestionCatalog_() {
   const headers = GRAMMAR_HEADERS;
@@ -1347,123 +1346,7 @@ function getSampleQuestionCatalog_() {
   }
 
   return {
-    '中学1年 英語': {
-      '単元A': [
-        headers,
-        row(1, 'be動詞', '肯定文', 'I am a student.', '私は学生です。',
-          'I (am,a,student).', 'is', 'I (am) a student.', 'is,are,be,being',
-          'be動詞', '主語が I のときの be 動詞は am。'),
-        row(2, 'be動詞', '肯定文', 'She is a teacher.', '彼女は先生です。',
-          'She (is,a,teacher).', 'am', 'She (is) a teacher.', 'am,are,be,was',
-          'be動詞', '三人称単数が主語のときの be 動詞は is。'),
-        row(3, 'be動詞', '肯定文', 'They are my friends.', '彼らは私の友達です。',
-          'They (are,my,friends).', 'is', 'They (are) my friends.', 'am,is,be,was',
-          'be動詞', '主語が複数のときの be 動詞は are。'),
-        row(4, 'be動詞', '否定文', 'You are not late.', 'あなたは遅刻していません。',
-          'You (are,not,late).', 'is', 'You (are not) late.', 'is not,am not,not are,do not',
-          'be動詞', 'be動詞の否定文は be動詞のすぐ後ろに not を置く。')
-      ],
-      '単元B': [
-        headers,
-        row(1, '指示語', 'this / that', 'This is a book.', 'これは本です。',
-          'This (is,a,book).', 'are', 'This (is) a book.', 'are,am,be,were',
-          'be動詞', 'this は単数扱いなので is。'),
-        row(2, '指示語', '所有代名詞', 'That pen is mine.', 'あのペンは私のものです。',
-          'That (pen,is,mine).', 'my', 'That pen is (mine).', 'my,me,I,myself',
-          '代名詞', '「私のもの」は所有代名詞 mine。my は名詞を伴う。'),
-        row(3, '指示語', 'these / those', 'These are new desks.', 'これらは新しい机です。',
-          'These (are,new,desks).', 'is', 'These (are) new desks.', 'is,am,be,was',
-          'be動詞', 'these は複数扱いなので are。')
-      ],
-      'be動詞': [
-        headers,
-        row(1, 'be動詞', '肯定文', 'I am fine today.', '私は今日元気です。',
-          'I (am,fine,today).', 'is', 'I (am) fine today.', 'is,are,be,was',
-          'be動詞', ''),
-        row(2, 'be動詞', '肯定文', 'He is very busy.', '彼はとても忙しいです。',
-          'He (is,very,busy).', 'are', 'He (is) very busy.', 'am,are,be,being',
-          'be動詞', ''),
-        row(3, 'be動詞', '肯定文', 'We are Japanese.', '私たちは日本人です。',
-          'We (are,Japanese).', 'is', 'We (are) Japanese.', 'am,is,be,being',
-          'be動詞', ''),
-        row(4, 'be動詞', '疑問文', 'Are you a student?', 'あなたは学生ですか。',
-          '(Are,you,a,student)?', 'Is', '(Are) you a student?', 'Is,Am,Be,Do',
-          'be動詞', 'be動詞の疑問文は be動詞を主語の前に出す。'),
-        row(5, 'be動詞', '過去形', 'She was a singer.', '彼女は歌手でした。',
-          'She (was,a,singer).', 'were', 'She (was) a singer.', 'were,is,been,be',
-          'be動詞', 'is の過去形は was。')
-      ],
-      '一般動詞': [
-        headers,
-        row(1, '一般動詞', '現在形', 'I play tennis every day.', '私は毎日テニスをします。',
-          'I (play,tennis,every day).', 'plays', 'I (play) tennis every day.', 'plays,playing,to play,played',
-          '一般動詞', ''),
-        row(2, '一般動詞', '三人称単数現在', 'He plays soccer after school.', '彼は放課後にサッカーをします。',
-          'He (plays,soccer,after school).', 'play', 'He (plays) soccer after school.', 'play,playing,to play,is playing',
-          '一般動詞', '三人称単数が主語で現在のことをいうときは動詞に s を付ける。'),
-        row(3, '一般動詞', '三人称単数現在', 'She reads a book every night.', '彼女は毎晩本を読みます。',
-          'She (reads,a,book,every night).', 'read', 'She (reads) a book every night.', 'read,reading,to read,is read',
-          '一般動詞', ''),
-        row(4, '一般動詞', '否定文', 'We do not study French.', '私たちはフランス語を勉強しません。',
-          'We (do,not,study,French).', 'does', 'We (do not) study French.', 'does not,are not,not do,do not to',
-          '一般動詞', '一般動詞の否定文は do not / does not を動詞の前に置き、動詞は原形にする。')
-      ]
-    },
     '中学2年 英語': {
-      '単元A': [
-        headers,
-        row(1, '時制', '過去形', 'I went to the park yesterday.', '私は昨日公園へ行きました。',
-          'I (went,to,the park,yesterday).', 'go', 'I (went) to the park yesterday.', 'go,goes,going,have gone',
-          '過去形', 'go の過去形は went。'),
-        row(2, '時制', '過去形', 'He watched TV last night.', '彼は昨夜テレビを見ました。',
-          'He (watched,TV,last night).', 'watch', 'He (watched) TV last night.', 'watch,watches,watching,is watched',
-          '過去形', ''),
-        row(3, '時制', '過去形', 'She was at home yesterday.', '彼女は昨日家にいました。',
-          'She (was,at,home,yesterday).', 'were', 'She (was) at home yesterday.', 'were,is,been,did',
-          'be動詞', '')
-      ],
-      '単元B': [
-        headers,
-        row(1, '助動詞', 'must', 'I must do my homework.', '私は宿題をしなければなりません。',
-          'I (must,do,my homework).', 'can', 'I (must) do my homework.', 'can,will,may,am',
-          '助動詞', '助動詞の後ろの動詞は原形。'),
-        row(2, '助動詞', 'can', 'He can swim very fast.', '彼はとても速く泳げます。',
-          'He (can,swim,very fast).', 'swims', 'He (can) swim very fast.', 'is,does,cans,will can',
-          '助動詞', ''),
-        row(3, '助動詞', 'should', 'You should go to bed early.', 'あなたは早く寝るべきです。',
-          'You (should,go,to bed,early).', 'going', 'You (should go) to bed early.', 'should to go,should going,should went,are going',
-          '助動詞', '')
-      ],
-      '過去形': [
-        headers,
-        row(1, '時制', '不規則動詞', 'I ran in the park yesterday.', '私はきのう公園で走りました。',
-          'I (ran,in,the park,yesterday).', 'run', 'I (ran) in the park yesterday.', 'run,runs,running,have run',
-          '過去形', 'run の過去形は ran。'),
-        row(2, '時制', '規則動詞', 'They played baseball last Sunday.', '彼らは先週の日曜日に野球をしました。',
-          'They (played,baseball,last Sunday).', 'play', 'They (played) baseball last Sunday.', 'play,plays,playing,are played',
-          '過去形', ''),
-        row(3, '時制', '不規則動詞', 'She came here an hour ago.', '彼女は1時間前にここへ来ました。',
-          'She (came,here,an hour ago).', 'come', 'She (came) here an hour ago.', 'come,comes,coming,has came',
-          '過去形', ''),
-        row(4, '時制', '不規則動詞', 'We ate lunch at noon.', '私たちは正午に昼食を食べました。',
-          'We (ate,lunch,at noon).', 'eat', 'We (ate) lunch at noon.', 'eat,eats,eaten,eating',
-          '過去形', 'eat の過去形は ate。')
-      ],
-      '助動詞': [
-        headers,
-        row(1, '助動詞', 'can', 'I can play the piano.', '私はピアノを弾けます。',
-          'I (can,play,the piano).', 'to play', 'I (can) play the piano.', 'am,do,will can,can to',
-          '助動詞', ''),
-        row(2, '助動詞', 'may', 'You may come here.', 'あなたはここに来てもよい。',
-          'You (may,come,here).', 'coming', 'You (may) come here.', 'are,do,mays,may to',
-          '助動詞', 'may は許可「〜してもよい」を表す。'),
-        row(3, '助動詞', 'should', 'We should hurry now.', '私たちは今急ぐべきだ。',
-          'We (should,hurry,now).', 'hurrying', 'We (should) hurry now.', 'are,do,shoulds,should to',
-          '助動詞', ''),
-        row(4, '助動詞', 'will', 'He will come tomorrow.', '彼は明日来るでしょう。',
-          'He (will,come,tomorrow).', 'comes', 'He (will come) tomorrow.', 'will comes,will came,is come,will to come',
-          '助動詞', '')
-      ],
       '不定詞': [
         headers,
         row(1, '不定詞', 'SVO to do', 'He wants his daughter to be a doctor in the future.', '彼は娘に将来医者になってほしいと思っている。',
