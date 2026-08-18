@@ -167,7 +167,13 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .correction-token { padding: 10px 14px; min-height: 44px; display: inline-flex; align-items: center; border: 1px solid #cfd8dc; border-radius: 10px; background-color: #fff; font-size: 1.1em; color: var(--c-text); user-select: none; }
 .correction-token.selectable { cursor: pointer; border-color: #90caf9; box-shadow: 0 1px 3px rgba(33,150,243,0.2); }
 .correction-token.selectable:active { background-color: #e3f2fd; }
-.correction-token.selected { background-color: #ffebee; border-color: var(--c-danger); color: #c62828; font-weight: bold; }
+.correction-token.selected { background-color: #ffebee; border-color: transparent; color: #c62828; font-weight: bold; box-shadow: none; }
+.correction-edit-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.correction-edit-label { font-weight: bold; flex: 1; min-width: 180px; text-align: left; }
+.correction-confirm-inline { width: auto !important; min-height: 44px; padding: 10px 14px; font-size: 0.92em; background-color: var(--c-success); color: white; border: none; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+.correction-live-preview { background: #f5f5f5; border: 1px solid #cfd8dc; border-radius: 10px; padding: 14px; font-size: clamp(1.05em, 4vw, 1.2em); word-break: break-word; text-align: left; min-height: 48px; }
+.correction-live-label { margin: 12px 0 6px; text-align: left; }
+.correction-input-display, .typing-display { min-height: 40px; padding: 10px; border: 2px solid #ccc; border-radius: 4px; background-color: #fff; cursor: text; font-size: 1.2em; text-align: left; }
 .correction-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 #correction-sentence { background: #fff; padding: 12px; border-radius: var(--radius); box-shadow: var(--shadow); }
 #correction-preview-sentence { background: #e8f5e9; border: 2px solid #a5d6a7; border-radius: 10px; padding: 14px; font-size: clamp(1.1em, 4vw, 1.25em); font-weight: bold; word-break: break-word; }
@@ -529,7 +535,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
     <!-- タイピング（和文英訳・空所）用 UI -->
     <div id="typing-ui" style="display:none;">
       <div id="typing-sentence-container" class="sentence-container fixed-text" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;"></div>
-      <div id="typing-input-display" class="typing-display" style="min-height: 40px; padding: 10px; border: 2px solid #ccc; border-radius: 4px; background-color: #fff; cursor: pointer; font-size: 1.2em; margin-bottom: 15px;">タップして入力</div>
+      <div id="typing-input-display" class="typing-display" style="margin-bottom: 15px;"></div>
       <button id="typing-submit-btn" style="display: none; width: 100%; padding: 15px; font-size: 1.2em; background-color: #4caf50; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px;">これで回答する</button>
     </div>
 
@@ -549,19 +555,13 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 
       <!-- STEP3: 修正文をキーボード入力 -->
       <div id="correction-edit-area" style="display: none; background: #fff; padding: 15px; border-radius: 8px; border: 2px solid #ff9800; margin-top: 10px;">
-        <div class="input-label" style="margin-bottom: 8px;">修正後の語句（削除する場合は空のまま）:</div>
-        <div id="correction-input-display" style="min-height: 40px; padding: 10px; border: 2px solid #ccc; border-radius: 4px; background-color: #f9f9f9; cursor: pointer; font-size: 1.2em; margin-bottom: 10px;">タップして入力</div>
-        <button id="correction-preview-btn" style="width: 100%; padding: 12px; font-size: 1.1em; background-color: #2196f3; color: white; border: none; border-radius: 8px; cursor: pointer;">置換後の英文を確認する</button>
-      </div>
-
-      <!-- STEP4: プレビュー確認 -->
-      <div id="correction-preview-area" style="display: none; margin-top: 12px;">
-        <div class="area-label" style="margin-bottom: 6px;">▼ 修正後の英文（これで回答しますか？）</div>
-        <div id="correction-preview-sentence"></div>
-        <div class="correction-actions">
-          <button id="correction-confirm-btn" style="width: 100%; padding: 15px; font-size: 1.2em; background-color: #4caf50; color: white; border: none; border-radius: 8px; cursor: pointer;">これでよい（回答する）</button>
-          <button id="correction-retry-btn" class="btn-small" style="padding: 10px;">やり直す</button>
+        <div class="correction-edit-header">
+          <span class="correction-edit-label">修正後の語句（削除する場合は空のまま）:</span>
+          <button type="button" id="correction-confirm-btn" class="correction-confirm-inline">これでよい（回答する）</button>
         </div>
+        <div id="correction-input-display" class="correction-input-display"></div>
+        <div class="area-label correction-live-label">▼ 修正後の英文</div>
+        <div id="correction-live-preview" class="correction-live-preview" aria-live="polite"></div>
       </div>
     </div>
 
@@ -1381,14 +1381,14 @@ const KeyboardModule = (() => {
 
   const keyLayout = {
     normal: [
-      ["!", "\"", "$", "%", "&", "'", "(", ")", "-", "¥"],
+      ["!", "\"", ",", ".", "&", "'", "(", ")", "-", "¥"],
       ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
       ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
       ["Shift", "z", "x", "c", "v", "b", "n", "m", "Back"],
       ["Space", "Enter"]
     ],
     shifted: [
-      ["!", "\"", "$", "%", "&", "'", "(", ")", "-", "¥"],
+      ["!", "\"", ",", ".", "&", "'", "(", ")", "-", "¥"],
       ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
       ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
       ["Shift", "Z", "X", "C", "V", "B", "N", "M", "Back"],
@@ -1449,10 +1449,13 @@ const KeyboardModule = (() => {
     } else if (key === "Space") {
       currentInput += " ";
     } else if (key === "Enter") {
+      if (typeof window.tryAdvanceToNextQuestion_ === 'function' && window.tryAdvanceToNextQuestion_()) {
+        return;
+      }
       if (onEnterCallback) {
         onEnterCallback(currentInput);
       }
-      return; 
+      return;
     } else {
       currentInput += key;
       if (shiftState === 1) shiftState = 0;
@@ -1493,9 +1496,16 @@ const KeyboardModule = (() => {
 
   // 物理キーボードサポート
   window.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.repeat) {
+      const kbVisible = kbContainer.style.display !== 'none';
+      if (!kbVisible && typeof window.tryAdvanceToNextQuestion_ === 'function' && window.tryAdvanceToNextQuestion_()) {
+        e.preventDefault();
+        return;
+      }
+    }
     if (kbContainer.style.display === 'none') return;
     let pressedKey = e.key;
-    e.preventDefault(); 
+    e.preventDefault();
 
     if (pressedKey === "Backspace") pressedKey = "Back";
     if (pressedKey === "Shift") pressedKey = "Shift";
@@ -1803,7 +1813,7 @@ const TypingModule = (() => {
     qData = questionData;
     answered = false;
     resultMsg.textContent = '';
-    inputDisplay.textContent = "タップして入力";
+    inputDisplay.textContent = '';
     submitBtn.style.display = 'none';
 
     // 形式A（和文英訳）は前後の英文がないため空所テンプレートを表示しない
@@ -1813,37 +1823,22 @@ const TypingModule = (() => {
 
     if (window.KeyboardModule) {
       window.KeyboardModule.init(
-        inputDisplay, 
-        "", 
-        (text) => {
-           checkAnswer(text);
-        }, 
-        (text) => {
-           if (text) {
-             submitBtn.style.display = 'block';
-           } else {
-             submitBtn.style.display = 'none';
-             if (inputDisplay.textContent === "") {
-               inputDisplay.textContent = "タップして入力";
-             }
-           }
-        }
+        inputDisplay,
+        '',
+        (text) => { checkAnswer(text); },
+        (text) => { submitBtn.style.display = text ? 'block' : 'none'; }
       );
+      window.KeyboardModule.show();
 
       inputDisplay.onclick = (e) => {
         window.KeyboardModule.show();
-        if (inputDisplay.textContent === "タップして入力") {
-          inputDisplay.textContent = "";
-        }
         e.stopPropagation();
       };
     }
-    
+
     submitBtn.onclick = () => {
-       const text = inputDisplay.textContent;
-       if (text && text !== "タップして入力") {
-         checkAnswer(text);
-       }
+      const text = inputDisplay.textContent || '';
+      if (text) checkAnswer(text);
     };
   }
 
@@ -1874,7 +1869,7 @@ window.TypingModule = TypingModule;
 
 // correction.js
 // 正誤判断指摘訂正モジュール
-// 手順: 誤りの有無を判断 → 誤り箇所をタップ指摘 → 修正語句を入力 → 置換後プレビューで確定 → 正答文と一致すれば正解
+// 手順: 誤りの有無を判断 → 誤り箇所をタップ指摘 → 修正語句を入力（リアルタイムプレビュー）→ 回答
 const CorrectionModule = (() => {
   const sentenceEl = document.getElementById('correction-sentence');
   const hintEl = document.getElementById('correction-hint');
@@ -1884,20 +1879,17 @@ const CorrectionModule = (() => {
   const locateBtn = document.getElementById('correction-locate-btn');
   const editArea = document.getElementById('correction-edit-area');
   const inputDisplay = document.getElementById('correction-input-display');
-  const previewBtn = document.getElementById('correction-preview-btn');
-  const previewArea = document.getElementById('correction-preview-area');
-  const previewSentence = document.getElementById('correction-preview-sentence');
+  const livePreviewEl = document.getElementById('correction-live-preview');
   const confirmBtn = document.getElementById('correction-confirm-btn');
-  const retryBtn = document.getElementById('correction-retry-btn');
   const resultMsg = document.getElementById('result-msg');
 
   let qData = null;
-  let tokens = [];            // 提示英文の単語トークン
-  let selected = new Set();   // 選択中トークンの添字
+  let tokens = [];
+  let selected = new Set();
   let presentedSentence = "";
   let correctSentence = "";
   let finalSentence = "";
-  let phase = "judge";        // judge → locate → edit → preview → done
+  let phase = "judge";
 
   document.body.addEventListener('click', (e) => {
     if (window.KeyboardModule && document.getElementById('correction-ui').style.display === 'block') {
@@ -1910,7 +1902,6 @@ const CorrectionModule = (() => {
   function initGame(questionData) {
     qData = questionData;
     resultMsg.textContent = '';
-
     presentedSentence = qData.presentedSentence;
     correctSentence = qData.correctSentence;
     tokens = presentedSentence.split(" ");
@@ -1926,9 +1917,28 @@ const CorrectionModule = (() => {
     judgeArea.style.display = 'flex';
     locateBtn.style.display = 'none';
     editArea.style.display = 'none';
-    previewArea.style.display = 'none';
+    if (livePreviewEl) livePreviewEl.textContent = '';
     resultMsg.textContent = '';
     if (window.KeyboardModule) window.KeyboardModule.hide();
+  }
+
+  function computeFinalSentence_(replacement) {
+    replacement = String(replacement || '').replace(/\s+/g, ' ').trim();
+    const indices = Array.from(selected).sort((a, b) => a - b);
+    if (!indices.length) return presentedSentence;
+    const min = indices[0];
+    const max = indices[indices.length - 1];
+    const newTokens = tokens.slice(0, min)
+      .concat(replacement ? replacement.split(' ') : [])
+      .concat(tokens.slice(max + 1));
+    return newTokens.join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function updateLivePreview() {
+    if (!livePreviewEl) return;
+    const replacement = inputDisplay.textContent || '';
+    finalSentence = computeFinalSentence_(replacement);
+    livePreviewEl.textContent = finalSentence;
   }
 
   function renderTokens() {
@@ -1974,74 +1984,39 @@ const CorrectionModule = (() => {
     phase = 'edit';
     locateBtn.style.display = 'none';
     editArea.style.display = 'block';
-    hintEl.textContent = "選択した部分をどう直しますか？修正後の語句を入力してください";
+    hintEl.textContent = "選択した部分を修正してください";
     renderTokens();
+    inputDisplay.textContent = '';
 
     if (window.KeyboardModule) {
       window.KeyboardModule.init(
         inputDisplay,
-        "",
-        () => { showPreview(); },
-        (text) => {
-          if (text === "" && inputDisplay.textContent === "") {
-            inputDisplay.textContent = "タップして入力";
-          }
-        }
+        '',
+        () => { submitEdit(); },
+        () => { updateLivePreview(); }
       );
+      window.KeyboardModule.show();
       inputDisplay.onclick = (e) => {
         window.KeyboardModule.show();
-        if (inputDisplay.textContent === "タップして入力") {
-          inputDisplay.textContent = "";
-        }
         e.stopPropagation();
       };
     }
+    updateLivePreview();
   };
 
-  previewBtn.onclick = () => {
+  function submitEdit() {
     if (phase !== 'edit') return;
-    showPreview();
-  };
-
-  function showPreview() {
-    let replacement = inputDisplay.textContent;
-    if (replacement === "タップして入力") replacement = "";
-    replacement = replacement.replace(/\s+/g, " ").trim();
-
-    // 選択された範囲（最小添字〜最大添字）を入力語句で置換
-    const indices = Array.from(selected).sort((a, b) => a - b);
-    const min = indices[0];
-    const max = indices[indices.length - 1];
-    const newTokens = tokens.slice(0, min)
-      .concat(replacement ? replacement.split(" ") : [])
-      .concat(tokens.slice(max + 1));
-    finalSentence = newTokens.join(" ").replace(/\s+/g, " ").trim();
-
-    phase = 'preview';
-    editArea.style.display = 'none';
-    previewArea.style.display = 'block';
-    previewSentence.textContent = finalSentence;
-    hintEl.textContent = "置換後の英文を確認してください";
-    if (window.KeyboardModule) window.KeyboardModule.hide();
+    updateLivePreview();
+    judge();
   }
 
-  confirmBtn.onclick = () => {
-    if (phase !== 'preview') return;
-    judge();
-  };
+  confirmBtn.onclick = () => { submitEdit(); };
 
-  retryBtn.onclick = () => {
-    if (phase !== 'preview') return;
-    resetToJudge();
-  };
-
-  // 最終的にユーザーが「これでよい」とした英文が正答文と一致するかで判定
   function judge() {
     phase = 'done';
     judgeArea.style.display = 'none';
     locateBtn.style.display = 'none';
     editArea.style.display = 'none';
-    previewArea.style.display = 'none';
     if (window.KeyboardModule) window.KeyboardModule.hide();
 
     if (normalizeEnglish(finalSentence) === normalizeEnglish(correctSentence)) {
@@ -2840,23 +2815,23 @@ const SortingModule = (() => {
     // キーボード機能の初期化
     if (window.KeyboardModule) {
       window.KeyboardModule.init(
-        missDisplay, 
-        "", 
-        (text) => {
-           if (text) createCardAction(text);
-        }, 
-        (text) => {
-           createCardBtn.disabled = (text.length === 0);
-        }
+        missDisplay,
+        '',
+        (text) => { if (text) createCardAction(text); },
+        (text) => { createCardBtn.disabled = (text.length === 0); }
       );
-      
+
       missDisplay.onclick = (e) => {
         window.KeyboardModule.show();
         e.stopPropagation();
       };
-      
+
+      if (qData.format === 'C') {
+        window.KeyboardModule.show();
+      }
+
       createCardBtn.onclick = () => {
-         if (!createCardBtn.disabled) createCardAction(missDisplay.textContent);
+        if (!createCardBtn.disabled) createCardAction(missDisplay.textContent);
       };
     }
     
@@ -3558,6 +3533,14 @@ async function saveVocabSessionResults() {
 async function saveGrammarSessionResults() {
   await saveSessionResultsUnified('grammar');
 }
+
+function tryAdvanceToNextQuestion_() {
+  const nextBtn = document.getElementById('next-btn');
+  if (!nextBtn || nextBtn.style.display === 'none') return false;
+  nextBtn.click();
+  return true;
+}
+window.tryAdvanceToNextQuestion_ = tryAdvanceToNextQuestion_;
 
 document.getElementById('next-btn').addEventListener('click', () => {
   document.getElementById('next-btn').style.display = 'none';
