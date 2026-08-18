@@ -48,6 +48,23 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .unit-card { border: 1px solid #cfd8dc; min-height: var(--tap); padding: 10px 12px; border-radius: 10px; cursor: pointer; background-color: #fff; display: flex; align-items: center; gap: 8px; font-size: 0.95em; word-break: break-word; }
 .unit-card.selected { background-color: #e3f2fd; border-color: var(--c-primary); font-weight: bold; }
 .btn-primary { width: 100%; min-height: 54px; padding: 14px; font-size: 1.15em; font-weight: bold; background-color: var(--c-primary); color: white; border: none; border-radius: 10px; cursor: pointer; }
+#result-review-list { text-align: left; max-height: 55vh; overflow-y: auto; margin-bottom: 16px; }
+.result-review-item { border-radius: 10px; padding: 12px; margin-bottom: 10px; border-left: 4px solid #ccc; background: #fafafa; }
+.result-review-item.result-item-correct { border-left-color: var(--c-success); }
+.result-review-item.result-item-wrong { border-left-color: var(--c-danger); }
+.result-review-item.result-item-unknown { border-left-color: var(--c-warn); }
+.result-review-head { display: flex; justify-content: space-between; margin-bottom: 6px; font-weight: bold; }
+.result-review-no { color: var(--c-text-sub); }
+.result-review-status { font-size: 0.9em; }
+.result-item-correct .result-review-status { color: var(--c-success); }
+.result-item-wrong .result-review-status { color: var(--c-danger); }
+.result-item-unknown .result-review-status { color: var(--c-warn); }
+.result-review-prompt { font-weight: bold; margin-bottom: 6px; word-break: break-word; }
+.result-review-label { font-size: 0.8em; color: var(--c-text-sub); font-weight: bold; }
+.result-review-answer, .result-review-correct { font-size: 0.95em; margin-top: 4px; word-break: break-word; }
+.result-review-explanation { background: #fff8e1; border-left: 3px solid #ffb300; padding: 10px 12px; border-radius: 8px; margin-top: 8px; font-size: 0.88em; line-height: 1.55; color: var(--c-text); }
+.result-review-explanation .result-review-grammar-area { font-weight: bold; display: block; margin-bottom: 4px; color: var(--c-text-sub); font-size: 0.92em; }
+
 .btn-primary:active { background-color: var(--c-primary-dark); }
 .btn-primary:disabled { background-color: #b0bec5; }
 
@@ -554,12 +571,13 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
   </div>
 
   <!-- Result Screen -->
-  <div id="result-screen" style="display: none; text-align: center;">
+  <div id="result-screen" style="display: none;">
     <div class="header-title">リザルト</div>
-    <div class="setting-section">
+    <div class="setting-section" style="text-align: center;">
       <h2 id="result-score" style="font-size: 2em; color: #2196f3; margin-bottom: 20px;"></h2>
-      <p id="result-details" style="font-size: 1.1em; color: #555; margin-bottom: 20px;"></p>
+      <p id="result-details" style="font-size: 1.1em; color: #555; margin-bottom: 0;"></p>
     </div>
+    <div id="result-review-list" class="setting-section"></div>
     <button id="return-settings-btn" class="btn-primary">学習設定に戻る</button>
   </div>
 
@@ -1735,7 +1753,10 @@ const ChoiceModule = (() => {
     if (choice.isCorrect) {
       resultMsg.textContent = "⭕️ 正解！";
       resultMsg.style.color = "#4caf50";
-      if (window.onQuestionCompleted) window.onQuestionCompleted(true);
+      if (window.onQuestionCompleted) window.onQuestionCompleted(true, {
+        userAnswer: choice.text,
+        correctAnswer: qData.correctText
+      });
       return;
     }
 
@@ -1746,7 +1767,11 @@ const ChoiceModule = (() => {
       resultMsg.textContent = "❌ 不正解... 正答: " + qData.correctText;
       resultMsg.style.color = "#f44336";
     }
-    if (window.onQuestionCompleted) window.onQuestionCompleted(false, { isUnknown: !!choice.isUnknown });
+    if (window.onQuestionCompleted) window.onQuestionCompleted(false, {
+      isUnknown: !!choice.isUnknown,
+      userAnswer: choice.text,
+      correctAnswer: qData.correctText
+    });
   }
 
   return { initGame };
@@ -1828,14 +1853,15 @@ const TypingModule = (() => {
     answered = true;
 
     const assembled = joinEnglish(qData.answerPrefix, userAnswer, qData.answerSuffix);
+    const answerMeta = { userAnswer: userAnswer, correctAnswer: qData.expectedInner };
     if (normalizeEnglish(assembled) === normalizeEnglish(qData.fullSentence)) {
       resultMsg.textContent = "⭕️ 正解！";
       resultMsg.style.color = "#4caf50";
-      if(window.onQuestionCompleted) window.onQuestionCompleted(true);
+      if(window.onQuestionCompleted) window.onQuestionCompleted(true, answerMeta);
     } else {
       resultMsg.textContent = "❌ 惜しい！ 正答: " + qData.expectedInner;
       resultMsg.style.color = "#f44336";
-      if(window.onQuestionCompleted) window.onQuestionCompleted(false);
+      if(window.onQuestionCompleted) window.onQuestionCompleted(false, answerMeta);
     }
     if (window.KeyboardModule) window.KeyboardModule.hide();
     submitBtn.style.display = 'none';
@@ -2021,11 +2047,17 @@ const CorrectionModule = (() => {
     if (normalizeEnglish(finalSentence) === normalizeEnglish(correctSentence)) {
       resultMsg.textContent = "⭕️ 正解！ " + correctSentence;
       resultMsg.style.color = "#4caf50";
-      if (window.onQuestionCompleted) window.onQuestionCompleted(true);
+      if (window.onQuestionCompleted) window.onQuestionCompleted(true, {
+        userAnswer: finalSentence,
+        correctAnswer: correctSentence
+      });
     } else {
       resultMsg.textContent = "❌ 不正解... 正答: " + correctSentence;
       resultMsg.style.color = "#f44336";
-      if (window.onQuestionCompleted) window.onQuestionCompleted(false);
+      if (window.onQuestionCompleted) window.onQuestionCompleted(false, {
+        userAnswer: finalSentence,
+        correctAnswer: correctSentence
+      });
     }
   }
 
@@ -2426,7 +2458,12 @@ const VocabQuizModule = (() => {
     btn.classList.add('selected');
 
     const answerMs = questionStartTime ? Date.now() - questionStartTime : 0;
-    const meta = { answerMs: answerMs, isUnknown: choice.text === VOCAB_OPTION_UNKNOWN };
+    const meta = {
+      answerMs: answerMs,
+      isUnknown: choice.text === VOCAB_OPTION_UNKNOWN,
+      userAnswer: choice.text,
+      correctAnswer: qData.correctAnswer
+    };
 
     if (choice.isCorrect) {
       resultMsg.textContent = '⭕️ 正解！';
@@ -2871,14 +2908,15 @@ const SortingModule = (() => {
 
     const inner = Array.from(answerSlot.children).map(c => c.textContent).join(' ');
     const assembled = joinEnglish(qData.answerPrefix, inner, qData.answerSuffix);
+    const answerMeta = { userAnswer: inner, correctAnswer: qData.expectedInner };
     if (normalizeEnglish(assembled) === normalizeEnglish(qData.fullSentence)) {
       resultMsg.textContent = "⭕️ 正解！";
       resultMsg.style.color = "#4caf50";
-      if(window.onQuestionCompleted) window.onQuestionCompleted(true);
+      if(window.onQuestionCompleted) window.onQuestionCompleted(true, answerMeta);
     } else {
       resultMsg.textContent = "❌ 不正解... 正答: " + qData.expectedInner;
       resultMsg.style.color = "#f44336";
-      if(window.onQuestionCompleted) window.onQuestionCompleted(false);
+      if(window.onQuestionCompleted) window.onQuestionCompleted(false, answerMeta);
     }
   });
 
@@ -2897,6 +2935,7 @@ let totalQuestionsCount = 0;
 let currentScore = 0;
 let currentUserId = "Guest";
 let sessionStartTime = null;
+let sessionAnswerLog = [];
 let currentAppMode = 'grammar';
 let currentVocabSetName = '';
 let currentVocabBookName = '';
@@ -3142,6 +3181,7 @@ elements.startBtn.addEventListener('click', async () => {
       totalQuestionsCount = questions.length;
       currentQuestionIndex = 0;
       currentScore = 0;
+      sessionAnswerLog = [];
       sessionStartTime = Date.now();
       loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
       screens.settings.style.display = 'none';
@@ -3210,6 +3250,7 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
     totalQuestionsCount = questions.length;
     currentQuestionIndex = 0;
     currentScore = 0;
+    sessionAnswerLog = [];
     sessionStartTime = Date.now();
 
     loadQuestionToGame(currentQuestionDataList[0]);
@@ -3322,9 +3363,114 @@ function showExplanation(qData) {
 }
 
 // モジュールからのコールバック
+function escapeHtml_(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function getQuestionPrompt_(q) {
+  if (!q) return '';
+  if (q.format === 'vocab-enja') {
+    return (q.word || '') + (q.posLabel ? '（' + q.posLabel + '）' : '');
+  }
+  if (q.format === 'H' && q.presentedSentence) {
+    return (q.japanese || '') + ' / ' + q.presentedSentence;
+  }
+  return q.japanese || q.presentedSentence || q.word || '';
+}
+
+function getDefaultCorrectAnswer_(q) {
+  if (!q) return '';
+  if (q.format === 'vocab-enja') return q.correctAnswer || '';
+  if (q.correctText) return q.correctText;
+  if (q.expectedInner) return q.expectedInner;
+  if (q.correctSentence) return q.correctSentence;
+  return q.fullSentence || '';
+}
+
+function normalizeExplanationField_(value) {
+  const text = String(value == null ? '' : value).trim();
+  if (!text || text === '(未登録)') return '';
+  return text;
+}
+
+function renderResultReviewList_() {
+  const el = document.getElementById('result-review-list');
+  if (!el) return;
+  if (!sessionAnswerLog.length) {
+    el.innerHTML = '';
+    return;
+  }
+  let html = '<div class="section-title">出題と回答</div>';
+  sessionAnswerLog.forEach(function (item, i) {
+    const statusClass = item.isCorrect
+      ? 'result-item-correct'
+      : (item.isUnknown ? 'result-item-unknown' : 'result-item-wrong');
+    const statusLabel = item.isCorrect ? '正解' : (item.isUnknown ? 'わからない' : '不正解');
+    html += '<div class="result-review-item ' + statusClass + '">';
+    html += '<div class="result-review-head"><span class="result-review-no">Q' + (i + 1) + '</span>';
+    html += '<span class="result-review-status">' + statusLabel + '</span></div>';
+    html += '<div class="result-review-prompt">' + escapeHtml_(item.prompt) + '</div>';
+    html += '<div class="result-review-answer"><span class="result-review-label">あなたの回答</span> ' + escapeHtml_(item.userAnswer || '—') + '</div>';
+    if (!item.isCorrect) {
+      html += '<div class="result-review-correct"><span class="result-review-label">正答</span> ' + escapeHtml_(item.correctAnswer || '—') + '</div>';
+    }
+    if (item.grammarArea || item.explanation) {
+      html += '<div class="result-review-explanation">';
+      if (item.grammarArea) {
+        html += '<span class="result-review-grammar-area">ターゲット文法領域: ' + escapeHtml_(item.grammarArea) + '</span>';
+      }
+      if (item.explanation) {
+        html += escapeHtml_(item.explanation);
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  });
+  el.innerHTML = html;
+}
+
+const SessionSave = (function () {
+  let activePromise = null;
+
+  function startSave() {
+    if (activePromise) return activePromise;
+    activePromise = (currentAppMode === 'vocab'
+      ? saveVocabSessionResults()
+      : saveGrammarSessionResults())
+      .finally(function () {
+        activePromise = null;
+        if (AuthGateService.isValid()) {
+          fetchUserLogs().catch(function () {});
+        }
+      });
+    return activePromise;
+  }
+
+  function isSaving() {
+    return !!activePromise;
+  }
+
+  return { startSave, isSaving };
+})();
+
 window.onQuestionCompleted = (isCorrect, meta) => {
   meta = meta || {};
   const currentQ = currentQuestionDataList[currentQuestionIndex];
+  sessionAnswerLog.push({
+    index: currentQuestionIndex + 1,
+    format: currentQ ? currentQ.format : '',
+    prompt: getQuestionPrompt_(currentQ),
+    userAnswer: meta.userAnswer || '',
+    correctAnswer: meta.correctAnswer || getDefaultCorrectAnswer_(currentQ),
+    isCorrect: !!isCorrect,
+    isUnknown: !!meta.isUnknown,
+    grammarArea: normalizeExplanationField_(currentQ && currentQ.grammarArea),
+    explanation: normalizeExplanationField_(currentQ && currentQ.explanation)
+  });
 
   if (currentAppMode === 'vocab') {
     if (window.SrsModule && currentQ.wordId) {
@@ -3440,19 +3586,17 @@ function showResultScreen() {
   resultScreen.style.display = 'block';
 
   document.getElementById('result-score').textContent = `スコア: ${currentScore} / ${totalQuestionsCount}`;
-  const detailsEl = document.getElementById('result-details');
+  renderResultReviewList_();
 
+  const detailsEl = document.getElementById('result-details');
   if (!AuthGateService.isValid()) {
     detailsEl.textContent = getResultSavedMessage_();
     return;
   }
 
-  detailsEl.textContent = '成績データを保存しています...（初回は Drive 準備で数十秒かかることがあります）';
+  detailsEl.textContent = '成績データを保存しています...（「学習設定に戻る」で移動しても保存は続行されます）';
 
-  const savePromise = currentAppMode === 'vocab'
-    ? saveVocabSessionResults()
-    : saveGrammarSessionResults();
-
+  const savePromise = SessionSave.startSave();
   var uiSettled = false;
   function setResultDetails(text) {
     if (!detailsEl) return;
@@ -3467,17 +3611,21 @@ function showResultScreen() {
 
   savePromise.then(function () {
     clearTimeout(uiTimer);
-    if (!uiSettled) setResultDetails(getResultSavedMessage_());
+    if (!uiSettled && resultScreen.style.display !== 'none') {
+      setResultDetails(getResultSavedMessage_());
+    }
   }).catch(function () {
     clearTimeout(uiTimer);
-    if (!uiSettled) setResultDetails('演習が終了しました。(一部通信エラーあり)');
+    if (!uiSettled && resultScreen.style.display !== 'none') {
+      setResultDetails('演習が終了しました。(一部通信エラーあり)');
+    }
   });
 }
 
 document.getElementById('return-settings-btn').addEventListener('click', () => {
   document.getElementById('result-screen').style.display = 'none';
   screens.settings.style.display = 'block';
-  if (AuthGateService.isValid()) {
+  if (AuthGateService.isValid() && !SessionSave.isSaving()) {
     fetchUserLogs();
   }
 });
