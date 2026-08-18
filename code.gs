@@ -5,6 +5,7 @@ const APP_NAME = 'DigitalDrill（デジドリ）';
 
 /** スクリプトプロパティキー */
 const PROP = {
+  CLIENT_ID: 'CLIENT_ID',
   SPREADSHEET_ID: 'SPREADSHEET_ID',
   MATERIALS_FOLDER_ID: 'MATERIALS_FOLDER_ID',
   VOCABULARY_FOLDER_ID: 'VOCABULARY_FOLDER_ID',
@@ -39,6 +40,10 @@ const USER_OP_CACHE_TTL = 600;
 /** 認証トークン有効期間: 1時間半（5400秒） */
 const AUTH_CACHE_TTL = 5400;
 const DEFAULT_PAGES_URL = 'https://snakamurako-coder.github.io/grammarquiz/';
+/** index.html の GOOGLE_CLIENT_ID と揃える（Script Properties 未設定時の既定値） */
+const DEFAULT_CLIENT_ID = '505252303455-84r495bnnsgiefcrv24ro2qtohlgbk2h.apps.googleusercontent.com';
+/** GAS① ユーザー権限デプロイ（config.js の DASHBOARD_URL と同一） */
+const DEFAULT_DASHBOARD_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxN9pnUp_mG6QHBKJz2WPaS-YqZlrhUaSI1XjTc3aXbmivNowfQPAi1Vi0WmpmfcDSo/exec';
 
 const MATERIALS_FOLDER_NAME = 'grammarquizzes';
 const VOCABULARY_FOLDER_NAME = 'vocabulary';
@@ -352,9 +357,15 @@ function fetchCatalogFromDrive() {
 // メインの受信処理
 function doPost(e) {
   try {
-    ensureEnvironment();
     const requestData = JSON.parse(e.postData.contents);
     const action = requestData.action;
+
+    if (action === "login") {
+      ensureEnvironment();
+      return handleLogin_(requestData);
+    }
+
+    ensureEnvironment();
 
     if (action === "logout") {
       if (requestData.authToken) invalidateAuthToken_(requestData.authToken);
@@ -471,8 +482,8 @@ function renderAccessDeniedPage_(email, reason) {
     shown =
       'Google アカウントのメールアドレスを取得できませんでした。<br>' +
       '<span style="font-size:.9em;font-weight:normal;">' +
-      '認証は <strong>GAS①（ユーザー権限デプロイ）</strong> の URL から行ってください。' +
-      'GAS②（API・匿名アクセス可）では <code>getActiveUser()</code> が空になります。' +
+      '学習画面（GitHub Pages）の「Googleアカウントでログイン」から認証してください。' +
+      'GAS②（API・匿名アクセス可）の URL では <code>getActiveUser()</code> が空になります。' +
       '</span>';
   } else if (email) {
     shown = 'ログイン中のアカウント: <strong>' + email + '</strong>';
@@ -585,10 +596,66 @@ function warmWhitelistCacheForAuth_() {
   }
 }
 
+/** Google ID トークンでログイン（GAS② POST・getActiveUser 不要） */
+function handleLogin_(requestData) {
+  const idToken = requestData.idToken;
+  if (!idToken) return sendResponse({ status: 'error', message: 'IDトークンがありません' });
+
+  const props = PropertiesService.getScriptProperties();
+  const clientId = props.getProperty(PROP.CLIENT_ID) || DEFAULT_CLIENT_ID;
+  const tokenInfoUrl = 'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken);
+  const tokenResponse = UrlFetchApp.fetch(tokenInfoUrl, { muteHttpExceptions: true });
+  if (tokenResponse.getResponseCode() !== 200) {
+    return sendResponse({ status: 'error', message: '無効なトークンです' });
+  }
+
+  const tokenData = JSON.parse(tokenResponse.getContentText());
+  if (tokenData.aud !== clientId) {
+    return sendResponse({ status: 'error', message: '不正なアクセスです' });
+  }
+
+  const userEmail = String(tokenData.email || '').trim().toLowerCase();
+  if (!userEmail) {
+    return sendResponse({ status: 'error', message: 'メールアドレスを取得できません' });
+  }
+
+  syncWhitelistCache_();
+
+  if (!isWhitelistedOrAdmin_(userEmail)) {
+    return sendResponse({
+      status: 'error',
+      message: '許可されていないユーザーです',
+      code: 'not_whitelisted',
+      email: userEmail
+    });
+  }
+
+  try {
+    const authToken = issueAuthToken_(userEmail);
+    const user = getWhitelistUserProfile_(userEmail);
+    return sendResponse({
+      status: 'success',
+      authToken: authToken,
+      user: user,
+      email: userEmail,
+      message: '認証成功'
+    });
+  } catch (e) {
+    return sendResponse({ status: 'error', message: e.message || String(e) });
+  }
+}
+
 /** GAS①/GAS② ?action=auth → whitelist 確認後 Pages へリダイレクト */
 function handleAuthRedirect_() {
   warmWhitelistCacheForAuth_();
   const access = checkDashboardAccess_();
+  if (!access.allowed && access.reason === 'no_email') {
+    const dashBase = String(DEFAULT_DASHBOARD_WEBAPP_URL).split('?')[0];
+    const currentBase = String(ScriptApp.getService().getUrl()).split('?')[0];
+    if (dashBase && currentBase && dashBase !== currentBase) {
+      return renderAuthRedirectPage_(dashBase + '?action=auth');
+    }
+  }
   if (!access.allowed) {
     return renderAccessDeniedPage_(access.email, access.reason);
   }
@@ -698,6 +765,13 @@ function setupEnvironment_(force) {
 
   const parentFolder = getScriptParentFolder_();
   props.setProperty(PROP.PARENT_FOLDER_ID, parentFolder.getId());
+
+  if (!props.getProperty(PROP.CLIENT_ID)) {
+    props.setProperty(PROP.CLIENT_ID, DEFAULT_CLIENT_ID);
+    created.push('CLIENT_ID');
+  } else {
+    reused.push('CLIENT_ID');
+  }
 
   const materialsFolder = getOrCreateMaterialsFolder_(parentFolder, force, created, reused);
   props.setProperty(PROP.MATERIALS_FOLDER_ID, materialsFolder.getId());
