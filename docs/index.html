@@ -36,6 +36,23 @@ button:active { opacity: 0.9; }
    共通スタイル & 設定画面
    ========================================= */
 .header-title { font-size: clamp(1.3em, 5vw, 1.8em); font-weight: bold; color: #2c3e50; text-align: center; margin: 4px 0 16px; }
+.backend-sync-status {
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  right: max(8px, env(safe-area-inset-right));
+  z-index: 10000;
+  font-size: 0.68em;
+  font-weight: bold;
+  padding: 6px 10px;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  max-width: min(210px, 46vw);
+  text-align: center;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.backend-sync-status.safe { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+.backend-sync-status.busy { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
 .setting-section { background: #fff; padding: 16px; border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 16px; }
 .section-title { font-size: 1.05em; font-weight: bold; color: #455a64; margin-bottom: 12px; border-bottom: 2px solid #eceff1; padding-bottom: 6px; }
 .form-group { margin-bottom: 15px; }
@@ -208,6 +225,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
   </style>
 </head>
 <body>
+<div id="backend-sync-status" class="backend-sync-status safe" role="status" aria-live="polite">アプリを安全に終了できます</div>
 <!-- Login Screen -->
   <div id="login-screen">
     <div class="header-title">DigitalDrill（デジドリ） ログイン</div>
@@ -615,6 +633,52 @@ const AUTH_TTL_MS = 90 * 60 * 1000;
 window.API_URL = (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.API_URL) || window.API_URL || '';
 window.DASHBOARD_URL = (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.DASHBOARD_URL) || window.DASHBOARD_URL || '';
 
+/** バックエンドへの送信・書き込み中かを右上に表示 */
+const BackendSyncStatus = (() => {
+  let pending = 0;
+  let el = null;
+
+  function updateUI_() {
+    if (!el) el = document.getElementById('backend-sync-status');
+    if (!el) return;
+    if (pending > 0) {
+      el.textContent = 'アプリを終了しないでください';
+      el.className = 'backend-sync-status busy';
+    } else {
+      el.textContent = 'アプリを安全に終了できます';
+      el.className = 'backend-sync-status safe';
+    }
+  }
+
+  function begin() {
+    pending++;
+    updateUI_();
+  }
+
+  function end() {
+    pending = Math.max(0, pending - 1);
+    updateUI_();
+  }
+
+  async function track(promiseOrFn) {
+    begin();
+    try {
+      if (typeof promiseOrFn === 'function') return await promiseOrFn();
+      return await promiseOrFn;
+    } finally {
+      end();
+    }
+  }
+
+  return {
+    begin,
+    end,
+    track,
+    isBusy: () => pending > 0
+  };
+})();
+window.BackendSyncStatus = BackendSyncStatus;
+
 /** GAS① 認証入口 URL */
 function getAuthLoginUrl_() {
   var base = window.DASHBOARD_URL;
@@ -681,17 +745,23 @@ const AuthGateService = {
     this.clear();
     if (token && window.API_URL) {
       try {
-        await fetch(window.API_URL, {
+        await BackendSyncStatus.track(fetch(window.API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ action: 'logout', authToken: token })
-        });
+        }));
       } catch (e) {}
     }
   }
 };
 
 window.AuthGateService = AuthGateService;
+
+const USER_BRIDGE_WRITE_OPS = {
+  saveSessionLog: true,
+  upsertItemStates: true,
+  registerVocabWords: true
+};
 
 /** UserBridge: GAS② キュー → GAS① iframe 実行（同時実行すると postMessage が取り違えられるため直列化） */
 const UserBridge = {
@@ -754,7 +824,11 @@ const UserBridge = {
   async call(op, payload) {
     var self = this;
     var run = self._chain.then(function () {
-      return self.queueOp(op, payload);
+      var opPromise = self.queueOp(op, payload);
+      if (USER_BRIDGE_WRITE_OPS[op]) {
+        return BackendSyncStatus.track(opPromise);
+      }
+      return opPromise;
     });
     self._chain = run.catch(function () {});
     return run;
@@ -1063,7 +1137,7 @@ window.ItemStateModule = ItemStateModule;
 
 async function queueSessionSummary_(summary) {
   if (!AuthGateService.isValid()) return { skipped: true };
-  return parseGasJson_(await fetchWithBackoff_(window.API_URL, {
+  return BackendSyncStatus.track(parseGasJson_(await fetchWithBackoff_(window.API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({
@@ -1071,7 +1145,7 @@ async function queueSessionSummary_(summary) {
       authToken: AuthGateService.getToken(),
       summary: summary
     })
-  }));
+  })));
 }
 
 function normalizeForScoringClient_(s) {
@@ -1378,6 +1452,7 @@ const KeyboardModule = (() => {
   let displayElement = null;
   let onEnterCallback = null;
   let onUpdateCallback = null;
+  let captureEnabled = false;
 
   const keyLayout = {
     normal: [
@@ -1401,6 +1476,7 @@ const KeyboardModule = (() => {
     currentInput = initialText || "";
     onEnterCallback = enterCallback;
     onUpdateCallback = updateCallback;
+    captureEnabled = true;
     updateInputDisplay();
     renderKeyboard();
   }
@@ -1489,35 +1565,56 @@ const KeyboardModule = (() => {
     kbContainer.style.display = 'none';
   }
 
+  function deactivate() {
+    captureEnabled = false;
+    hide();
+  }
+
+  function isCaptureEnabled() {
+    return captureEnabled;
+  }
+
+  function handlePhysicalKey_(e) {
+    if (!captureEnabled) return false;
+    if (e.ctrlKey || e.metaKey || e.altKey) return false;
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleKeyPress('Enter');
+      return true;
+    }
+    if (e.key === 'Backspace') {
+      e.preventDefault();
+      handleKeyPress('Back');
+      return true;
+    }
+    if (e.key === ' ') {
+      e.preventDefault();
+      handleKeyPress('Space');
+      return true;
+    }
+    if (e.key.length === 1) {
+      e.preventDefault();
+      handleKeyPress(e.key);
+      return true;
+    }
+    return false;
+  }
+
   function resetInput(text = "") {
     currentInput = text;
     updateInputDisplay();
   }
 
-  // 物理キーボードサポート
+  // 物理キーボードサポート（入力欄をタップしなくても captureEnabled 中は受け付ける）
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.repeat) {
-      const kbVisible = kbContainer.style.display !== 'none';
-      if (!kbVisible && typeof window.tryAdvanceToNextQuestion_ === 'function' && window.tryAdvanceToNextQuestion_()) {
+      if (!captureEnabled && typeof window.tryAdvanceToNextQuestion_ === 'function' && window.tryAdvanceToNextQuestion_()) {
         e.preventDefault();
         return;
       }
     }
-    if (kbContainer.style.display === 'none') return;
-    let pressedKey = e.key;
-    e.preventDefault();
-
-    if (pressedKey === "Backspace") pressedKey = "Back";
-    if (pressedKey === "Shift") pressedKey = "Shift";
-    if (pressedKey === " ") pressedKey = "Space";
-    if (pressedKey === "Enter") pressedKey = "Enter";
-
-    const allKeysNormal = keyLayout.normal.flat();
-    const allKeysShifted = keyLayout.shifted.flat();
-    
-    if (allKeysNormal.includes(pressedKey) || allKeysShifted.includes(pressedKey)) {
-      handleKeyPress(pressedKey);
-    }
+    handlePhysicalKey_(e);
   });
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -1528,6 +1625,8 @@ const KeyboardModule = (() => {
     init,
     show,
     hide,
+    deactivate,
+    isCaptureEnabled,
     resetInput
   };
 })();
@@ -1858,7 +1957,7 @@ const TypingModule = (() => {
       resultMsg.style.color = "#f44336";
       if(window.onQuestionCompleted) window.onQuestionCompleted(false, answerMeta);
     }
-    if (window.KeyboardModule) window.KeyboardModule.hide();
+    if (window.KeyboardModule) window.KeyboardModule.deactivate();
     submitBtn.style.display = 'none';
   }
 
@@ -1919,7 +2018,7 @@ const CorrectionModule = (() => {
     editArea.style.display = 'none';
     if (livePreviewEl) livePreviewEl.textContent = '';
     resultMsg.textContent = '';
-    if (window.KeyboardModule) window.KeyboardModule.hide();
+    if (window.KeyboardModule) window.KeyboardModule.deactivate();
   }
 
   function computeFinalSentence_(replacement) {
@@ -2017,7 +2116,7 @@ const CorrectionModule = (() => {
     judgeArea.style.display = 'none';
     locateBtn.style.display = 'none';
     editArea.style.display = 'none';
-    if (window.KeyboardModule) window.KeyboardModule.hide();
+    if (window.KeyboardModule) window.KeyboardModule.deactivate();
 
     if (normalizeEnglish(finalSentence) === normalizeEnglish(correctSentence)) {
       resultMsg.textContent = "⭕️ 正解！ " + correctSentence;
@@ -2893,6 +2992,7 @@ const SortingModule = (() => {
       resultMsg.style.color = "#f44336";
       if(window.onQuestionCompleted) window.onQuestionCompleted(false, answerMeta);
     }
+    if (window.KeyboardModule) window.KeyboardModule.deactivate();
   });
 
   return { initGame };
@@ -3294,6 +3394,7 @@ const QUESTION_HANDLERS = {
 };
 
 function loadQuestionToGame(qData) {
+  if (window.KeyboardModule) window.KeyboardModule.deactivate();
   const instructionEl = document.getElementById('question-instruction');
   const explanationEl = document.getElementById('question-explanation');
 
