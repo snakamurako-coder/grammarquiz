@@ -171,7 +171,7 @@ function doGet(e) {
 
   const access = checkDashboardAccess_();
   if (!access.allowed) {
-    return renderAccessDeniedPage_(access.email);
+    return renderAccessDeniedPage_(access.email, access.reason);
   }
 
   if (!isAdminEmail_(access.email)) {
@@ -442,18 +442,43 @@ function isWhitelistedOrAdmin_(email) {
   return emails.indexOf(normalized) !== -1;
 }
 
+/**
+ * ログイン中ユーザーのメール（小文字）。
+ * GAS②（作成者実行・匿名アクセス可）では常に空になるため、認証は GAS① 経由にすること。
+ */
+function getActiveUserEmail_() {
+  return String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+}
+
 /** GAS① ダッシュボードのアクセス判定（管理者は常に許可・匿名は拒否） */
 function checkDashboardAccess_() {
-  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
-  if (!email) return { allowed: false, email: '' };
-  return { allowed: isWhitelistedOrAdmin_(email), email: email };
+  const email = getActiveUserEmail_();
+  if (!email) {
+    return { allowed: false, email: '', reason: 'no_email' };
+  }
+  const allowed = isWhitelistedOrAdmin_(email);
+  return {
+    allowed: allowed,
+    email: email,
+    reason: allowed ? 'ok' : 'not_whitelisted'
+  };
 }
 
 /** アクセス拒否ページ */
-function renderAccessDeniedPage_(email) {
-  const shown = email
-    ? 'ログイン中のアカウント: <strong>' + email + '</strong>'
-    : 'アカウント情報を取得できませんでした。';
+function renderAccessDeniedPage_(email, reason) {
+  let shown;
+  if (reason === 'no_email') {
+    shown =
+      'Google アカウントのメールアドレスを取得できませんでした。<br>' +
+      '<span style="font-size:.9em;font-weight:normal;">' +
+      '認証は <strong>GAS①（ユーザー権限デプロイ）</strong> の URL から行ってください。' +
+      'GAS②（API・匿名アクセス可）では <code>getActiveUser()</code> が空になります。' +
+      '</span>';
+  } else if (email) {
+    shown = 'ログイン中のアカウント: <strong>' + email + '</strong>';
+  } else {
+    shown = 'アカウント情報を取得できませんでした。';
+  }
   const html =
     '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1.0"></head>' +
@@ -565,7 +590,7 @@ function handleAuthRedirect_() {
   warmWhitelistCacheForAuth_();
   const access = checkDashboardAccess_();
   if (!access.allowed) {
-    return renderAccessDeniedPage_(access.email);
+    return renderAccessDeniedPage_(access.email, access.reason);
   }
   try {
     const token = issueAuthToken_(access.email);
@@ -582,7 +607,7 @@ function handleAuthRedirect_() {
     target += '&authUser=' + encodeURIComponent(JSON.stringify(compact));
     return renderAuthRedirectPage_(target);
   } catch (e) {
-    return renderAccessDeniedPage_(access.email);
+    return renderAccessDeniedPage_(access.email, 'not_whitelisted');
   }
 }
 

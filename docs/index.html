@@ -727,9 +727,9 @@ const BackendSyncStatus = (() => {
 })();
 window.BackendSyncStatus = BackendSyncStatus;
 
-/** 認証入口 URL（GAS②: 作成者権限で whitelist シートを直接照合できる） */
+/** 認証入口 URL（GAS①: ユーザー権限で getActiveUser() が使える） */
 function getAuthLoginUrl_() {
-  var base = window.API_URL || window.DASHBOARD_URL;
+  var base = window.DASHBOARD_URL;
   if (!base) return '';
   var sep = base.indexOf('?') >= 0 ? '&' : '?';
   return base + sep + 'action=auth';
@@ -4066,7 +4066,7 @@ function bindLoginScreen_() {
     var url = getAuthLoginUrl_();
     if (!url) {
       var msgEl = document.getElementById('login-msg');
-      if (msgEl) msgEl.textContent = 'API_URL が設定されていません（config.js）';
+      if (msgEl) msgEl.textContent = 'DASHBOARD_URL が設定されていません（config.js）';
       return;
     }
     window.location.href = url;
