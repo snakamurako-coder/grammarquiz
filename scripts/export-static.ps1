@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   GAS② exportStatic API から docs/data/manifest.json を生成する。

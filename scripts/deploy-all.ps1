@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   GitHub Pages + GAS①（管理）+ GAS②（API）を一度に反映する。
