@@ -633,15 +633,29 @@ const AUTH_TTL_MS = 90 * 60 * 1000;
 window.API_URL = (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.API_URL) || window.API_URL || '';
 window.DASHBOARD_URL = (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.DASHBOARD_URL) || window.DASHBOARD_URL || '';
 
-/** バックエンドへの送信・書き込み中かを右上に表示 */
+/** バックエンドへの送信・書き込み中、または未送信の学習データがあるかを右上に表示 */
 const BackendSyncStatus = (() => {
-  let pending = 0;
+  let pendingNetwork = 0;
   let el = null;
+
+  function hasUnsavedLearning_() {
+    if (typeof sessionAnswerLog !== 'undefined' && sessionAnswerLog.length > 0) {
+      if (!AuthGateService.isValid()) return true;
+      if (typeof SessionSave !== 'undefined' && SessionSave.isSaving()) return true;
+      if (typeof sessionPersistedToServer !== 'undefined' && !sessionPersistedToServer) return true;
+    }
+    if (AuthGateService.isValid() && ItemStateModule.hasPendingSync()) return true;
+    return false;
+  }
+
+  function isUnsafe_() {
+    return pendingNetwork > 0 || hasUnsavedLearning_();
+  }
 
   function updateUI_() {
     if (!el) el = document.getElementById('backend-sync-status');
     if (!el) return;
-    if (pending > 0) {
+    if (isUnsafe_()) {
       el.textContent = 'アプリを終了しないでください';
       el.className = 'backend-sync-status busy';
     } else {
@@ -651,12 +665,12 @@ const BackendSyncStatus = (() => {
   }
 
   function begin() {
-    pending++;
+    pendingNetwork++;
     updateUI_();
   }
 
   function end() {
-    pending = Math.max(0, pending - 1);
+    pendingNetwork = Math.max(0, pendingNetwork - 1);
     updateUI_();
   }
 
@@ -670,11 +684,17 @@ const BackendSyncStatus = (() => {
     }
   }
 
+  function refresh() {
+    updateUI_();
+  }
+
   return {
     begin,
     end,
     track,
-    isBusy: () => pending > 0
+    refresh,
+    isUnsafe: isUnsafe_,
+    hasUnsavedLearning: hasUnsavedLearning_
   };
 })();
 window.BackendSyncStatus = BackendSyncStatus;
@@ -1031,10 +1051,33 @@ window.PresetModule = PresetModule;
 /** 学習状態（文法・単語統合・localStorage + Drive同期） */
 const ItemStateModule = (() => {
   const STORAGE_KEY = 'digitaldrill_item_state';
+  const DIRTY_KEY = 'digitaldrill_item_state_dirty';
   const HISTORY_MASK = 0xFFFF;
 
-  // Drive へ未反映の Item_ID。同期成功時にのみクリアする
   let dirtyIds = {};
+
+  function loadDirtyIds_() {
+    try {
+      const raw = localStorage.getItem(DIRTY_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        Object.keys(parsed).forEach(function (id) { dirtyIds[id] = true; });
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function saveDirtyIds_() {
+    try { localStorage.setItem(DIRTY_KEY, JSON.stringify(dirtyIds)); } catch (e) { /* ignore */ }
+  }
+
+  function markDirty_(itemId) {
+    dirtyIds[itemId] = true;
+    saveDirtyIds_();
+    if (window.BackendSyncStatus) BackendSyncStatus.refresh();
+  }
+
+  loadDirtyIds_();
 
   function loadLocal() {
     try {
@@ -1068,7 +1111,7 @@ const ItemStateModule = (() => {
     st.Last_Seen = Math.floor(Date.now() / 1000);
     states[itemId] = st;
     saveLocal(states);
-    dirtyIds[itemId] = true;
+    markDirty_(itemId);
     return st;
   }
 
@@ -1078,7 +1121,7 @@ const ItemStateModule = (() => {
     if (!states[itemId]) states[itemId] = defaultState(itemId, 'vocab', '');
     Object.assign(states[itemId], fields);
     saveLocal(states);
-    dirtyIds[itemId] = true;
+    markDirty_(itemId);
     return states[itemId];
   }
 
@@ -1124,13 +1167,21 @@ const ItemStateModule = (() => {
     const ids = Object.keys(dirtyIds);
     if (!ids.length) return { skipped: true };
     const res = await UserBridge.call('upsertItemStates', { rows: getRows(ids) });
-    if (res.status === 'success') dirtyIds = {};
+    if (res.status === 'success') {
+      dirtyIds = {};
+      try { localStorage.removeItem(DIRTY_KEY); } catch (e) { /* ignore */ }
+    }
+    if (window.BackendSyncStatus) BackendSyncStatus.refresh();
     return res;
+  }
+
+  function hasPendingSync() {
+    return Object.keys(dirtyIds).length > 0;
   }
 
   return {
     loadLocal, saveLocal, defaultState, recordAttempt, patchState, getState,
-    getRows, mergeStates, syncFromServer, syncToServer
+    getRows, mergeStates, syncFromServer, syncToServer, hasPendingSync
   };
 })();
 window.ItemStateModule = ItemStateModule;
@@ -3014,6 +3065,8 @@ let currentScore = 0;
 let currentUserId = "Guest";
 let sessionStartTime = null;
 let sessionAnswerLog = [];
+/** 現在の演習結果がサーバーへ保存済みか（sessionAnswerLog が空なら true 扱い） */
+let sessionPersistedToServer = true;
 let currentAppMode = 'grammar';
 let currentVocabSetName = '';
 let currentVocabBookName = '';
@@ -3260,7 +3313,9 @@ elements.startBtn.addEventListener('click', async () => {
       currentQuestionIndex = 0;
       currentScore = 0;
       sessionAnswerLog = [];
+      sessionPersistedToServer = true;
       sessionStartTime = Date.now();
+      BackendSyncStatus.refresh();
       loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
       screens.settings.style.display = 'none';
       document.getElementById('result-screen').style.display = 'none';
@@ -3329,7 +3384,9 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
     currentQuestionIndex = 0;
     currentScore = 0;
     sessionAnswerLog = [];
+    sessionPersistedToServer = true;
     sessionStartTime = Date.now();
+    BackendSyncStatus.refresh();
 
     loadQuestionToGame(currentQuestionDataList[0]);
     screens.settings.style.display = 'none';
@@ -3522,6 +3579,7 @@ const SessionSave = (function () {
       : saveGrammarSessionResults())
       .finally(function () {
         activePromise = null;
+        BackendSyncStatus.refresh();
         if (AuthGateService.isValid()) {
           fetchUserLogs().catch(function () {});
         }
@@ -3550,6 +3608,8 @@ window.onQuestionCompleted = (isCorrect, meta) => {
     grammarArea: normalizeExplanationField_(currentQ && currentQ.grammarArea),
     explanation: normalizeExplanationField_(currentQ && currentQ.explanation)
   });
+  sessionPersistedToServer = false;
+  BackendSyncStatus.refresh();
 
   if (currentAppMode === 'vocab') {
     if (window.SrsModule && currentQ.wordId) {
@@ -3615,7 +3675,7 @@ async function saveSessionResultsUnified(modeOverride, setNameOverride) {
 
   const summary = await buildSessionSummary_(modeOverride, setNameOverride);
 
-  await UserBridge.call('saveSessionLog', {
+  const logRes = await UserBridge.call('saveSessionLog', {
     setId: summary.Set_ID,
     setName: summary.Set_Name,
     mode: summary.Mode,
@@ -3625,9 +3685,15 @@ async function saveSessionResultsUnified(modeOverride, setNameOverride) {
     timeTaken: summary.Duration_Sec
   });
 
-  await queueSessionSummary_(summary);
-  await ItemStateModule.syncToServer();
-  return { status: 'success' };
+  const summaryRes = await queueSessionSummary_(summary);
+  const stateRes = await ItemStateModule.syncToServer();
+
+  const ok = logRes.status === 'success'
+    && summaryRes.status === 'success'
+    && (stateRes.status === 'success' || stateRes.skipped);
+  if (ok) sessionPersistedToServer = true;
+  BackendSyncStatus.refresh();
+  return ok ? { status: 'success' } : { status: 'error' };
 }
 
 async function saveVocabSessionResults() {
@@ -3678,6 +3744,7 @@ function showResultScreen() {
   const detailsEl = document.getElementById('result-details');
   if (!AuthGateService.isValid()) {
     detailsEl.textContent = getResultSavedMessage_();
+    BackendSyncStatus.refresh();
     return;
   }
 
@@ -3712,6 +3779,10 @@ function showResultScreen() {
 document.getElementById('return-settings-btn').addEventListener('click', () => {
   document.getElementById('result-screen').style.display = 'none';
   screens.settings.style.display = 'block';
+  if (sessionPersistedToServer || !AuthGateService.isValid()) {
+    sessionAnswerLog = [];
+  }
+  BackendSyncStatus.refresh();
   if (AuthGateService.isValid() && !SessionSave.isSaving()) {
     fetchUserLogs();
   }
@@ -3917,6 +3988,7 @@ window.onLoginSuccess = function(user) {
   fetchUserLogs();
   PresetModule.revalidate();
   ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
+  BackendSyncStatus.refresh();
 };
 
 /** URL の ?auth= を取り込み、クエリから除去 */
@@ -4115,6 +4187,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     screens.login.style.display = 'block';
     screens.settings.style.display = 'none';
   }
+  BackendSyncStatus.refresh();
 });
 </script>
 </body>
