@@ -74,19 +74,17 @@ function Deploy-Gas {
   Write-Host "GAS① (Dashboard) : $($ids.Gas1DashboardId)"
 
   Write-Step 'clasp push（マニフェスト含む強制上書き）'
-  clasp push -f
+  clasp push -f | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "clasp push が失敗しました (exit=$LASTEXITCODE)" }
 
   $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm'
   Write-Step 'GAS②（JSON API）デプロイ更新'
-  clasp deploy -i $ids.Gas2ApiId -d "API update $stamp"
+  clasp deploy -i $ids.Gas2ApiId -d "API update $stamp" | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "GAS② deploy が失敗しました (exit=$LASTEXITCODE)" }
 
   Write-Step 'GAS①（管理ダッシュボード）デプロイ更新'
-  clasp deploy -i $ids.Gas1DashboardId -d "Dashboard update $stamp"
+  clasp deploy -i $ids.Gas1DashboardId -d "Dashboard update $stamp" | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "GAS① deploy が失敗しました (exit=$LASTEXITCODE)" }
-
-  return $ids
 }
 
 function Deploy-Pages {
@@ -111,9 +109,8 @@ function Deploy-Pages {
   if ($LASTEXITCODE -ne 0) { throw "git push が失敗しました (exit=$LASTEXITCODE)" }
 }
 
-$ids = $null
 if (-not $PagesOnly) {
-  $ids = Deploy-Gas
+  Deploy-Gas
 }
 if (-not $GasOnly) {
   if ($ExportStatic) {
@@ -126,6 +123,7 @@ if (-not $GasOnly) {
 Write-Host ""
 Write-Host '完了しました。' -ForegroundColor Green
 if (-not $PagesOnly) {
+  $ids = Get-DeploymentIdsFromConfig
   Write-Host "  GAS② : https://script.google.com/macros/s/$($ids.Gas2ApiId)/exec"
   Write-Host "  GAS① : https://script.google.com/macros/s/$($ids.Gas1DashboardId)/exec"
 }
