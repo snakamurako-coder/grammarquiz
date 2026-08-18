@@ -1137,15 +1137,18 @@ window.ItemStateModule = ItemStateModule;
 
 async function queueSessionSummary_(summary) {
   if (!AuthGateService.isValid()) return { skipped: true };
-  return BackendSyncStatus.track(parseGasJson_(await fetchWithBackoff_(window.API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({
-      action: 'queueSessionSummary',
-      authToken: AuthGateService.getToken(),
-      summary: summary
-    })
-  })));
+  return BackendSyncStatus.track((async () => {
+    const res = await fetchWithBackoff_(window.API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'queueSessionSummary',
+        authToken: AuthGateService.getToken(),
+        summary: summary
+      })
+    });
+    return parseGasJson_(res);
+  })());
 }
 
 function normalizeForScoringClient_(s) {
