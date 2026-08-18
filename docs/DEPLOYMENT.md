@@ -1,14 +1,23 @@
-# DigitalDrill（デジドリ） デプロイ手順（2UI構成）
+# DigitalDrill（デジドリ） デプロイ手順
 
 ## 構成概要
 
 | コンポーネント | 配置 | 実行権限 | 役割 |
 |---|---|---|---|
-| GAS① ダッシュボード | `script.google.com/.../exec`（dashboard.html） | **アクセスしているユーザー** | 単語登録・マイ単語帳・学習スタート・成績保存 |
-| GAS② JSON API | `script.google.com/.../exec?action=...` | **作成者（自分）** | プリセット配布・採点API・CacheService |
-| GitHub Pages | `docs/index.html` | 静的 | 単語N択・文法演習・音読プレースホルダ |
+| **GitHub Pages** | `docs/index.html` | 静的 | 学習UI（文法・単語・音読・マイページ）・STT |
+| **GAS①** | `dashboard.html` | **アクセスしているユーザー** | 認証ゲート・UserBridge（ユーザーDrive） |
+| **GAS②** | JSON API | **作成者（自分）** | プリセット配布・セッション集約キュー・setup |
 
-同一GASプロジェクトから **2つのウェブアプリデプロイ** を作成します。
+同一 GAS プロジェクトから **2つのウェブアプリデプロイ** を作成します。
+
+```text
+Pages（学習UI）
+  ├─ fetch → GAS②（プリセット読取・queueSessionSummary・queueUserOp）
+  └─ iframe → GAS① UserBridge（ユーザーDrive 読み書き）
+
+GAS① 管理者ダッシュボード（管理者のみ）
+  └─ セッション集約・whitelist 閲覧
+```
 
 ---
 
@@ -18,198 +27,158 @@
 clasp push
 ```
 
-`.claspignore` により `docs/` は GAS にアップロードされません。
-
 ---
 
 ## 2. GAS②（作成者権限・JSON API）デプロイ
 
-1. [Apps Script エディタ](https://script.google.com) を開く
-2. **デプロイ** → **新しいデプロイ** → 種類: **ウェブアプリ**
-3. 設定:
-   - **実行ユーザー**: 自分
-   - **アクセス**: 全員（匿名ユーザーを含む）
-4. デプロイして **exec URL** をコピー → `docs/config.js` の `API_URL` に設定
-
-`appsscript.json` の既定設定は GAS② 向けです:
-
-```json
-"webapp": {
-  "access": "ANYONE_ANONYMOUS",
-  "executeAs": "USER_DEPLOYING"
-}
-```
+- **実行ユーザー**: 自分
+- **アクセス**: 全員（匿名ユーザーを含む）
+- exec URL → `docs/config.js` の `API_URL`
 
 ---
 
-## 3. GAS①（ユーザー権限・ダッシュボード）デプロイ
+## 3. GAS①（ユーザー権限）デプロイ
 
-1. 同じプロジェクトで **もう1つ** ウェブアプリデプロイを作成
-2. 設定:
-   - **実行ユーザー**: **アクセスしているユーザー**
-   - **アクセス**: Google アカウントを持つ全員
-3. exec URL をコピー → `docs/config.js` の `DASHBOARD_URL` に設定
+- **実行ユーザー**: **アクセスしているユーザー**
+- **アクセス**: Google アカウントを持つ全員
+- exec URL → `docs/config.js` の `DASHBOARD_URL`
 
-GAS① にアクセスすると `dashboard.html` が表示されます（`doGet` パラメータなし）。
+学習者は **GitHub Pages** を利用します。GAS① URL は認証（`?action=auth`）と UserBridge 用です。
 
 ---
 
-## 4. GitHub Pages の有効化
+## 4. GitHub Pages
 
-1. GitHub リポジトリ → **Settings** → **Pages**
-2. Source: **Deploy from a branch**
-3. Branch: `main` / Folder: **`/docs`**
-4. 数分後 `https://<user>.github.io/grammarquiz/` で公開
+Settings → Pages → Branch: `main` / Folder: `/docs`
 
 ---
 
-## 5. config.js の設定
-
-[docs/config.js](config.js) を編集:
+## 5. config.js
 
 ```javascript
 window.DIGITALDRILL_CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/GAS2_DEPLOYMENT_ID/exec',
-  DASHBOARD_URL: 'https://script.google.com/macros/s/GAS1_DEPLOYMENT_ID/exec'
+  API_URL: '...GAS②.../exec',
+  DASHBOARD_URL: '...GAS①.../exec',
+  STATIC_MANIFEST_URL: 'data/manifest.json'
 };
 ```
 
----
+### プリセット取得はハイブリッド（`PresetModule`）
 
-## 6. 初回セットアップ（作成者Drive）
+取得元の切り替え設定はありません。次の順に、使えるものを使います。
 
-GAS② の exec URL にアクセス:
+| 順 | 取得元 | 速さ | 使う条件 |
+|---|---|---|---|
+| 1 | localStorage キャッシュ | 即時・通信なし | 教材の版が変わるまで |
+| 2 | Pages の `manifest.json` | 即時（CDN・GAS② に触らない） | manifest の版が現行版と一致 |
+| 3 | GAS② JSON API | 通信あり | manifest が古い／manifest に無い教材／絞り込み指定あり |
 
-```
-https://script.google.com/macros/s/.../exec?action=setup
-```
+初回アクセスでも `manifest.json` から即座に描画され、教材を更新しない限り
+2回目以降はキャッシュのみで完結します（GAS② への通信は版チェック 1 回だけ）。
 
-または Apps Script エディタで `setupEnvironment(true)` を実行。
+### 教材更新の検知
 
-**サンプル問題をカタログ定義（不定詞3問）に揃え直す**場合は `force=1` を付けてください:
+- GAS② `?action=presetVersion` が **教材の版**（grammarquizzes / vocabulary 配下の
+  スプレッドシートの最終更新時刻から算出した MD5）を返します。
+- サーバー側は CacheService に 120 秒キャッシュするため、同時接続数が増えても
+  Drive の走査は最大 30回/時 に収まります。
+- クライアントは画面表示後に 1 回だけ問い合わせ、版が変わっていたときだけ
+  キャッシュを破棄して再取得し、設定画面を描き直します（学習中は次にセット選択へ
+  戻ったときに反映）。
+- 手動で更新したい場合は学習画面の「キャッシュ更新」ボタン。
 
-```
-https://script.google.com/macros/s/.../exec?action=setup&force=1
-```
-
-初回以降も、GAS コード更新でサンプルカタログの版が上がったときは API アクセス時に自動同期されます（`grammarquizzes` 内のカタログ外ブックは削除されます）。
-
-作成者Drive に `grammarquizzes/`（文法演習）、`vocabulary/`（プリセット）、`DigitalDrill` スプレッドシートが生成されます。
-旧環境の `materials/` フォルダは初回アクセス時に自動で `grammarquizzes/` にリネームされます。
-
-セットアップ実行者のメールアドレスが `ADMIN_EMAIL` として記録され、**管理者はホワイトリスト登録なしで常に利用できます**。
-
----
-
-## 7. ユーザー環境（自動）
-
-GAS① ダッシュボードに初回アクセスすると、**ユーザー自身のマイドライブ** に以下が自動作成されます:
-
-- `DigitalDrill_MyData/` フォルダ
-- `マイ単語帳`（「サンプル」シートに10語、「デフォルト」空シート）
-- `DigitalDrill学習記録`
+教材を更新したら `scripts/export-static.ps1` を再実行して `manifest.json` も作り直してください。
+再生成するまでは版が食い違うため、その教材だけ GAS② API 経由になります。
 
 ---
 
-## 8. 学習フロー
+## 6. UserBridge（ユーザーDrive 操作）
 
-### 音読（プレースホルダ）
+1. Pages が GAS② `queueUserOp`（authToken 必須）→ `opToken`
+2. 隠し iframe で GAS① `?action=userBridge&token=opToken`
+3. GAS① が `Session.getActiveUser()` で本人確認し、ユーザー Drive に読み書き
+4. `postMessage` で Pages に結果返却
 
-1. GAS① ダッシュボード → シート選択 → 「音読練習」→ **学習スタート**
-2. GitHub Pages に `?token=...&mode=reading` でリダイレクト
-3. 単語・チャンク・例文を表示 → テキスト入力 → GAS② で採点
-4. 「ダッシュボードへ戻る」→ GAS① が結果をユーザーDriveに保存
-
-### 単語N択（GitHub Pages 直接）
-
-1. GitHub Pages でプリセットを選択（localStorage キャッシュ）
-2. または GAS① から「単語学習」モードで学習スタート（トークン経由）
-
-### 文法演習
-
-GitHub Pages から直接（GAS② API + キャッシュ）
+対応 op: `getVocabCatalog`, `getVocabWords`, `registerVocabWords`, `getLearningLogs`, `getItemStates`, `upsertItemStates`, `saveSessionLog`, `startSession`, `countSessionAttempts`
 
 ---
 
-## 9. 一括反映（推奨）
+## 7. データモデル
 
-Cursor / VS Code の **Tasks: Run Task** から次を実行:
+### ユーザー層（細粒度）— ユーザーDrive `DigitalDrill学習記録` / シート `学習状態`
+
+| 列 | 説明 |
+|---|---|
+| Item_ID | 文法 rowId / 単語 book\|sheet\|通し番号 |
+| Kind | grammar / vocab |
+| Set_ID | 教材識別子 |
+| Total_Attempts / Total_Wrong | 累計 |
+| Recent_Bits | 直近16回正誤（下位5ビットで直近5回正答率） |
+| Last_Seen | UNIX秒 |
+| Step_Index, EF, Next_Review, Avg_Time | SRS（単語） |
+
+クライアント側の保管場所は `localStorage['digitaldrill_item_state']` の1箇所のみです。
+`ItemStateModule` が唯一の読み書き口で、`SrsModule` は出題間隔の計算だけを担当します。
+セッション終了時に未反映（dirty）の Item_ID だけを UserBridge 経由で Drive へ送ります。
+
+### 管理者層（粗粒度）— 本体 SS / シート `セッション集約`
+
+Session_ID, User_ID, Mode, Set_ID, Set_Name, Attempt_No, Correct, Total, Score, Duration_Sec, Started_At, Ended_At
+
+- 書き込み: Pages → GAS② `queueSessionSummary` → Script Properties に **1セッション1キー**（`ssq_<Session_ID>`）
+  で保存。read-modify-write を避けているため、同時投入されたサマリーが取りこぼされません。
+- 反映: 時間トリガー `flushSessionSummaries_`（5分間隔）。ScriptLock で二重書き込みを防止し、
+  書き込み成功後にキューのキーを削除します。
+
+**トリガー初回設定**（管理者が GAS エディタで `installSessionSummaryTrigger_()` を実行、または管理者ダッシュボードのボタン）
+
+---
+
+## 8. 静的プリセット export
+
+```powershell
+.\scripts\export-static.ps1
+# または Deploy All with -ExportStatic
+.\scripts\deploy-all.ps1 -ExportStatic
+```
+
+GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成します。
+
+---
+
+## 9. 認証フロー
+
+1. Pages「Googleアカウントでログイン」→ GAS① `?action=auth`
+2. whitelist 照合 → `auth` トークン → Pages `?auth=TOKEN`
+3. 以降 API 呼び出しに authToken を付与
+
+---
+
+## 10. 一括反映
 
 | タスク | 内容 |
 |---|---|
-| **★ Deploy All (Pages + GAS① + GAS②)** | `clasp push` → 両デプロイ更新 → `git commit`（必要時）→ `git push` |
-| Deploy: GAS only | GAS①②のみ |
-| Deploy: Pages only | GitHub Pages のみ |
-
-実装: [`scripts/deploy-all.ps1`](../scripts/deploy-all.ps1)  
-デプロイIDは [`docs/config.js`](config.js) から自動取得します（URL・権限設定は維持）。
-
-手動の場合:
-
-```bash
-# GAS② を更新
-clasp deploy -i <GAS2_DEPLOYMENT_ID> --description "API update"
-
-# GAS① を更新
-clasp deploy -i <GAS1_DEPLOYMENT_ID> --description "Dashboard update"
-```
+| Deploy All | clasp push → GAS①② → git push |
+| `-ExportStatic` | 上記 + manifest.json 生成 |
 
 ---
 
-## 10. 認証フロー（GAS① 認証ゲート + 短命トークン）
+## 同時接続への備え
 
-GitHub Pages 上では Google Session を直接取得できないため、**GAS① で本人確認 → 短命トークン → Pages** の流れです。
+同時接続数の上限に当たったときだけ再試行します（それ以外のフォールバックは持ちません）。
 
-```text
-1. 利用者が Pages を開く（未ログインならログイン画面）
-2. 「Googleアカウントでログイン」→ GAS① ?action=auth
-3. GAS①: Session.getActiveUser + whitelist 照合
-4. 成功: auth トークン（TTL 90分）を CacheService に保存 → Pages?auth=TOKEN へリダイレクト
-5. Pages: トークンを localStorage に保存し学習画面へ
-6. 成績・記録の保存時のみ GAS② に authToken を付与（identity はサーバー側でトークンから解決）
-```
-
-| 項目 | 値 |
+| 箇所 | 挙動 |
 |---|---|
-| 認証入口 | `DASHBOARD_URL?action=auth` |
-| トークン TTL | **90分（5400秒）** |
-| 読み取り API | 匿名のまま（問題取得・カタログ等） |
-| 保護 API | `saveResult`, `saveSessionLog`, `getUserLogs`, `scoreReading`, `save`, `registerVocabWords` 等 |
-
-ダッシュボードから「学習スタート」した場合も `authToken` が URL に付与されます。
-
----
-
-## 11. ホワイトリスト（利用者制限）
-
-ホワイトリストに登録されたユーザーと管理者のみがアプリを利用できます。
-
-- **登録方法**: 作成者Drive の `DigitalDrill` スプレッドシートの `whitelist` シートに、`account` 列へ利用者の Google メールアドレスを追記
-- **GitHub Pages 学習画面**: GAS① 認証ゲート経由。未登録ユーザーは `?action=auth` で拒否
-- **GAS① ダッシュボード**: アクセス時に whitelist（Script Properties キャッシュ）と照合
-- **管理者**: セットアップ実行者（`ADMIN_EMAIL`）は whitelist 登録不要で常に利用可
-- **キャッシュ**: whitelist は GAS② のリクエスト時に約10分間隔で Script Properties へ同期されます
-
----
-
-## 12. Script Properties（任意）
-
-Apps Script → プロジェクトの設定 → スクリプト プロパティ:
-
-| キー | 説明 |
-|---|---|
-| `PAGES_URL` | GitHub Pages の URL（GAS① リダイレクト先。未設定時は既定値） |
-| `ADMIN_EMAIL` | 管理者メールアドレス（setup 時に自動設定。変更可） |
-| `WHITELIST_CACHE` | whitelist の自動キャッシュ（手動編集不要） |
+| Pages → GAS②（版チェック・プリセット取得・`queueUserOp`・`queueSessionSummary`） | HTTP 429 / 5xx とネットワークエラーに限り、指数バックオフで最大4回リトライ（約1s / 2s / 4s + ジッター） |
+| 教材の配布 | 通常は Pages の `manifest.json`（CDN）とローカルキャッシュで完結し、GAS② には版チェックの 1 リクエストしか出さない |
+| 学習状態の Drive 同期 | 送信に失敗した Item_ID は dirty のまま残り、次のセッション終了時に再送 |
+| `flushSessionSummaries_` | ScriptLock 取得に失敗したら何もせず次回トリガーに委ねる |
 
 ---
 
 ## トラブルシューティング
 
-- **「利用が許可されていないアカウントです」**: `DigitalDrill` スプレッドシートの `whitelist` シートを確認
-- **「認証トークンが無効」**: 90分経過後は再ログイン（GAS① `?action=auth`）
-- **成績が保存されない**: Pages でログイン済みか確認（authToken 必須）
-- **dashboard が真っ白**: GAS① のデプロイが「ユーザーとして実行」になっているか確認
-- **API が 403**: GAS② が「全員（匿名）」アクセスになっているか確認
-- **セッションが見つからない**: CacheService TTL は6時間。再スタートしてください
-- **プリセットが古い**: GitHub Pages の「キャッシュ更新」ボタンを押す
+- **UserBridge タイムアウト**: GAS① が「ユーザーとして実行」か確認。サードパーティ Cookie 制限時は再ログイン
+- **セッション集約が空**: `flushSessionSummaries_` または管理者ダッシュボード「手動フラッシュ」
+- **教材の更新が反映されない**: サーバー側の版キャッシュ（120秒）が切れるのを待つか「キャッシュ更新」ボタン
+- **初回表示が遅い**: `docs/data/manifest.json` が未生成。`scripts/export-static.ps1` を実行

@@ -96,6 +96,8 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .word-card:active { cursor: grabbing; transform: translateY(2px); }
 .sortable-ghost { opacity: 0.3; }
 .btn-small { min-height: 38px; padding: 8px 14px; font-size: 0.85em; background-color: #607d8b; color: white; border: none; border-radius: 8px; cursor: pointer; }
+#app-toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 16px); max-width: 90%; padding: 12px 20px; background-color: rgba(38,50,56,0.95); color: #fff; border-radius: 24px; font-size: 0.9em; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25); opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; z-index: 2000; }
+#app-toast.visible { opacity: 1; transform: translate(-50%, 0); }
 #submit-btn { width: 100%; min-height: 54px; padding: 14px; font-size: 1.15em; background-color: var(--c-success); color: white; border: none; border-radius: 10px; cursor: pointer; margin-top: 10px; }
 #result-msg { margin-top: 12px; font-size: 1.15em; font-weight: bold; text-align: center; line-height: 1.5; word-break: break-word; }
 #next-btn { background-color: var(--c-success); }
@@ -198,8 +200,6 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
   <div id="settings-screen" style="display: none;">
     <div class="header-title">DigitalDrill（デジドリ） 学習</div>
     <p style="text-align:center;margin:-8px 0 12px;font-size:0.9em;">
-      <a id="dashboard-link" href="#" target="_blank" rel="noopener">ダッシュボード（単語登録・学習スタート）</a>
-      &nbsp;|&nbsp;
       <button type="button" id="cache-refresh-btn" class="btn-small">キャッシュ更新</button>
     </p>
 
@@ -207,6 +207,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
       <button type="button" class="mode-tab active" data-mode="grammar">文法・語法演習</button>
       <button type="button" class="mode-tab" data-mode="vocab">単語学習</button>
       <button type="button" class="mode-tab" data-mode="reading">音読練習</button>
+      <button type="button" class="mode-tab" data-mode="manage">マイページ</button>
     </div>
 
     <div class="setting-section" id="profile-container">
@@ -221,7 +222,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
       <input type="hidden" id="username-input">
     </div>
     
-    <!-- 新設：マイページ（ダッシュボード） -->
+    <!-- 新設：マイページ（学習記録サマリー） -->
     <div class="setting-section" id="mypage-container" style="display: none;">
       <div class="section-title">📊 マイページ（学習記録）</div>
       <div class="dashboard-grid">
@@ -402,10 +403,57 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 
     <div id="reading-info-panel" style="display: none;">
       <div class="setting-section">
-        <div class="section-title">音読練習（プレースホルダ）</div>
-        <p style="color:#555;line-height:1.6;">音読学習は<strong>ダッシュボード</strong>から「学習スタート」を押して開始してください。ダッシュボードがユーザーのマイ単語帳からデータを読み取り、セッショントークン付きでこの画面に引き渡します。</p>
-        <p style="color:#666;font-size:0.9em;">※ STT（音声認識）は未実装です。テキスト入力によるダミー採点で動作確認できます。</p>
-        <a id="reading-dashboard-link" class="btn-primary" href="#" target="_blank" rel="noopener" style="display:inline-block;text-align:center;text-decoration:none;margin-top:8px;">ダッシュボードを開く</a>
+        <div class="section-title">音読練習</div>
+        <div class="form-group">
+          <label>教材（マイ単語帳シート）</label>
+          <select id="reading-sheet-select"></select>
+        </div>
+        <p style="color:#666;font-size:0.9em;">マイクで読み上げ（Web Speech API）。未対応ブラウザはテキスト入力に切り替わります。</p>
+        <button type="button" id="reading-start-btn" class="btn-primary">音読を開始する</button>
+      </div>
+    </div>
+
+    <div id="manage-panel" style="display: none;">
+      <div class="mode-tabs" style="margin-bottom:12px;">
+        <button type="button" class="mode-tab manage-sub-tab active" data-manage-tab="sets">マイセット</button>
+        <button type="button" class="mode-tab manage-sub-tab" data-manage-tab="register">単語登録</button>
+        <button type="button" class="mode-tab manage-sub-tab" data-manage-tab="logs">学習記録</button>
+      </div>
+      <div id="manage-sets-panel">
+        <div class="setting-section">
+          <div class="section-title">マイ単語帳（あなたのDrive）</div>
+          <div id="user-set-list">ログイン後に読み込まれます</div>
+        </div>
+      </div>
+      <div id="manage-register-panel" style="display:none;">
+        <div class="setting-section">
+          <div class="section-title">単語登録（マイ単語帳）</div>
+          <div class="form-group">
+            <label>登録先シート（教材名）</label>
+            <input type="text" id="register-sheet-name" value="デフォルト">
+          </div>
+          <div class="form-group">
+            <label>TSV貼り付け（22列・ヘッダなし）</label>
+            <textarea id="register-tsv-input" rows="4"></textarea>
+            <button type="button" id="register-parse-tsv-btn" class="btn-small" style="margin-top:8px;">TSVを解析</button>
+          </div>
+          <div id="register-preview-area" style="display:none;">
+            <div id="register-preview-table-wrap" style="overflow-x:auto;"></div>
+            <button type="button" id="register-import-btn" class="btn-primary" style="margin-top:12px;">一括登録</button>
+          </div>
+          <div id="register-msg" style="margin-top:10px;font-weight:bold;"></div>
+        </div>
+        <div class="setting-section">
+          <div class="section-title">手動入力（1語）</div>
+          <div class="vocab-form-grid" id="register-form-grid"></div>
+          <button type="button" id="register-single-btn" class="btn-primary" style="margin-top:12px;">登録</button>
+        </div>
+      </div>
+      <div id="manage-logs-panel" style="display:none;">
+        <div class="setting-section" id="mypage-container-inner">
+          <div class="section-title">学習記録（直近）</div>
+          <div id="user-logs-list">ログイン後に読み込まれます</div>
+        </div>
       </div>
     </div>
   </div>
@@ -522,12 +570,17 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
       <div id="reading-progress" class="section-title">読み込み中...</div>
       <div id="reading-word-card" style="margin:12px 0;"></div>
       <div class="form-group">
-        <label>読み上げテキスト（STTプレースホルダ：ここに入力）</label>
-        <textarea id="reading-transcript" rows="3" placeholder="読み上げた内容を入力..."></textarea>
+        <label>読み上げ（音声認識 / テキスト）</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <button type="button" id="reading-stt-start-btn" class="btn-small">🎤 録音開始</button>
+          <button type="button" id="reading-stt-stop-btn" class="btn-small" style="display:none;">⏹ 録音停止</button>
+          <span id="reading-stt-status" style="font-size:0.85em;color:#666;"></span>
+        </div>
+        <textarea id="reading-transcript" rows="3" placeholder="読み上げた内容（音声認識または手入力）..."></textarea>
       </div>
       <button id="reading-submit-btn" class="btn-primary">読み上げ完了（採点する）</button>
       <div id="reading-result-msg" style="margin-top:12px;font-weight:bold;"></div>
-      <button id="reading-back-dashboard-btn" class="btn-primary" style="display:none;margin-top:12px;">ダッシュボードへ戻る</button>
+      <button id="reading-back-settings-btn" class="btn-primary" style="display:none;margin-top:12px;">学習設定に戻る</button>
     </div>
   </div>
 
@@ -621,11 +674,394 @@ const AuthGateService = {
 };
 
 window.AuthGateService = AuthGateService;
-/** 後方互換: 成績記録等が参照 */
-window.AuthService = {
-  get currentUser() { return AuthGateService.getUser(); },
-  clearSession() { AuthGateService.clear(); }
+
+/** UserBridge: GAS② キュー → GAS① iframe 実行 */
+const UserBridge = {
+  async queueOp(op, payload) {
+    if (!AuthGateService.isValid()) {
+      return { status: 'error', message: 'ログインが必要です' };
+    }
+    const res = await parseGasJson_(await fetchWithBackoff_(window.API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'queueUserOp',
+        authToken: AuthGateService.getToken(),
+        op: op,
+        payload: payload || {}
+      })
+    }));
+    if (res.status !== 'success' || !res.opToken) {
+      return res;
+    }
+    return this.executeViaIframe_(res.opToken);
+  },
+
+  executeViaIframe_(opToken) {
+    var self = this;
+    return new Promise(function (resolve) {
+      if (!opToken || !window.DASHBOARD_URL) {
+        resolve({ status: 'error', message: 'DASHBOARD_URL または opToken がありません' });
+        return;
+      }
+      var iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = window.DASHBOARD_URL + '?action=userBridge&token=' + encodeURIComponent(opToken);
+      var timeout = setTimeout(function () {
+        window.removeEventListener('message', onMessage);
+        if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+        resolve({ status: 'error', message: 'UserBridge がタイムアウトしました' });
+      }, 45000);
+      function onMessage(event) {
+        if (!event.data || event.data.type !== 'userBridgeComplete') return;
+        clearTimeout(timeout);
+        window.removeEventListener('message', onMessage);
+        if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+        var result = event.data.result;
+        if (event.data.success && result) {
+          resolve(result);
+        } else {
+          resolve({ status: 'error', message: event.data.message || 'UserBridge 失敗' });
+        }
+      }
+      window.addEventListener('message', onMessage);
+      document.body.appendChild(iframe);
+    });
+  },
+
+  async call(op, payload) {
+    return this.queueOp(op, payload);
+  }
 };
+window.UserBridge = UserBridge;
+
+/**
+ * プリセット取得（ハイブリッド）
+ *
+ *   1. localStorage キャッシュ … 教材の版が変わるまで再利用。ネットワークに出ない
+ *   2. Pages の manifest.json  … 初回でも待たずに表示できる。GAS② に触らない
+ *   3. GAS② の JSON API        … manifest が古い・manifest に無い教材だけ
+ *
+ * 教材が更新されたかどうかは GAS② の presetVersion で判定する。
+ * 版が変わったときだけキャッシュを捨て、'digitaldrill:presets-updated' を通知する。
+ */
+const PresetModule = (() => {
+  const CACHE_PREFIX = 'dd_preset_';
+  const VERSION_KEY = 'dd_preset_version';
+
+  let manifest = null;
+  let manifestPromise = null;
+  let revalidatePromise = null;
+
+  function manifestUrl_() {
+    return window.STATIC_MANIFEST_URL
+      || (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.STATIC_MANIFEST_URL)
+      || 'data/manifest.json';
+  }
+
+  function currentVersion_() {
+    try { return localStorage.getItem(VERSION_KEY) || ''; } catch (e) { return ''; }
+  }
+
+  function setVersion_(version) {
+    try { localStorage.setItem(VERSION_KEY, version); } catch (e) {}
+  }
+
+  /** 版が変わったらキャッシュを捨てて採用する。捨てたら true */
+  function adoptVersion_(version) {
+    if (!version || currentVersion_() === version) return false;
+    clearAll();
+    setVersion_(version);
+    return true;
+  }
+
+  function readCache_(key) {
+    try {
+      const raw = localStorage.getItem(CACHE_PREFIX + key);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  function writeCache_(key, data) {
+    try { localStorage.setItem(CACHE_PREFIX + key, JSON.stringify(data)); } catch (e) {}
+  }
+
+  function clearAll() {
+    try {
+      Object.keys(localStorage).forEach(function (k) {
+        if (k.indexOf(CACHE_PREFIX) === 0) localStorage.removeItem(k);
+      });
+      localStorage.removeItem(VERSION_KEY);
+    } catch (e) {}
+  }
+
+  /** Pages 上の manifest.json を1回だけ読む。未生成なら null */
+  function loadManifest() {
+    if (!manifestPromise) {
+      manifestPromise = (async () => {
+        const base = window.location.pathname.replace(/\/[^/]*$/, '/');
+        const res = await fetch(base + manifestUrl_());
+        if (!res.ok) {
+          console.warn('manifest.json がありません。GAS② API から取得します。');
+          return null;
+        }
+        manifest = await res.json();
+        // 初回訪問時の出発点。2回目以降は API 由来の版のほうが新しいことがあるので上書きしない
+        if (!currentVersion_()) adoptVersion_(manifest.version);
+        return manifest;
+      })();
+    }
+    return manifestPromise;
+  }
+
+  /** manifest が現行版と一致していれば静的データを使える */
+  async function usableManifest_() {
+    const m = await loadManifest();
+    return m && m.version === currentVersion_() ? m : null;
+  }
+
+  async function fetchRemoteVersion_() {
+    if (!window.API_URL) return '';
+    const res = await parseGasJson_(
+      await fetchWithBackoff_(window.API_URL + '?action=presetVersion', { redirect: 'follow' })
+    );
+    return res.status === 'success' ? (res.version || '') : '';
+  }
+
+  /**
+   * GAS② に現行版を問い合わせ、教材が更新されていればキャッシュを捨てて通知する。
+   * 初回描画を遅らせないよう、画面表示のあとに1回だけ走らせる。
+   */
+  function revalidate() {
+    if (!revalidatePromise) {
+      revalidatePromise = (async () => {
+        try {
+          if (!adoptVersion_(await fetchRemoteVersion_())) return false;
+          window.dispatchEvent(new CustomEvent('digitaldrill:presets-updated'));
+          return true;
+        } catch (e) {
+          console.warn('教材の更新確認に失敗:', e);
+          return false;
+        }
+      })();
+    }
+    return revalidatePromise;
+  }
+
+  /** 「キャッシュ更新」ボタン用。全部捨てて版を取り直す（通知は出さない） */
+  async function refreshAll() {
+    clearAll();
+    manifest = null;
+    manifestPromise = null;
+    revalidatePromise = null;
+    try {
+      const version = await fetchRemoteVersion_();
+      if (version) setVersion_(version);
+    } catch (e) {
+      console.warn('教材の版を取得できませんでした:', e);
+    }
+  }
+
+  /**
+   * @param {string} key          キャッシュキー
+   * @param {function} fromManifest manifest から該当データを取り出す（無ければ null）
+   * @param {function} fromApi     GAS② API を叩く
+   * @param {boolean} force        キャッシュと manifest を無視して API から取り直す
+   */
+  async function resolve_(key, fromManifest, fromApi, force) {
+    if (!force) {
+      const cached = readCache_(key);
+      if (cached !== null) return { status: 'success', data: cached };
+
+      const m = await usableManifest_();
+      const staticData = m ? fromManifest(m) : null;
+      if (staticData != null) {
+        writeCache_(key, staticData);
+        return { status: 'success', data: staticData };
+      }
+    }
+
+    const result = await fromApi();
+    if (result.status === 'success') writeCache_(key, result.data);
+    return result;
+  }
+
+  /** manifest は絞り込み前の全件なので、絞り込みが指定されていたら API に任せる */
+  function noFilters_(filtersJson) {
+    if (!filtersJson) return true;
+    try {
+      const f = JSON.parse(filtersJson);
+      return Object.keys(f).every(function (k) {
+        return !f[k] || f[k].length === 0;
+      });
+    } catch (e) { return false; }
+  }
+
+  function getVocabCatalog(force) {
+    return resolve_('vocab_catalog',
+      function (m) { return m.vocabCatalog || null; },
+      function () { return gasRun('apiGetVocabCatalog'); },
+      force);
+  }
+
+  function getVocabWords(bookName, sheetName, filtersJson, includeBookPool, force) {
+    const manifestKey = bookName + '::' + sheetName;
+    return resolve_('vocab_words_' + manifestKey + '_' + (filtersJson || '{}'),
+      function (m) {
+        if (!noFilters_(filtersJson)) return null;
+        return (m.vocabWords && m.vocabWords[manifestKey]) || null;
+      },
+      function () { return gasRun('apiGetVocabWords', bookName, sheetName, filtersJson, includeBookPool); },
+      force);
+  }
+
+  function getQuestions(subject, unit, force) {
+    const manifestKey = subject + '::' + unit;
+    return resolve_('questions_' + manifestKey,
+      function (m) { return (m.questions && m.questions[manifestKey]) || null; },
+      function () { return gasRun('apiGetQuestions', subject, unit); },
+      force);
+  }
+
+  return { getVocabCatalog, getVocabWords, getQuestions, clearAll, refreshAll, revalidate };
+})();
+window.PresetModule = PresetModule;
+
+/** 学習状態（文法・単語統合・localStorage + Drive同期） */
+const ItemStateModule = (() => {
+  const STORAGE_KEY = 'digitaldrill_item_state';
+  const HISTORY_MASK = 0xFFFF;
+
+  // Drive へ未反映の Item_ID。同期成功時にのみクリアする
+  let dirtyIds = {};
+
+  function loadLocal() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  }
+
+  function saveLocal(states) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(states)); } catch (e) {}
+  }
+
+  function defaultState(itemId, kind, setId) {
+    return {
+      Item_ID: itemId, Kind: kind || 'grammar', Set_ID: setId || '',
+      Total_Attempts: 0, Total_Wrong: 0, Recent_Bits: 0, Last_Seen: 0,
+      Step_Index: 0, EF: 2.5, Next_Review: 0, Avg_Time: 0
+    };
+  }
+
+  function recordAttempt(itemId, isCorrect, meta) {
+    meta = meta || {};
+    const states = loadLocal();
+    const kind = meta.kind || (String(itemId).indexOf('|') >= 0 ? 'vocab' : 'grammar');
+    const setId = meta.setId || '';
+    let st = states[itemId] || defaultState(itemId, kind, setId);
+    st.Total_Attempts = (parseInt(st.Total_Attempts, 10) || 0) + 1;
+    if (!isCorrect) st.Total_Wrong = (parseInt(st.Total_Wrong, 10) || 0) + 1;
+    const bit = isCorrect ? 1 : 0;
+    st.Recent_Bits = ((parseInt(st.Recent_Bits, 10) || 0) << 1 | bit) & HISTORY_MASK;
+    st.Last_Seen = Math.floor(Date.now() / 1000);
+    states[itemId] = st;
+    saveLocal(states);
+    dirtyIds[itemId] = true;
+    return st;
+  }
+
+  /** SM-2 の算出結果（Step_Index / EF / Next_Review / Avg_Time）を書き戻す */
+  function patchState(itemId, fields) {
+    const states = loadLocal();
+    if (!states[itemId]) states[itemId] = defaultState(itemId, 'vocab', '');
+    Object.assign(states[itemId], fields);
+    saveLocal(states);
+    dirtyIds[itemId] = true;
+    return states[itemId];
+  }
+
+  function getState(itemId) {
+    return loadLocal()[itemId] || null;
+  }
+
+  function toRow(st) {
+    return {
+      Item_ID: st.Item_ID, Kind: st.Kind, Set_ID: st.Set_ID,
+      Total_Attempts: st.Total_Attempts, Total_Wrong: st.Total_Wrong,
+      Recent_Bits: st.Recent_Bits, Last_Seen: st.Last_Seen,
+      Step_Index: st.Step_Index, EF: st.EF, Next_Review: st.Next_Review, Avg_Time: st.Avg_Time
+    };
+  }
+
+  function getRows(itemIds) {
+    const states = loadLocal();
+    const ids = itemIds || Object.keys(states);
+    return ids.filter(function (id) { return !!states[id]; })
+      .map(function (id) { return toRow(states[id]); });
+  }
+
+  /** サーバー由来の状態をローカルへ取り込む（Drive 側を正とする） */
+  function mergeStates(serverStates) {
+    if (!serverStates) return;
+    const local = loadLocal();
+    Object.keys(serverStates).forEach(function (k) {
+      local[k] = Object.assign(defaultState(k, serverStates[k].Kind, serverStates[k].Set_ID), serverStates[k]);
+    });
+    saveLocal(local);
+  }
+
+  async function syncFromServer(setId) {
+    if (!AuthGateService.isValid()) return;
+    const res = await UserBridge.call('getItemStates', { setId: setId || '' });
+    if (res.status === 'success') mergeStates(res.data);
+  }
+
+  /** 未反映分だけを Drive へ送る。失敗時は dirty を残して次回に再送する */
+  async function syncToServer() {
+    if (!AuthGateService.isValid()) return { skipped: true };
+    const ids = Object.keys(dirtyIds);
+    if (!ids.length) return { skipped: true };
+    const res = await UserBridge.call('upsertItemStates', { rows: getRows(ids) });
+    if (res.status === 'success') dirtyIds = {};
+    return res;
+  }
+
+  return {
+    loadLocal, saveLocal, defaultState, recordAttempt, patchState, getState,
+    getRows, mergeStates, syncFromServer, syncToServer
+  };
+})();
+window.ItemStateModule = ItemStateModule;
+
+async function queueSessionSummary_(summary) {
+  if (!AuthGateService.isValid()) return { skipped: true };
+  return parseGasJson_(await fetchWithBackoff_(window.API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      action: 'queueSessionSummary',
+      authToken: AuthGateService.getToken(),
+      summary: summary
+    })
+  }));
+}
+
+function normalizeForScoringClient_(s) {
+  return (s || '').toString().toLowerCase().replace(/[^\w\s']/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function scoreReadingTranscriptClient_(sessionData, transcript) {
+  const words = sessionData.words || [];
+  const normalizedTranscript = normalizeForScoringClient_(transcript);
+  let matched = 0;
+  words.forEach(function (w) {
+    const target = normalizeForScoringClient_(w['英単語・熟語の表現'] || '');
+    if (target && normalizedTranscript.indexOf(target) >= 0) matched++;
+  });
+  const score = words.length > 0 ? Math.round((matched / words.length) * 100) : 0;
+  return { score: score, matched: matched, total: words.length, transcript: transcript };
+}
 
 /** GAS サーバー呼び出し（GitHub Pages は fetch のみ） */
 function gasRun(fnName) {
@@ -643,214 +1079,71 @@ async function parseGasJson_(res) {
   }
 }
 
+/**
+ * GAS② のプリセット取得エンドポイント（manifest に無い教材のみここへ来る）。
+ * 同時実行数の上限に当たると GAS は 429/5xx を返すため、指数バックオフで再試行する。
+ */
 async function gasFetch_(fnName, args) {
   var url = window.API_URL;
   if (!url) {
-    throw new Error('API URL が取得できません。GAS の Webアプリ URL（/exec）から開いてください。');
+    throw new Error('API URL が設定されていません。docs/config.js の API_URL を確認してください。');
   }
 
-  function authToken_() {
-    return AuthGateService.isValid() ? AuthGateService.getToken() : '';
-  }
-
-  if (fnName === 'apiGetQuestions') {
-    var qUrl = url + '?action=getQuestions&subject=' + encodeURIComponent(args[0]) + '&unit=' + encodeURIComponent(args[1]);
-    return parseGasJson_(await fetch(qUrl, { redirect: 'follow' }));
-  }
-  if (fnName === 'apiSaveResult') {
-    return parseGasJson_(await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'saveResult', authToken: authToken_(), results: args[0] })
-    }));
-  }
-  if (fnName === 'apiSaveSessionLog') {
-    return parseGasJson_(await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'saveSessionLog',
-        authToken: authToken_(),
-        setName: args[0],
-        correctRate: args[1],
-        timeTaken: args[2]
-      })
-    }));
-  }
-  if (fnName === 'apiGetUserLogs') {
-    return parseGasJson_(await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'getUserLogs', authToken: authToken_() })
-    }));
-  }
+  var target;
   if (fnName === 'apiGetVocabCatalog') {
-    return parseGasJson_(await fetch(url + '?action=getVocabCatalog', { redirect: 'follow' }));
-  }
-  if (fnName === 'apiGetVocabWords') {
-    var vUrl = url + '?action=getVocabWords&bookName=' + encodeURIComponent(args[0])
+    target = url + '?action=getVocabCatalog';
+  } else if (fnName === 'apiGetQuestions') {
+    target = url + '?action=getQuestions&subject=' + encodeURIComponent(args[0])
+      + '&unit=' + encodeURIComponent(args[1]);
+  } else if (fnName === 'apiGetVocabWords') {
+    target = url + '?action=getVocabWords&bookName=' + encodeURIComponent(args[0])
       + '&sheetName=' + encodeURIComponent(args[1])
       + '&filters=' + encodeURIComponent(args[2] || '{}')
       + '&includeBookPool=' + encodeURIComponent(args[3] ? '1' : '0');
-    return parseGasJson_(await fetch(vUrl, { redirect: 'follow' }));
+  } else {
+    throw new Error('未対応のAPI: ' + fnName);
   }
-  if (fnName === 'apiRegisterVocabWords') {
-    return parseGasJson_(await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'registerVocabWords', authToken: authToken_(), sheetName: args[0], rows: args[1] })
-    }));
-  }
-  if (fnName === 'apiGetSession') {
-    return parseGasJson_(await fetch(url + '?action=getSession&token=' + encodeURIComponent(args[0]), { redirect: 'follow' }));
-  }
-  if (fnName === 'apiScoreReading') {
-    return parseGasJson_(await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'scoreReading', authToken: authToken_(), token: args[0], transcript: args[1] })
-    }));
-  }
-  if (fnName === 'apiGetResult') {
-    return parseGasJson_(await fetch(url + '?action=getResult&token=' + encodeURIComponent(args[0]), { redirect: 'follow' }));
-  }
-  if (fnName === 'apiSaveSrsLog') {
-    return parseGasJson_(await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'saveSrsLog',
-        authToken: authToken_(),
-        setId: args[0],
-        score: args[1],
-        timeTaken: args[2]
-      })
-    }));
-  }
-  if (fnName === 'apiQueueSrsBulk') {
-    return parseGasJson_(await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'queueSrsBulk',
-        authToken: authToken_(),
-        rows: args[0]
-      })
-    }));
-  }
-  throw new Error('未対応のAPI: ' + fnName);
+
+  return parseGasJson_(await fetchWithBackoff_(target, { redirect: 'follow' }));
 }
 
-// presetCache.js
-const PresetCacheModule = (() => {
-  const TTL_MS = 24 * 60 * 60 * 1000;
-  const PREFIX = 'dd_cache_';
-
-  function get(key) {
+/** 同時接続超過（429 / 5xx）のみ間隔を空けて再試行する */
+async function fetchWithBackoff_(url, options, maxAttempts) {
+  var attempts = maxAttempts || 4;
+  var lastError = null;
+  for (var i = 0; i < attempts; i++) {
+    if (i > 0) {
+      var waitMs = Math.round(Math.pow(2, i - 1) * 1000 + Math.random() * 500);
+      await new Promise(function (r) { setTimeout(r, waitMs); });
+    }
     try {
-      const raw = localStorage.getItem(PREFIX + key);
-      if (!raw) return null;
-      const obj = JSON.parse(raw);
-      if (!obj || !obj.fetchedAt) return null;
-      if (Date.now() - obj.fetchedAt > TTL_MS) return null;
-      return obj.data;
-    } catch (e) { return null; }
-  }
-
-  function set(key, data) {
-    try {
-      localStorage.setItem(PREFIX + key, JSON.stringify({ fetchedAt: Date.now(), data: data }));
-    } catch (e) {}
-  }
-
-  function remove(key) {
-    localStorage.removeItem(PREFIX + key);
-  }
-
-  function clearAll() {
-    Object.keys(localStorage).forEach(function (k) {
-      if (k.indexOf(PREFIX) === 0) localStorage.removeItem(k);
-    });
-  }
-
-  async function getVocabCatalog(force) {
-    const key = 'vocab_catalog';
-    if (!force) {
-      const cached = get(key);
-      if (cached) return cached;
+      var res = await fetch(url, options);
+      if (res.status === 429 || res.status >= 500) {
+        lastError = new Error('サーバー混雑中（HTTP ' + res.status + '）');
+        continue;
+      }
+      return res;
+    } catch (e) {
+      lastError = e;
     }
-    const result = await gasRun('apiGetVocabCatalog');
-    if (result.status === 'success') set(key, result.data);
-    return result;
   }
-
-  async function getVocabWords(bookName, sheetName, filtersJson, includeBookPool, force) {
-    const key = 'vocab_words_' + bookName + '_' + sheetName + '_' + (filtersJson || '{}');
-    if (!force) {
-      const cached = get(key);
-      if (cached) return { status: 'success', data: cached };
-    }
-    const result = await gasRun('apiGetVocabWords', bookName, sheetName, filtersJson, includeBookPool);
-    if (result.status === 'success') set(key, result.data);
-    return result;
-  }
-
-  async function getQuestions(subject, unit, force) {
-    const key = 'questions_v11_' + subject + '_' + unit;
-    if (!force) {
-      const cached = get(key);
-      if (cached) return { status: 'success', data: cached };
-    }
-    const result = await gasRun('apiGetQuestions', subject, unit);
-    if (result.status === 'success') set(key, result.data);
-    return result;
-  }
-
-  return { getVocabCatalog, getVocabWords, getQuestions, clearAll, remove };
-})();
-
-window.PresetCacheModule = PresetCacheModule;
+  throw lastError || new Error('サーバーへ接続できませんでした');
+}
 
 // algorithm.js
-// 出題アルゴリズム・成績記録モジュール
+// 出題順の組み立て（学習状態は ItemStateModule を参照）
 
 const AlgorithmModule = (() => {
-  const STORAGE_KEY = 'digitaldrill_history';
-
-  function getHistory() {
-    try {
-      const data = localStorage.getItem(STORAGE_KEY);
-      return data ? JSON.parse(data) : {};
-    } catch (e) {
-      return {};
-    }
-  }
-
-  function saveHistory(historyObj) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(historyObj));
-    } catch (e) {}
-  }
-
-  function recordResult(questionId, isCorrect) {
-    const history = getHistory();
-    if (!history[questionId]) {
-      history[questionId] = { correct: 0, incorrect: 0, lastPlayed: 0 };
-    }
-    if (isCorrect) {
-      history[questionId].correct += 1;
-    } else {
-      history[questionId].incorrect += 1;
-    }
-    history[questionId].lastPlayed = Date.now();
-    saveHistory(history);
+  function recordResult(questionId, isCorrect, meta) {
+    meta = meta || {};
+    ItemStateModule.recordAttempt(questionId, isCorrect, { kind: 'grammar', setId: meta.setId || '' });
   }
 
   function buildQuestionSet(allQuestions, mode) {
     if (!allQuestions || allQuestions.length === 0) return [];
-    
+
     let pool = [...allQuestions];
-    const history = getHistory();
+    const itemStates = ItemStateModule.loadLocal();
 
     if (mode === "normal") {
       return pool;
@@ -861,7 +1154,15 @@ const AlgorithmModule = (() => {
       return pool.slice(0, 10);
     }
 
-    const entry = (q) => history[q.rowId] || { correct: 0, incorrect: 0, lastPlayed: 0 };
+    const entry = (q) => {
+      const st = itemStates[q.rowId];
+      if (!st) return { correct: 0, incorrect: 0, lastPlayed: 0 };
+      return {
+        correct: (parseInt(st.Total_Attempts, 10) || 0) - (parseInt(st.Total_Wrong, 10) || 0),
+        incorrect: parseInt(st.Total_Wrong, 10) || 0,
+        lastPlayed: (parseInt(st.Last_Seen, 10) || 0) * 1000
+      };
+    };
 
     if (mode === "weakness") {
       pool.sort((a, b) => {
@@ -906,75 +1207,27 @@ window.AlgorithmModule = AlgorithmModule;
 
 // srsModule.js — 固定間隔 × SM-2 ハイブリッド SRS
 const SrsModule = (() => {
-  const STORAGE_KEY = 'digitaldrill_srs_state';
   const INTERVALS = [0, 1, 7, 30, 90, 180, 365];
   const EF_MIN = 1.3;
   const EF_DEFAULT = 2.5;
-  const HISTORY_MASK = 0xFFFF;
 
-  let sessionStates = {};
-  let sessionDiffs = {};
-
+  // 学習状態の保管場所は ItemStateModule ただ一つ。
+  // ここは出題間隔（SM-2）の計算だけを担当する。
   function buildWordId(bookName, sheetName, serialNo) {
     return String(bookName || '(未登録)') + '|' + String(sheetName || '(未登録)') + '|' + String(serialNo || '(未登録)');
   }
 
-  function loadFromLocalStorage() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch (e) {
-      return {};
-    }
-  }
-
-  function saveToLocalStorage(states) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(states));
-    } catch (e) {}
-  }
-
-  function defaultState(wordId) {
-    return {
-      Word_ID: wordId,
-      Step_Index: 0,
-      EF: EF_DEFAULT,
-      Next_Review: 0,
-      History: 0,
-      Avg_Time: 0,
-      _answerCount: 0
-    };
-  }
-
-  function normalizeState(raw, wordId) {
-    const base = defaultState(wordId);
-    if (!raw) return base;
-    return {
-      Word_ID: wordId,
-      Step_Index: parseInt(raw.Step_Index, 10) || 0,
-      EF: parseFloat(raw.EF) || EF_DEFAULT,
-      Next_Review: parseInt(raw.Next_Review, 10) || 0,
-      History: parseInt(raw.History, 10) || 0,
-      Avg_Time: parseInt(raw.Avg_Time, 10) || 0,
-      _answerCount: parseInt(raw._answerCount, 10) || 0
-    };
+  function setIdOf(wordId) {
+    const parts = String(wordId).split('|');
+    return parts.length >= 2 ? parts.slice(0, 2).join('|') : '';
   }
 
   function initSession(serverStates) {
-    const local = loadFromLocalStorage();
-    sessionStates = {};
-    sessionDiffs = {};
-    const merged = Object.assign({}, local, serverStates || {});
-    Object.keys(merged).forEach(function (wordId) {
-      sessionStates[wordId] = normalizeState(merged[wordId], wordId);
-    });
+    ItemStateModule.mergeStates(serverStates);
   }
 
   function getState(wordId) {
-    if (!sessionStates[wordId]) {
-      sessionStates[wordId] = normalizeState(loadFromLocalStorage()[wordId], wordId);
-    }
-    return sessionStates[wordId];
+    return ItemStateModule.getState(wordId) || ItemStateModule.defaultState(wordId, 'vocab', setIdOf(wordId));
   }
 
   function calcQScore(isCorrect, answerMs, isUnknown) {
@@ -989,11 +1242,6 @@ const SrsModule = (() => {
   function updateEf(ef, q) {
     let next = ef + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
     return Math.max(EF_MIN, Math.round(next * 100) / 100);
-  }
-
-  function updateHistory(history, isCorrect) {
-    const bit = isCorrect ? 1 : 0;
-    return ((history << 1) | bit) & HISTORY_MASK;
   }
 
   function updateAvgTime(prevAvg, prevCount, answerMs) {
@@ -1022,37 +1270,25 @@ const SrsModule = (() => {
 
     const nowSec = Math.floor(Date.now() / 1000);
     const intervalDays = INTERVALS[step] || 0;
-    const nextReview = nowSec + intervalDays * 86400;
-
-    const timeStats = updateAvgTime(state.Avg_Time, state._answerCount || 0, answerMs || 0);
+    const timeStats = updateAvgTime(
+      parseInt(state.Avg_Time, 10) || 0,
+      parseInt(state.Total_Attempts, 10) || 0,
+      answerMs || 0
+    );
 
     return {
-      Word_ID: state.Word_ID,
       Step_Index: step,
       EF: ef,
-      Next_Review: nextReview,
-      History: updateHistory(state.History, q >= 3),
-      Avg_Time: timeStats.avg,
-      _answerCount: timeStats.count
+      Next_Review: nowSec + intervalDays * 86400,
+      Avg_Time: timeStats.avg
     };
   }
 
   function update(wordId, isCorrect, answerMs, isUnknown) {
-    const state = getState(wordId);
-    const next = applyReview(state, isCorrect, answerMs, isUnknown);
-    sessionStates[wordId] = next;
-    sessionDiffs[wordId] = {
-      Word_ID: next.Word_ID,
-      Step_Index: next.Step_Index,
-      EF: next.EF,
-      Next_Review: next.Next_Review,
-      History: next.History,
-      Avg_Time: next.Avg_Time
-    };
-    const allLocal = loadFromLocalStorage();
-    allLocal[wordId] = next;
-    saveToLocalStorage(allLocal);
-    return next;
+    const before = getState(wordId);
+    const review = applyReview(before, isCorrect, answerMs, isUnknown);
+    ItemStateModule.recordAttempt(wordId, isCorrect, { kind: 'vocab', setId: setIdOf(wordId) });
+    return ItemStateModule.patchState(wordId, review);
   }
 
   function selectDueWords(words, bookName, sheetName, limit) {
@@ -1064,9 +1300,9 @@ const SrsModule = (() => {
       const wordId = buildWordId(bookName, sheetName, wordObj['通し番号']);
       const state = getState(wordId);
       const nextReview = parseInt(state.Next_Review, 10) || 0;
-      const answerCount = state._answerCount || 0;
+      const attempts = parseInt(state.Total_Attempts, 10) || 0;
 
-      if (answerCount === 0 && nextReview === 0 && state.Step_Index === 0 && state.History === 0) {
+      if (attempts === 0) {
         unseen.push(wordObj);
       } else if (nextReview <= nowSec) {
         due.push({ wordObj: wordObj, wordId: wordId, nextReview: nextReview });
@@ -1090,14 +1326,6 @@ const SrsModule = (() => {
     return selected;
   }
 
-  function getDiffRows() {
-    return Object.keys(sessionDiffs).map(function (k) { return sessionDiffs[k]; });
-  }
-
-  function hasDiffs() {
-    return Object.keys(sessionDiffs).length > 0;
-  }
-
   return {
     INTERVALS: INTERVALS,
     buildWordId: buildWordId,
@@ -1105,10 +1333,7 @@ const SrsModule = (() => {
     getState: getState,
     update: update,
     calcQScore: calcQScore,
-    selectDueWords: selectDueWords,
-    getDiffRows: getDiffRows,
-    hasDiffs: hasDiffs,
-    loadFromLocalStorage: loadFromLocalStorage
+    selectDueWords: selectDueWords
   };
 })();
 
@@ -1917,9 +2142,17 @@ const VocabSettingsModule = (() => {
   let catalog = { presets: [], userBooks: [] };
 
   async function loadCatalog(force) {
-    const result = await window.PresetCacheModule.getVocabCatalog(!!force);
+    const result = await PresetModule.getVocabCatalog(!!force);
     if (result.status !== 'success') throw new Error(result.message || 'カタログ取得失敗');
     catalog = result.data;
+    if (AuthGateService.isValid()) {
+      try {
+        const userRes = await UserBridge.call('getVocabCatalog', {});
+        if (userRes.status === 'success' && userRes.data && userRes.data.userBooks) {
+          catalog.userBooks = userRes.data.userBooks;
+        }
+      } catch (e) { console.warn('ユーザーカタログ:', e.message); }
+    }
     refreshBookSelect();
   }
 
@@ -2286,7 +2519,8 @@ const VocabRegisterModule = (() => {
 
   async function registerRows(rows) {
     const sheetName = document.getElementById('register-sheet-name').value.trim() || 'デフォルト';
-    const result = await gasRun('apiRegisterVocabWords', sheetName, JSON.stringify(rows));
+    if (!AuthGateService.isValid()) throw new Error('単語登録にはログインが必要です');
+    const result = await UserBridge.call('registerVocabWords', { sheetName: sheetName, rows: rows });
     if (result.status !== 'success') throw new Error(result.message || '登録失敗');
     return result;
   }
@@ -2346,26 +2580,54 @@ const VocabRegisterModule = (() => {
 
 window.VocabRegisterModule = VocabRegisterModule;
 
-// readingSession.js - 音読プレースホルダ（token ベース）
+// readingSession.js - 音読（STT + ローカル採点）
 const ReadingSessionModule = (() => {
   let sessionData = null;
   let currentIndex = 0;
-  let sessionToken = null;
-  let resultToken = null;
+  let sessionStartTs = 0;
+  let recognition = null;
 
-  async function initFromUrl() {
-    const params = new URLSearchParams(window.location.search);
-    sessionToken = params.get('token');
-    const mode = params.get('mode');
-    if (!sessionToken || mode !== 'reading') return false;
+  function initStt_() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return null;
+    const rec = new SpeechRecognition();
+    rec.lang = 'en-US';
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = function (event) {
+      let text = '';
+      for (let i = 0; i < event.results.length; i++) {
+        text += event.results[i][0].transcript + ' ';
+      }
+      document.getElementById('reading-transcript').value = text.trim();
+    };
+    rec.onerror = function (e) {
+      const st = document.getElementById('reading-stt-status');
+      if (st) st.textContent = 'STTエラー: ' + (e.error || '');
+    };
+    return rec;
+  }
 
-    const result = await gasRun('apiGetSession', sessionToken);
+  async function startSession(sheetName) {
+    if (!AuthGateService.isValid()) {
+      alert('音読練習にはログインが必要です');
+      return false;
+    }
+    const result = await UserBridge.call('startSession', {
+      mode: 'reading',
+      sheetName: sheetName,
+      filters: {},
+      options: {}
+    });
     if (result.status !== 'success') {
-      alert('セッション取得エラー: ' + (result.message || ''));
+      alert('セッション開始エラー: ' + (result.message || ''));
       return false;
     }
     sessionData = result.data;
     currentIndex = 0;
+    sessionStartTs = Date.now();
+    currentAppMode = 'reading';
+    currentReadingSetName = sessionData.setName || ('マイ単語帳 / ' + sheetName);
     showReadingScreen();
     renderCurrentWord();
     return true;
@@ -2385,7 +2647,7 @@ const ReadingSessionModule = (() => {
     const cardEl = document.getElementById('reading-word-card');
     if (currentIndex >= words.length) {
       progressEl.textContent = '全語完了';
-      cardEl.innerHTML = '<p>すべての単語を確認しました。下のテキストエリアに読み上げ内容を入力して採点してください。</p>';
+      cardEl.innerHTML = '<p>すべての単語を確認しました。読み上げて採点してください。</p>';
       return;
     }
     const w = words[currentIndex];
@@ -2403,39 +2665,60 @@ const ReadingSessionModule = (() => {
 
   async function submitTranscript() {
     const transcript = document.getElementById('reading-transcript').value.trim();
-    if (!transcript) { alert('テキストを入力してください'); return; }
+    if (!transcript) { alert('テキストを入力するか、音声認識してください'); return; }
     const msgEl = document.getElementById('reading-result-msg');
     msgEl.textContent = '採点中...';
     msgEl.style.color = '#555';
     try {
-      const result = await gasRun('apiScoreReading', sessionToken, transcript);
-      if (result.status !== 'success') throw new Error(result.message || '採点失敗');
-      resultToken = result.resultToken;
-      const d = result.data;
+      const d = scoreReadingTranscriptClient_(sessionData, transcript);
+      currentScore = d.matched;
+      totalQuestionsCount = d.total;
+      sessionStartTime = sessionStartTs;
+      await saveSessionResultsUnified('reading', currentReadingSetName || sessionData.setName);
       msgEl.textContent = 'スコア: ' + d.score + '% （' + d.matched + '/' + d.total + ' 語一致）';
       msgEl.style.color = d.score >= 80 ? '#4caf50' : '#ff9800';
       document.getElementById('reading-submit-btn').style.display = 'none';
-      document.getElementById('reading-back-dashboard-btn').style.display = 'block';
+      document.getElementById('reading-back-settings-btn').style.display = 'block';
     } catch (e) {
       msgEl.textContent = 'エラー: ' + e.message;
       msgEl.style.color = '#f44336';
     }
   }
 
-  function backToDashboard() {
-    if (!resultToken || !window.DASHBOARD_URL) {
-      alert('ダッシュボード URL が未設定です（config.js）');
-      return;
-    }
-    window.location.href = window.DASHBOARD_URL + '?result_token=' + encodeURIComponent(resultToken);
+  function backToSettings() {
+    document.getElementById('reading-screen').style.display = 'none';
+    document.getElementById('settings-screen').style.display = 'block';
   }
 
   function bindEvents() {
     document.getElementById('reading-submit-btn').addEventListener('click', submitTranscript);
-    document.getElementById('reading-back-dashboard-btn').addEventListener('click', backToDashboard);
+    document.getElementById('reading-back-settings-btn').addEventListener('click', backToSettings);
+    const startStt = document.getElementById('reading-stt-start-btn');
+    const stopStt = document.getElementById('reading-stt-stop-btn');
+    if (startStt) {
+      startStt.addEventListener('click', function () {
+        if (!recognition) recognition = initStt_();
+        if (!recognition) {
+          document.getElementById('reading-stt-status').textContent = 'このブラウザは音声認識非対応です（手入力してください）';
+          return;
+        }
+        recognition.start();
+        startStt.style.display = 'none';
+        stopStt.style.display = 'inline-block';
+        document.getElementById('reading-stt-status').textContent = '録音中...';
+      });
+    }
+    if (stopStt) {
+      stopStt.addEventListener('click', function () {
+        if (recognition) recognition.stop();
+        startStt.style.display = 'inline-block';
+        stopStt.style.display = 'none';
+        document.getElementById('reading-stt-status').textContent = '録音停止';
+      });
+    }
   }
 
-  return { initFromUrl, bindEvents };
+  return { bindEvents, startSession };
 })();
 
 window.ReadingSessionModule = ReadingSessionModule;
@@ -2457,77 +2740,7 @@ function prepareVocabQuestions(words, pool, bookPool, options, srsStates) {
   return window.VocabQuizGenerator.buildQuestions(targetWords, pool, bookPool, options);
 }
 
-function applySrsSyncViaIframe(syncToken) {
-  return new Promise(function (resolve) {
-    if (!syncToken || !window.DASHBOARD_URL) {
-      resolve({ success: false, message: 'syncToken または DASHBOARD_URL がありません' });
-      return;
-    }
-
-    var iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.src = window.DASHBOARD_URL + '?action=applySrsSync&token=' + encodeURIComponent(syncToken);
-
-    var timeout = setTimeout(function () {
-      window.removeEventListener('message', onMessage);
-      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-      resolve({ success: false, message: 'SRS同期がタイムアウトしました' });
-    }, 30000);
-
-    function onMessage(event) {
-      if (!event.data || event.data.type !== 'srsSyncComplete') return;
-      clearTimeout(timeout);
-      window.removeEventListener('message', onMessage);
-      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-      resolve(event.data);
-    }
-
-    window.addEventListener('message', onMessage);
-    document.body.appendChild(iframe);
-  });
-}
-
-// Token-based vocab session
-async function initVocabSessionFromUrl() {
-  const params = new URLSearchParams(window.location.search);
-  const token = params.get('token');
-  const mode = params.get('mode');
-  if (!token || mode !== 'vocab') return false;
-
-  const result = await gasRun('apiGetSession', token);
-  if (result.status !== 'success') {
-    alert('セッション取得エラー: ' + (result.message || ''));
-    return false;
-  }
-  const session = result.data;
-  const options = session.options || {};
-  options.sheetName = session.sheetName;
-  options.bookName = session.bookName;
-  currentAppMode = 'vocab';
-  currentVocabSetName = session.setName || '';
-  currentVocabBookName = session.bookName || '';
-  currentVocabSheetName = session.sheetName || '';
-  const questions = prepareVocabQuestions(
-    session.words, session.pool, session.bookPool, options, session.srsStates
-  );
-  if (questions.length === 0) {
-    alert('出題できる問題がありません');
-    return false;
-  }
-  currentQuestionDataList = questions;
-  totalQuestionsCount = questions.length;
-  currentQuestionIndex = 0;
-  currentScore = 0;
-  sessionResults = [];
-  sessionStartTime = Date.now();
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('settings-screen').style.display = 'none';
-  document.getElementById('reading-screen').style.display = 'none';
-  document.getElementById('result-screen').style.display = 'none';
-  document.getElementById('game-screen').style.display = 'block';
-  loadQuestionToGame(currentQuestionDataList[0]);
-  return true;
-}
+let currentReadingSetName = '';
 
 // sorting.js
 // 並び替えと正誤判定
@@ -2673,7 +2886,6 @@ let currentQuestionDataList = [];
 let currentQuestionIndex = 0;
 let totalQuestionsCount = 0;
 let currentScore = 0;
-let sessionResults = [];
 let currentUserId = "Guest";
 let sessionStartTime = null;
 let currentAppMode = 'grammar';
@@ -2829,13 +3041,13 @@ const GrammarSettingsModule = (() => {
     }
   }
 
-  /** 学習開始時に使う。最新データを API から再取得する */
+  /** 学習開始時に使う。教材の版が変わっていなければキャッシュのまま */
   async function prepareForStart() {
     resetRows();
     if (getSelectedUnits().length === 0) {
       throw new Error('単元を1つ以上選択してください。');
     }
-    await loadRows(true);
+    await loadRows(false);
     if (rows.length === 0) {
       throw new Error('問題データが0件です。キャッシュ更新後に再度お試しください。');
     }
@@ -2899,8 +3111,6 @@ elements.startBtn.addEventListener('click', async () => {
     if (unInput && currentUserId !== "Guest") unInput.value = currentUserId;
   }
   
-  sessionResults = [];
-  
   // UX：ロード中の表現
   elements.startBtn.disabled = true;
   const originalText = elements.startBtn.textContent;
@@ -2955,7 +3165,17 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
   btn.textContent = '単語を読み込み中...';
 
   try {
-    const result = await window.PresetCacheModule.getVocabWords(options.bookName, options.sheetName, JSON.stringify(options.filters), true, false);
+    let result;
+    const bookType = document.getElementById('vocab-book-type').value;
+    if (bookType === 'user' && AuthGateService.isValid()) {
+      result = await UserBridge.call('getVocabWords', {
+        sheetName: options.sheetName,
+        filtersJson: JSON.stringify(options.filters)
+      });
+      if (result.status === 'success') result = { status: 'success', data: result.data };
+    } else {
+      result = await PresetModule.getVocabWords(options.bookName, options.sheetName, JSON.stringify(options.filters), true, false);
+    }
     if (result.status !== 'success') throw new Error(result.message || '単語取得失敗');
 
     const words = result.data.words || [];
@@ -2981,7 +3201,6 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
     totalQuestionsCount = questions.length;
     currentQuestionIndex = 0;
     currentScore = 0;
-    sessionResults = [];
     sessionStartTime = Date.now();
 
     loadQuestionToGame(currentQuestionDataList[0]);
@@ -3028,7 +3247,7 @@ function normalizeGrammarRow(row) {
 }
 
 async function fetchGrammarRows(subject, unit, forceRefresh) {
-  const result = await window.PresetCacheModule.getQuestions(subject, unit, !!forceRefresh);
+  const result = await PresetModule.getQuestions(subject, unit, !!forceRefresh);
   if (result.status === "success") {
     return (result.data || []).map(normalizeGrammarRow);
   }
@@ -3103,108 +3322,81 @@ window.onQuestionCompleted = (isCorrect, meta) => {
       window.SrsModule.update(currentQ.wordId, isCorrect, meta.answerMs || 0, !!meta.isUnknown);
     }
   } else {
-    // 履歴は「行」単位で集計する（同じ英文を別形式で出題しても苦手判定が継続する）
-    AlgorithmModule.recordResult(currentQ.rowId, isCorrect);
+    AlgorithmModule.recordResult(currentQ.rowId, isCorrect, {
+      setId: 'grammar:' + getSelectedSubjectName() + '/' + (currentQ.unit || '')
+    });
     showExplanation(currentQ);
   }
   if (isCorrect) currentScore++;
-  
-  const modeDesc = document.querySelector('input[name="play-mode"]:checked').value;
-  const user = window.AuthService && window.AuthService.currentUser ? window.AuthService.currentUser : {};
-  
-  sessionResults.push({
-    timestamp: new Date().toISOString(),
-    userId: currentUserId,
-    userName: user.name || "",
-    grade: user.grade || "",
-    userClass: user.class || "",
-    questionId: currentQ.id,
-    subject: currentAppMode === 'vocab' ? '単語学習' : getSelectedSubjectName(),
-    unit: currentQ.unit || "",
-    isCorrect: isCorrect ? "正解" : "不正解",
-    mode: currentAppMode === 'vocab' ? 'vocab-enja' : modeDesc,
-    questionFormat: currentQ.format,
-    difficulty: currentQ.difficulty || '',
-    grammarArea: currentQ.grammarArea || ''
-  });
-  
+
   document.getElementById('next-btn').style.display = 'block';
 };
 
-async function sendResultsToGAS() {
-  if (sessionResults.length === 0) return;
-  try {
-    const data = await gasRun('apiSaveResult', sessionResults);
-    console.log("Save Response:", data);
-  } catch(e) {
-    console.error("Save Error:", e);
-  }
-}
-
-async function sendSessionLogToGAS() {
+async function buildSessionSummary_(modeOverride, setNameOverride) {
+  const mode = modeOverride || currentAppMode;
   const timeTaken = sessionStartTime ? Math.round((Date.now() - sessionStartTime) / 1000) : 0;
   const correctRate = totalQuestionsCount > 0 ? Math.round((currentScore / totalQuestionsCount) * 100) : 0;
-  let setName;
-  if (currentAppMode === 'vocab') {
-    setName = '単語学習: ' + (currentVocabSetName || 'セット');
+  let setName, setId;
+
+  if (mode === 'vocab') {
+    setName = setNameOverride || currentVocabSetName || 'セット';
+    setId = 'vocab:' + (currentVocabBookName || '') + '/' + (currentVocabSheetName || '');
+  } else if (mode === 'reading') {
+    setName = setNameOverride || currentReadingSetName || '音読';
+    setId = 'reading:' + setName;
   } else {
     setName = `${getSelectedSubjectName()} - ${GrammarSettingsModule.getSelectedUnits().join(',')}`;
+    setId = 'grammar:' + getSelectedSubjectName() + '/' + GrammarSettingsModule.getSelectedUnits().join(',');
   }
 
-  try {
-    const data = await gasRun('apiSaveSessionLog', setName, correctRate, timeTaken);
-    console.log("Session Log Response:", data);
-  } catch(e) {
-    console.error("Session Log Error:", e);
+  let attemptNo = 1;
+  if (AuthGateService.isValid()) {
+    try {
+      const cnt = await UserBridge.call('countSessionAttempts', { setId: setName });
+      if (cnt.status === 'success' && cnt.data) attemptNo = cnt.data.attemptNo || 1;
+    } catch (e) { /* ignore */ }
   }
+
+  return {
+    Mode: mode,
+    Set_ID: setId,
+    Set_Name: setName,
+    Attempt_No: attemptNo,
+    Correct: currentScore,
+    Total: totalQuestionsCount,
+    Score: correctRate,
+    Duration_Sec: timeTaken,
+    Started_At: sessionStartTime ? new Date(sessionStartTime).toISOString() : '',
+    Ended_At: new Date().toISOString()
+  };
 }
 
-async function sendSrsLogToGAS() {
+async function saveSessionResultsUnified(modeOverride, setNameOverride) {
   if (!AuthGateService.isValid()) return { skipped: true };
-  const timeTaken = sessionStartTime ? Math.round((Date.now() - sessionStartTime) / 1000) : 0;
-  const correctRate = totalQuestionsCount > 0 ? Math.round((currentScore / totalQuestionsCount) * 100) : 0;
-  const setId = '単語学習: ' + (currentVocabSetName || 'セット');
-  try {
-    return await gasRun('apiSaveSrsLog', setId, correctRate, timeTaken);
-  } catch (e) {
-    console.error('SRS Log Error:', e);
-    throw e;
-  }
-}
 
-async function sendSrsBulkToGAS() {
-  if (!AuthGateService.isValid() || !window.SrsModule || !window.SrsModule.hasDiffs()) {
-    return { skipped: true };
-  }
-  const rows = window.SrsModule.getDiffRows();
-  if (rows.length === 0) return { skipped: true };
+  const summary = await buildSessionSummary_(modeOverride, setNameOverride);
 
-  try {
-    const queueResult = await gasRun('apiQueueSrsBulk', rows);
-    if (queueResult.status !== 'success' || !queueResult.syncToken) {
-      throw new Error(queueResult.message || 'SRS差分キューに失敗しました');
-    }
-    return await applySrsSyncViaIframe(queueResult.syncToken);
-  } catch (e) {
-    console.error('SRS Bulk Error:', e);
-    throw e;
-  }
+  await UserBridge.call('saveSessionLog', {
+    setId: summary.Set_ID,
+    setName: summary.Set_Name,
+    mode: summary.Mode,
+    score: summary.Score,
+    correctRate: summary.Score,
+    durationSec: summary.Duration_Sec,
+    timeTaken: summary.Duration_Sec
+  });
+
+  await queueSessionSummary_(summary);
+  await ItemStateModule.syncToServer();
+  return { status: 'success' };
 }
 
 async function saveVocabSessionResults() {
-  const results = await Promise.allSettled([sendSrsLogToGAS(), sendSrsBulkToGAS()]);
-  const errors = results.filter(function (r) { return r.status === 'rejected'; });
-  if (errors.length > 0) {
-    throw new Error('一部の保存に失敗しました');
-  }
-  const bulkResult = results[1].value;
-  if (bulkResult && bulkResult.success === false) {
-    throw new Error(bulkResult.message || 'SRS同期に失敗しました');
-  }
+  await saveSessionResultsUnified('vocab');
 }
 
 async function saveGrammarSessionResults() {
-  await Promise.all([sendResultsToGAS(), sendSessionLogToGAS()]);
+  await saveSessionResultsUnified('grammar');
 }
 
 document.getElementById('next-btn').addEventListener('click', () => {
@@ -3250,7 +3442,7 @@ document.getElementById('return-settings-btn').addEventListener('click', () => {
   }
 });
 
-// ======= AuthService連携 =======
+// ======= 認証ゲート連携 =======
 /** 認証なしモード: ログイン画面をスキップして学習設定へ */
 function enterAppAsGuest() {
   currentUserId = "Guest";
@@ -3276,13 +3468,19 @@ function enterAppAsGuest() {
   GrammarSettingsModule.init();
   initModeTabs();
   initVocabModules();
+  if (window.VocabRegisterModule) window.VocabRegisterModule.init();
+  PresetModule.revalidate();
+  if (AuthGateService.isValid()) {
+    ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
+  }
 }
 
 function initModeTabs() {
-  const tabs = document.querySelectorAll('.mode-tab');
+  const tabs = document.querySelectorAll('.mode-tab:not(.manage-sub-tab)');
   const grammarPanel = document.getElementById('grammar-settings-panel');
   const vocabPanel = document.getElementById('vocab-settings-panel');
   const readingPanel = document.getElementById('reading-info-panel');
+  const managePanel = document.getElementById('manage-panel');
   const startBtn = document.getElementById('start-btn');
 
   tabs.forEach(function (tab) {
@@ -3293,28 +3491,108 @@ function initModeTabs() {
       grammarPanel.style.display = mode === 'grammar' ? 'block' : 'none';
       vocabPanel.style.display = mode === 'vocab' ? 'block' : 'none';
       readingPanel.style.display = mode === 'reading' ? 'block' : 'none';
+      if (managePanel) managePanel.style.display = mode === 'manage' ? 'block' : 'none';
       if (startBtn) startBtn.style.display = mode === 'grammar' ? 'block' : 'none';
+      if (mode === 'manage') loadManagePanel_();
     });
   });
 
-  const dashUrl = window.DASHBOARD_URL || '#';
-  const dashLink = document.getElementById('dashboard-link');
-  const readingDashLink = document.getElementById('reading-dashboard-link');
-  if (dashLink) dashLink.href = dashUrl;
-  if (readingDashLink) readingDashLink.href = dashUrl;
+  document.querySelectorAll('.manage-sub-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      document.querySelectorAll('.manage-sub-tab').forEach(function (t) { t.classList.remove('active'); });
+      tab.classList.add('active');
+      const name = tab.dataset.manageTab;
+      document.getElementById('manage-sets-panel').style.display = name === 'sets' ? 'block' : 'none';
+      document.getElementById('manage-register-panel').style.display = name === 'register' ? 'block' : 'none';
+      document.getElementById('manage-logs-panel').style.display = name === 'logs' ? 'block' : 'none';
+      if (name === 'register' && window.VocabRegisterModule) window.VocabRegisterModule.init();
+      if (name === 'logs') fetchUserLogs();
+    });
+  });
+
+  const readingStartBtn = document.getElementById('reading-start-btn');
+  if (readingStartBtn) {
+    readingStartBtn.addEventListener('click', async function () {
+      const sheet = document.getElementById('reading-sheet-select').value;
+      if (!sheet) { alert('シートを選択してください'); return; }
+      readingStartBtn.disabled = true;
+      await ReadingSessionModule.startSession(sheet);
+      readingStartBtn.disabled = false;
+    });
+  }
 
   document.getElementById('cache-refresh-btn').addEventListener('click', async function () {
-    if (window.PresetCacheModule) window.PresetCacheModule.clearAll();
-    await GrammarSettingsModule.refreshDivisions();
-    if (window.VocabSettingsModule) {
-      try {
-        await window.VocabSettingsModule.loadCatalog(true);
-        alert('キャッシュを更新しました。');
-      } catch (e) {
-        alert('更新エラー: ' + e.message);
-      }
+    const btn = this;
+    btn.disabled = true;
+    try {
+      await PresetModule.refreshAll();
+      await reloadPresetScreens_();
+      showToast_('教材を最新に更新しました。');
+    } catch (e) {
+      alert('更新エラー: ' + e.message);
+    } finally {
+      btn.disabled = false;
     }
   });
+
+  // 裏側の版チェックで教材の更新を検知したら、設定画面を静かに描き直す
+  window.addEventListener('digitaldrill:presets-updated', async function () {
+    if (screens.settings.style.display === 'none') return;
+    try {
+      await reloadPresetScreens_();
+      showToast_('教材が更新されたため最新版を読み込みました。');
+    } catch (e) {
+      console.warn('教材の再読み込みに失敗:', e);
+    }
+  });
+}
+
+async function reloadPresetScreens_() {
+  await GrammarSettingsModule.refreshDivisions();
+  if (window.VocabSettingsModule) await window.VocabSettingsModule.loadCatalog(false);
+}
+
+function showToast_(message) {
+  let el = document.getElementById('app-toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'app-toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = message;
+  el.classList.add('visible');
+  clearTimeout(showToast_.timer);
+  showToast_.timer = setTimeout(function () { el.classList.remove('visible'); }, 4000);
+}
+
+async function loadManagePanel_() {
+  if (!AuthGateService.isValid()) {
+    document.getElementById('user-set-list').innerHTML = '<p>ログインするとマイ単語帳を表示できます。</p>';
+    return;
+  }
+  try {
+    const result = await UserBridge.call('getVocabCatalog', {});
+    if (result.status !== 'success') throw new Error(result.message);
+    const books = (result.data && result.data.userBooks) || [];
+    const select = document.getElementById('reading-sheet-select');
+    const el = document.getElementById('user-set-list');
+    if (books.length === 0) {
+      el.innerHTML = '<p>マイ単語帳がありません。初回アクセス時に自動作成されます。</p>';
+      return;
+    }
+    let html = '';
+    select.innerHTML = '';
+    books[0].sheets.forEach(function (s) {
+      html += '<div class="log-item"><strong>' + s.sheetName + '</strong> — ' + s.wordCount + '語</div>';
+      const opt = document.createElement('option');
+      opt.value = s.sheetName;
+      opt.textContent = s.sheetName + ' (' + s.wordCount + '語)';
+      select.appendChild(opt);
+    });
+    el.innerHTML = html;
+  } catch (e) {
+    document.getElementById('user-set-list').innerHTML = '<p style="color:#c62828;">エラー: ' + e.message + '</p>';
+  }
 }
 
 async function initVocabModules() {
@@ -3360,7 +3638,10 @@ window.onLoginSuccess = function(user) {
   GrammarSettingsModule.init();
   initModeTabs();
   initVocabModules();
+  if (window.VocabRegisterModule) window.VocabRegisterModule.init();
   fetchUserLogs();
+  PresetModule.revalidate();
+  ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
 };
 
 /** URL の ?auth= を取り込み、クエリから除去 */
@@ -3409,14 +3690,31 @@ function bindLoginScreen_() {
 
 // ログ取得とマイページ描画
 async function fetchUserLogs() {
+  if (!AuthGateService.isValid()) return;
   try {
-    const data = await gasRun('apiGetUserLogs');
-    if (data.status === "success") {
+    const data = await UserBridge.call('getLearningLogs', {});
+    if (data.status === 'success') {
+      renderUserLogsList_(data.data);
       renderMyPage(data.data);
     }
   } catch (e) {
-    console.error("fetchUserLogs error:", e);
+    console.error('fetchUserLogs error:', e);
   }
+}
+
+function renderUserLogsList_(logs) {
+  const el = document.getElementById('user-logs-list');
+  if (!el) return;
+  if (!logs || logs.length === 0) {
+    el.innerHTML = '<p>まだ記録がありません。</p>';
+    return;
+  }
+  let html = '';
+  logs.forEach(function (log) {
+    html += '<div class="log-item"><strong>' + (log['学習セット名'] || '') + '</strong><br>';
+    html += '<span style="font-size:.85em;color:#888;">' + (log['タイムスタンプ'] || '') + ' / ' + (log['モード'] || '') + ' / ' + (log['正答率'] || '') + '%</span></div>';
+  });
+  el.innerHTML = html;
 }
 
 function formatLogDuration_(log) {
@@ -3536,25 +3834,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const params = new URLSearchParams(window.location.search);
   captureAuthFromUrl_(params);
-
-  if (params.get('token') && params.get('mode') === 'reading') {
-    if (AUTH_ENABLED && !AuthGateService.isValid()) {
-      alert('ログインが必要です。認証後、ダッシュボードから再度学習スタートしてください。');
-      screens.login.style.display = 'block';
-      return;
-    }
-    await ReadingSessionModule.initFromUrl();
-    return;
-  }
-  if (params.get('token') && params.get('mode') === 'vocab') {
-    if (AUTH_ENABLED && !AuthGateService.isValid()) {
-      alert('ログインが必要です。認証後、ダッシュボードから再度学習スタートしてください。');
-      screens.login.style.display = 'block';
-      return;
-    }
-    await initVocabSessionFromUrl();
-    return;
-  }
 
   const restored = await tryRestoreAuthSession_();
   if (!restored) {

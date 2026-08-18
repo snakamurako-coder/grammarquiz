@@ -15,7 +15,8 @@
 #>
 param(
   [switch]$GasOnly,
-  [switch]$PagesOnly
+  [switch]$PagesOnly,
+  [switch]$ExportStatic
 )
 
 $ErrorActionPreference = 'Stop'
@@ -115,6 +116,10 @@ if (-not $PagesOnly) {
   $ids = Deploy-Gas
 }
 if (-not $GasOnly) {
+  if ($ExportStatic) {
+    Write-Step '静的プリセット export（docs/data/manifest.json）'
+    & (Join-Path $Root 'scripts\export-static.ps1')
+  }
   Deploy-Pages
 }
 
