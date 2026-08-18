@@ -675,8 +675,10 @@ const AuthGateService = {
 
 window.AuthGateService = AuthGateService;
 
-/** UserBridge: GAS② キュー → GAS① iframe 実行 */
+/** UserBridge: GAS② キュー → GAS① iframe 実行（同時実行すると postMessage が取り違えられるため直列化） */
 const UserBridge = {
+  _chain: Promise.resolve(),
+
   async queueOp(op, payload) {
     if (!AuthGateService.isValid()) {
       return { status: 'error', message: 'ログインが必要です' };
@@ -698,30 +700,32 @@ const UserBridge = {
   },
 
   executeViaIframe_(opToken) {
-    var self = this;
+    if (!opToken || !window.DASHBOARD_URL) {
+      return Promise.resolve({ status: 'error', message: 'DASHBOARD_URL または opToken がありません' });
+    }
+    var iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = window.DASHBOARD_URL + '?action=userBridge&token=' + encodeURIComponent(opToken);
     return new Promise(function (resolve) {
-      if (!opToken || !window.DASHBOARD_URL) {
-        resolve({ status: 'error', message: 'DASHBOARD_URL または opToken がありません' });
-        return;
-      }
-      var iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      iframe.src = window.DASHBOARD_URL + '?action=userBridge&token=' + encodeURIComponent(opToken);
-      var timeout = setTimeout(function () {
-        window.removeEventListener('message', onMessage);
-        if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-        resolve({ status: 'error', message: 'UserBridge がタイムアウトしました' });
-      }, 45000);
-      function onMessage(event) {
-        if (!event.data || event.data.type !== 'userBridgeComplete') return;
+      var settled = false;
+      function finish(result) {
+        if (settled) return;
+        settled = true;
         clearTimeout(timeout);
         window.removeEventListener('message', onMessage);
         if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+        resolve(result);
+      }
+      var timeout = setTimeout(function () {
+        finish({ status: 'error', message: 'UserBridge がタイムアウトしました' });
+      }, 45000);
+      function onMessage(event) {
+        if (!event.data || event.data.type !== 'userBridgeComplete') return;
         var result = event.data.result;
         if (event.data.success && result) {
-          resolve(result);
+          finish(result);
         } else {
-          resolve({ status: 'error', message: event.data.message || 'UserBridge 失敗' });
+          finish({ status: 'error', message: event.data.message || 'UserBridge 失敗' });
         }
       }
       window.addEventListener('message', onMessage);
@@ -730,7 +734,12 @@ const UserBridge = {
   },
 
   async call(op, payload) {
-    return this.queueOp(op, payload);
+    var self = this;
+    var run = self._chain.then(function () {
+      return self.queueOp(op, payload);
+    });
+    self._chain = run.catch(function () {});
+    return run;
   }
 };
 window.UserBridge = UserBridge;
@@ -3352,7 +3361,12 @@ async function buildSessionSummary_(modeOverride, setNameOverride) {
   let attemptNo = 1;
   if (AuthGateService.isValid()) {
     try {
-      const cnt = await UserBridge.call('countSessionAttempts', { setId: setName });
+      const cnt = await Promise.race([
+        UserBridge.call('countSessionAttempts', { setId: setName }),
+        new Promise(function (resolve) {
+          setTimeout(function () { resolve({ status: 'timeout' }); }, 8000);
+        })
+      ]);
       if (cnt.status === 'success' && cnt.data) attemptNo = cnt.data.attemptNo || 1;
     } catch (e) { /* ignore */ }
   }
@@ -3409,28 +3423,54 @@ document.getElementById('next-btn').addEventListener('click', () => {
   }
 });
 
+function getResultSavedMessage_() {
+  if (currentAppMode === 'vocab') {
+    return AuthGateService.isValid()
+      ? '演習が終了し、SRSデータが保存されました。'
+      : '演習が終了しました。（ローカルSRSのみ更新・ログインすると同期されます）';
+  }
+  return AuthGateService.isValid()
+    ? '演習が終了し、成績が保存されました。'
+    : '演習が終了しました。（ログインするとクラウドに同期されます）';
+}
+
 function showResultScreen() {
   screens.game.style.display = 'none';
   const resultScreen = document.getElementById('result-screen');
   resultScreen.style.display = 'block';
-  
+
   document.getElementById('result-score').textContent = `スコア: ${currentScore} / ${totalQuestionsCount}`;
-  document.getElementById('result-details').textContent = "成績データを保存しています...";
-  
+  const detailsEl = document.getElementById('result-details');
+
+  if (!AuthGateService.isValid()) {
+    detailsEl.textContent = getResultSavedMessage_();
+    return;
+  }
+
+  detailsEl.textContent = '成績データを保存しています...（初回は Drive 準備で数十秒かかることがあります）';
+
   const savePromise = currentAppMode === 'vocab'
     ? saveVocabSessionResults()
     : saveGrammarSessionResults();
 
+  var uiSettled = false;
+  function setResultDetails(text) {
+    if (!detailsEl) return;
+    detailsEl.textContent = text;
+    uiSettled = true;
+  }
+
+  var uiTimer = setTimeout(function () {
+    if (uiSettled) return;
+    setResultDetails('演習が終了しました。（クラウド保存はバックグラウンドで続行中です）');
+  }, 20000);
+
   savePromise.then(function () {
-    if (currentAppMode === 'vocab') {
-      document.getElementById('result-details').textContent = AuthGateService.isValid()
-        ? "演習が終了し、SRSデータが保存されました。"
-        : "演習が終了しました。（ローカルSRSのみ更新・ログインすると同期されます）";
-    } else {
-      document.getElementById('result-details').textContent = "演習が終了し、成績が保存されました。";
-    }
+    clearTimeout(uiTimer);
+    if (!uiSettled) setResultDetails(getResultSavedMessage_());
   }).catch(function () {
-    document.getElementById('result-details').textContent = "演習が終了しました。(一部通信エラーあり)";
+    clearTimeout(uiTimer);
+    if (!uiSettled) setResultDetails('演習が終了しました。(一部通信エラーあり)');
   });
 }
 
