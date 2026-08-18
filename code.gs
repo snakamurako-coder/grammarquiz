@@ -40,8 +40,10 @@ const SRS_SYNC_CACHE_TTL = 3600;
 const AUTH_CACHE_TTL = 5400;
 const DEFAULT_PAGES_URL = 'https://snakamurako-coder.github.io/grammarquiz/';
 
-/** index.html の GSI client_id と揃える既定値（未設定時のみ書き込む） */
+/** index.html の GOOGLE_CLIENT_ID と揃える（Script Properties 未設定時の既定値） */
 const DEFAULT_CLIENT_ID = '505252303455-84r495bnnsgiefcrv24ro2qtohlgbk2h.apps.googleusercontent.com';
+/** GAS① ユーザー権限デプロイ（config.js の DASHBOARD_URL と同一） */
+const DEFAULT_DASHBOARD_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxN9pnUp_mG6QHBKJz2WPaS-YqZlrhUaSI1XjTc3aXbmivNowfQPAi1Vi0WmpmfcDSo/exec';
 
 const MATERIALS_FOLDER_NAME = 'grammarquizzes';
 /** 旧フォルダ名（既存環境からの自動リネーム用） */
@@ -98,6 +100,26 @@ function doGet(e) {
 
   if (action === 'applySrsSync') {
     return handleApplySrsSync_(e);
+  }
+
+  // 認証系は ensureEnvironment を通さない（GAS① ユーザー権限で Drive 初期化が失敗し得る）
+  if (action === 'auth') {
+    return handleAuthRedirect_();
+  }
+  if (action === 'getAuthUser') {
+    try {
+      const token = e.parameter.token;
+      const auth = validateAuthToken_(token);
+      if (!auth) return sendResponse({ status: "error", message: "認証トークンが無効または期限切れです" });
+      return sendResponse({ status: "success", user: auth.user, email: auth.email });
+    } catch (error) {
+      return sendResponse({ status: "error", message: error.toString() });
+    }
+  }
+  if (action === 'logout') {
+    const token = e.parameter.token;
+    if (token) invalidateAuthToken_(token);
+    return sendResponse({ status: "success", message: "ログアウトしました" });
   }
 
   if (action) {
@@ -162,28 +184,13 @@ function doGet(e) {
       } catch (error) {
         return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
       }
-    } else if (action === 'auth') {
-      return handleAuthRedirect_();
-    } else if (action === 'getAuthUser') {
-      try {
-        const token = e.parameter.token;
-        const auth = validateAuthToken_(token);
-        if (!auth) return sendResponse({ status: "error", message: "認証トークンが無効または期限切れです" });
-        return sendResponse({ status: "success", user: auth.user, email: auth.email });
-      } catch (error) {
-        return sendResponse({ status: "error", message: error.toString() });
-      }
-    } else if (action === 'logout') {
-      const token = e.parameter.token;
-      if (token) invalidateAuthToken_(token);
-      return sendResponse({ status: "success", message: "ログアウトしました" });
     }
     return sendResponse({ status: "error", message: "無効なactionです: " + action });
   }
 
   const access = checkDashboardAccess_();
   if (!access.allowed) {
-    return renderAccessDeniedPage_(access.email);
+    return renderAccessDeniedPage_(access.email, access.reason);
   }
 
   const template = HtmlService.createTemplateFromFile('dashboard');
@@ -354,14 +361,18 @@ function fetchCatalogFromDrive() {
 // メインの受信処理
 function doPost(e) {
   try {
-    ensureEnvironment();
     const requestData = JSON.parse(e.postData.contents);
     const action = requestData.action;
 
-    // アクション（目的）によって処理を振り分ける
     if (action === "login") {
+      ensureEnvironment();
       return handleLogin(requestData);
-    } else if (action === "saveResult") {
+    }
+
+    ensureEnvironment();
+
+    // アクション（目的）によって処理を振り分ける
+    if (action === "saveResult") {
       return handleSaveResult(requestData); // アプリ側成績用
     } else if (action === "saveSessionLog") {
       return handleSaveSessionLog(requestData); // セッションサマリー用
@@ -393,60 +404,52 @@ function doPost(e) {
 // =========================================================
 // ① ログイン処理（以前のコードをそのまま関数化）
 // =========================================================
+/** Google ID トークンでログイン（GAS② POST・getActiveUser 不要） */
 function handleLogin(requestData) {
   const idToken = requestData.idToken;
-  if (!idToken) return sendResponse({ status: "error", message: "IDトークンがありません" });
+  if (!idToken) return sendResponse({ status: 'error', message: 'IDトークンがありません' });
 
-  const tokenInfoUrl = `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`;
-  const tokenResponse = UrlFetchApp.fetch(tokenInfoUrl, { muteHttpExceptions: true });
-  if (tokenResponse.getResponseCode() !== 200) return sendResponse({ status: "error", message: "無効なトークンです" });
-  
-  const tokenData = JSON.parse(tokenResponse.getContentText());
   const props = PropertiesService.getScriptProperties();
-  if (tokenData.aud !== props.getProperty('CLIENT_ID')) {
-    return sendResponse({ status: "error", message: "不正なアクセスです" });
+  const clientId = props.getProperty(PROP.CLIENT_ID) || DEFAULT_CLIENT_ID;
+  const tokenInfoUrl = 'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken);
+  const tokenResponse = UrlFetchApp.fetch(tokenInfoUrl, { muteHttpExceptions: true });
+  if (tokenResponse.getResponseCode() !== 200) {
+    return sendResponse({ status: 'error', message: '無効なトークンです' });
   }
 
-  const userEmail = tokenData.email;
-
-  // 管理者（セットアップ実行者）は whitelist に無くても常に許可
-  if (isAdminEmail_(userEmail)) {
-    syncWhitelistCache_();
-    return sendResponse({
-      status: "success",
-      user: { account: userEmail, name: '管理者', grade: '', class: '', role: 'admin' },
-      message: "認証成功（管理者）"
-    });
+  const tokenData = JSON.parse(tokenResponse.getContentText());
+  if (tokenData.aud !== clientId) {
+    return sendResponse({ status: 'error', message: '不正なアクセスです' });
   }
 
-  const spreadId = props.getProperty('SPREADSHEET_ID');
-  if (!spreadId) return sendResponse({ status: "error", message: "SPREADSHEET_IDが設定されていません" });
-
-  const sheet = SpreadsheetApp.openById(spreadId).getSheetByName('whitelist');
-  if (!sheet) return sendResponse({ status: "error", message: "whitelistシートが見つかりません" });
-
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const accountIdx = headers.indexOf('account');
-  if (accountIdx === -1) return sendResponse({ status: "error", message: "account列がありません" });
-
-  let foundUser = null;
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][accountIdx] === userEmail) {
-      foundUser = {};
-      for (let j = 0; j < headers.length; j++) {
-        if (headers[j]) foundUser[headers[j]] = data[i][j];
-      }
-      break;
-    }
+  const userEmail = String(tokenData.email || '').trim().toLowerCase();
+  if (!userEmail) {
+    return sendResponse({ status: 'error', message: 'メールアドレスを取得できません' });
   }
 
   syncWhitelistCache_();
 
-  if (foundUser) {
-    return sendResponse({ status: "success", user: foundUser, message: "認証成功" });
-  } else {
-    return sendResponse({ status: "error", message: "許可されていないユーザーです" });
+  if (!isWhitelistedOrAdmin_(userEmail)) {
+    return sendResponse({
+      status: 'error',
+      message: '許可されていないユーザーです',
+      code: 'not_whitelisted',
+      email: userEmail
+    });
+  }
+
+  try {
+    const authToken = issueAuthToken_(userEmail);
+    const user = getWhitelistUserProfile_(userEmail);
+    return sendResponse({
+      status: 'success',
+      authToken: authToken,
+      user: user,
+      email: userEmail,
+      message: '認証成功'
+    });
+  } catch (e) {
+    return sendResponse({ status: 'error', message: e.message || String(e) });
   }
 }
 
@@ -521,18 +524,43 @@ function isWhitelistedOrAdmin_(email) {
   return emails.indexOf(normalized) !== -1;
 }
 
+/**
+ * ログイン中ユーザーのメール（小文字）。
+ * GAS②（作成者実行・匿名アクセス可）では常に空になるため、Pages では ID トークン認証を使う。
+ */
+function getActiveUserEmail_() {
+  return String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+}
+
 /** GAS① ダッシュボードのアクセス判定（管理者は常に許可・匿名は拒否） */
 function checkDashboardAccess_() {
-  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
-  if (!email) return { allowed: false, email: '' };
-  return { allowed: isWhitelistedOrAdmin_(email), email: email };
+  const email = getActiveUserEmail_();
+  if (!email) {
+    return { allowed: false, email: '', reason: 'no_email' };
+  }
+  const allowed = isWhitelistedOrAdmin_(email);
+  return {
+    allowed: allowed,
+    email: email,
+    reason: allowed ? 'ok' : 'not_whitelisted'
+  };
 }
 
 /** アクセス拒否ページ */
-function renderAccessDeniedPage_(email) {
-  const shown = email
-    ? 'ログイン中のアカウント: <strong>' + email + '</strong>'
-    : 'アカウント情報を取得できませんでした。';
+function renderAccessDeniedPage_(email, reason) {
+  let shown;
+  if (reason === 'no_email') {
+    shown =
+      'Google アカウントのメールアドレスを取得できませんでした。<br>' +
+      '<span style="font-size:.9em;font-weight:normal;">' +
+      '学習画面（GitHub Pages）の「Googleアカウントでログイン」から認証してください。' +
+      'GAS②（API・匿名アクセス可）の URL では <code>getActiveUser()</code> が空になります。' +
+      '</span>';
+  } else if (email) {
+    shown = 'ログイン中のアカウント: <strong>' + email + '</strong>';
+  } else {
+    shown = 'アカウント情報を取得できませんでした。';
+  }
   const html =
     '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1.0"></head>' +
@@ -630,20 +658,45 @@ function requireAuthToken_(requestData) {
   return { ok: true, auth: auth };
 }
 
-/** GAS① ?action=auth → whitelist 確認後 Pages へリダイレクト */
+/** 認証直前に whitelist キャッシュを更新（GAS② ならシートから、GAS① なら既存キャッシュ維持） */
+function warmWhitelistCacheForAuth_() {
+  try {
+    syncWhitelistCache_();
+  } catch (e) {
+    // GAS① などシートを開けない文脈では何もしない
+  }
+}
+
+/** GAS①/GAS② ?action=auth → whitelist 確認後 Pages へリダイレクト */
 function handleAuthRedirect_() {
+  warmWhitelistCacheForAuth_();
   const access = checkDashboardAccess_();
+  if (!access.allowed && access.reason === 'no_email') {
+    const dashBase = String(DEFAULT_DASHBOARD_WEBAPP_URL).split('?')[0];
+    const currentBase = String(ScriptApp.getService().getUrl()).split('?')[0];
+    if (dashBase && currentBase && dashBase !== currentBase) {
+      return renderAuthRedirectPage_(dashBase + '?action=auth');
+    }
+  }
   if (!access.allowed) {
-    return renderAccessDeniedPage_(access.email);
+    return renderAccessDeniedPage_(access.email, access.reason);
   }
   try {
     const token = issueAuthToken_(access.email);
     const pagesUrl = getPagesUrl_();
     const sep = pagesUrl.indexOf('?') >= 0 ? '&' : '?';
-    const target = pagesUrl + sep + 'auth=' + encodeURIComponent(token);
+    const profile = getWhitelistUserProfile_(access.email) || { account: access.email };
+    const compact = {
+      account: profile.account || access.email,
+      name: profile.name || '',
+      grade: profile.grade || '',
+      class: profile.class || ''
+    };
+    let target = pagesUrl + sep + 'auth=' + encodeURIComponent(token);
+    target += '&authUser=' + encodeURIComponent(JSON.stringify(compact));
     return renderAuthRedirectPage_(target);
   } catch (e) {
-    return renderAccessDeniedPage_(access.email);
+    return renderAccessDeniedPage_(access.email, 'not_whitelisted');
   }
 }
 

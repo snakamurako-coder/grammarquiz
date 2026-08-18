@@ -188,8 +188,9 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
     <div class="header-title">DigitalDrill（デジドリ） ログイン</div>
     <div class="setting-section" style="text-align: center; padding: 40px 10px;">
       <p style="margin-bottom: 20px; font-size: 1.1em; color: #555;">システムを利用するには Google アカウントで認証が必要です。</p>
-      <p style="margin-bottom: 24px; font-size: 0.9em; color: #777;">ダッシュボード（GAS）で本人確認とホワイトリスト照合を行い、学習画面へ戻ります。</p>
-      <button type="button" id="login-via-gas-btn" class="btn-primary" style="max-width:320px;margin:0 auto;">Googleアカウントでログイン</button>
+      <p style="margin-bottom: 24px; font-size: 0.9em; color: #777;">Google でサインインし、ホワイトリスト照合後に学習画面へ進みます。</p>
+      <div id="google-signin-container" style="display:flex;justify-content:center;margin:0 auto 8px;"></div>
+      <button type="button" id="login-via-gas-btn" class="btn-primary" style="max-width:320px;margin:0 auto;display:none;">Googleアカウントでログイン（GAS経由）</button>
       <div id="login-msg" style="margin-top: 15px; color: #f44336; font-weight: bold;"></div>
     </div>
   </div>
@@ -533,6 +534,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 
   <div id="keyboard-container"></div>
 <script src="config.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script>
 /** true: GAS① 認証ゲート必須（短命 auth トークン） */
@@ -3367,8 +3369,18 @@ window.onLoginSuccess = function(user) {
 function captureAuthFromUrl_(params) {
   var auth = params.get('auth');
   if (!auth) return false;
-  AuthGateService.save(auth, null);
+  var user = null;
+  var authUser = params.get('authUser');
+  if (authUser) {
+    try {
+      user = JSON.parse(authUser);
+    } catch (e) {
+      console.warn('authUser parse failed', e);
+    }
+  }
+  AuthGateService.save(auth, user);
   params.delete('auth');
+  params.delete('authUser');
   var qs = params.toString();
   var newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
   window.history.replaceState({}, '', newUrl);
@@ -3393,7 +3405,89 @@ async function tryRestoreAuthSession_() {
   return true;
 }
 
+function getGoogleClientId_() {
+  return (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.GOOGLE_CLIENT_ID) || '';
+}
+
+async function handleGoogleCredential_(credential) {
+  var msgEl = document.getElementById('login-msg');
+  if (!window.API_URL) {
+    if (msgEl) msgEl.textContent = 'API_URL が設定されていません（config.js）';
+    return;
+  }
+  if (msgEl) msgEl.textContent = '認証中…';
+  try {
+    var res = await fetch(window.API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'login', idToken: credential })
+    });
+    var data = await parseGasJson_(res);
+    if (data.status === 'success' && data.authToken) {
+      AuthGateService.save(data.authToken, data.user);
+      if (msgEl) msgEl.textContent = '';
+      window.onLoginSuccess(data.user);
+      return;
+    }
+    if (data.code === 'not_whitelisted') {
+      if (msgEl) msgEl.textContent = 'ホワイトリストに登録されていません: ' + (data.email || '');
+      return;
+    }
+    if (msgEl) msgEl.textContent = data.message || 'ログインに失敗しました';
+  } catch (e) {
+    if (msgEl) msgEl.textContent = 'ログインエラー: ' + (e.message || e);
+  }
+}
+
+function initGoogleLogin_() {
+  var clientId = getGoogleClientId_();
+  var container = document.getElementById('google-signin-container');
+  var msgEl = document.getElementById('login-msg');
+  var fallbackBtn = document.getElementById('login-via-gas-btn');
+
+  if (!clientId) {
+    if (msgEl) msgEl.textContent = 'GOOGLE_CLIENT_ID が設定されていません（config.js）';
+    if (fallbackBtn) fallbackBtn.style.display = 'block';
+    return;
+  }
+
+  var attempts = 0;
+  function tryInit_() {
+    if (!window.google || !google.accounts || !google.accounts.id) {
+      attempts += 1;
+      if (attempts < 50) {
+        setTimeout(tryInit_, 100);
+        return;
+      }
+      if (msgEl) msgEl.textContent = 'Google ログインの読み込みに失敗しました。ページを再読み込みしてください。';
+      if (fallbackBtn) fallbackBtn.style.display = 'block';
+      return;
+    }
+    google.accounts.id.initialize({
+      client_id: clientId,
+      callback: function (response) {
+        handleGoogleCredential_(response.credential);
+      },
+      auto_select: false,
+      cancel_on_tap_outside: true
+    });
+    if (container) {
+      google.accounts.id.renderButton(container, {
+        type: 'standard',
+        theme: 'outline',
+        size: 'large',
+        text: 'signin_with',
+        shape: 'rectangular',
+        logo_alignment: 'left',
+        width: 320
+      });
+    }
+  }
+  tryInit_();
+}
+
 function bindLoginScreen_() {
+  initGoogleLogin_();
   var btn = document.getElementById('login-via-gas-btn');
   if (!btn) return;
   btn.addEventListener('click', function () {
