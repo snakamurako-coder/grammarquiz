@@ -95,6 +95,26 @@ function doGet(e) {
     return handleUserBridge_(e);
   }
 
+  // 認証系は ensureEnvironment を通さない（GAS① ユーザー権限で Drive 初期化が失敗し得る）
+  if (action === 'auth') {
+    return handleAuthRedirect_();
+  }
+  if (action === 'getAuthUser') {
+    try {
+      const token = e.parameter.token;
+      const auth = validateAuthToken_(token);
+      if (!auth) return sendResponse({ status: "error", message: "認証トークンが無効または期限切れです" });
+      return sendResponse({ status: "success", user: auth.user, email: auth.email });
+    } catch (error) {
+      return sendResponse({ status: "error", message: error.toString() });
+    }
+  }
+  if (action === 'logout') {
+    const token = e.parameter.token;
+    if (token) invalidateAuthToken_(token);
+    return sendResponse({ status: "success", message: "ログアウトしました" });
+  }
+
   if (action) {
     ensureEnvironment();
     if (action === 'getQuestions') {
@@ -132,21 +152,6 @@ function doGet(e) {
       } catch (error) {
         return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
       }
-    } else if (action === 'auth') {
-      return handleAuthRedirect_();
-    } else if (action === 'getAuthUser') {
-      try {
-        const token = e.parameter.token;
-        const auth = validateAuthToken_(token);
-        if (!auth) return sendResponse({ status: "error", message: "認証トークンが無効または期限切れです" });
-        return sendResponse({ status: "success", user: auth.user, email: auth.email });
-      } catch (error) {
-        return sendResponse({ status: "error", message: error.toString() });
-      }
-    } else if (action === 'logout') {
-      const token = e.parameter.token;
-      if (token) invalidateAuthToken_(token);
-      return sendResponse({ status: "success", message: "ログアウトしました" });
     } else if (action === 'exportStatic') {
       try {
         const data = exportStaticPresetData_();
@@ -546,8 +551,18 @@ function requireAuthToken_(requestData) {
   return { ok: true, auth: auth };
 }
 
-/** GAS① ?action=auth → whitelist 確認後 Pages へリダイレクト */
+/** 認証直前に whitelist キャッシュを更新（GAS② ならシートから、GAS① なら既存キャッシュ維持） */
+function warmWhitelistCacheForAuth_() {
+  try {
+    syncWhitelistCache_();
+  } catch (e) {
+    // GAS① などシートを開けない文脈では何もしない
+  }
+}
+
+/** GAS①/GAS② ?action=auth → whitelist 確認後 Pages へリダイレクト */
 function handleAuthRedirect_() {
+  warmWhitelistCacheForAuth_();
   const access = checkDashboardAccess_();
   if (!access.allowed) {
     return renderAccessDeniedPage_(access.email);
@@ -556,7 +571,15 @@ function handleAuthRedirect_() {
     const token = issueAuthToken_(access.email);
     const pagesUrl = getPagesUrl_();
     const sep = pagesUrl.indexOf('?') >= 0 ? '&' : '?';
-    const target = pagesUrl + sep + 'auth=' + encodeURIComponent(token);
+    const profile = getWhitelistUserProfile_(access.email) || { account: access.email };
+    const compact = {
+      account: profile.account || access.email,
+      name: profile.name || '',
+      grade: profile.grade || '',
+      class: profile.class || ''
+    };
+    let target = pagesUrl + sep + 'auth=' + encodeURIComponent(token);
+    target += '&authUser=' + encodeURIComponent(JSON.stringify(compact));
     return renderAuthRedirectPage_(target);
   } catch (e) {
     return renderAccessDeniedPage_(access.email);
