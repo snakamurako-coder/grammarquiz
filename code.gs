@@ -678,21 +678,30 @@ function handleAuthRedirect_() {
   }
 }
 
-/** Pages への即時リダイレクト HTML（GAS iframe 外の top へ遷移） */
+/**
+ * Pages へ戻す HTML。
+ * GAS ウェブアプリは googleusercontent.com の iframe 内で動くため、
+ * top 遷移も iframe 内遷移も失敗しやすい（Pages は X-Frame-Options で埋め込み拒否）。
+ * 新しいタブで開く。
+ */
 function renderAuthRedirectPage_(targetUrl) {
   const hrefAttr = String(targetUrl)
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;');
-  // JS 文字列用（JSON.stringify で安全にエスケープ）
   const jsUrl = JSON.stringify(String(targetUrl));
   const html =
     '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1.0"></head>' +
-    '<body style="font-family:sans-serif;text-align:center;padding:40px;">' +
-    '<p>認証成功。学習画面へ移動しています...</p>' +
-    '<p><a id="auth-go" target="_top" rel="noopener" href="' + hrefAttr + '">移動しない場合はこちら</a></p>' +
-    '<script>(function(){var u=' + jsUrl + ';try{window.top.location.href=u;}catch(e){window.location.href=u;}})();</script>' +
+    '<body style="font-family:sans-serif;text-align:center;padding:40px;max-width:480px;margin:0 auto;">' +
+    '<p style="font-size:1.15em;font-weight:bold;color:#2c3e50;">認証に成功しました。</p>' +
+    '<p style="color:#555;">下のボタンで学習画面を開いてください。</p>' +
+    '<p><a id="auth-go" target="_blank" rel="noopener noreferrer" href="' + hrefAttr + '"' +
+    ' style="display:inline-block;margin-top:12px;padding:14px 28px;background:#2196f3;color:#fff;' +
+    'text-decoration:none;border-radius:10px;font-weight:bold;">学習画面を開く</a></p>' +
+    '<p style="color:#888;font-size:.85em;margin-top:20px;">ボタンで開かない場合は、このページのポップアップを許可してください。</p>' +
+    '<script>(function(){var u=' + jsUrl + ';' +
+    'try{var w=window.open(u,"_blank","noopener");if(w)w.opener=null;}catch(e){}})();</script>' +
     '</body></html>';
   return HtmlService.createHtmlOutput(html)
     .setTitle(APP_NAME + ' - 認証中')
