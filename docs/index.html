@@ -61,6 +61,9 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .check-list { display: flex; flex-direction: column; gap: 8px; }
 .check-item { display: flex; align-items: center; gap: 10px; font-size: 1em; cursor: pointer; min-height: 44px; padding: 4px 6px; border-radius: 8px; }
 .check-item input[type="checkbox"], .check-item input[type="radio"] { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--c-primary); }
+.format-follow-options { margin: 0 0 10px 28px; padding: 10px 12px; background: #f7f9fa; border-radius: 8px; border: 1px solid #eceff1; }
+.format-follow-options > label { margin-bottom: 6px; }
+.format-follow-options .check-list { margin-top: 8px; }
 .unit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .unit-card { border: 1px solid #cfd8dc; min-height: var(--tap); padding: 10px 12px; border-radius: 10px; cursor: pointer; background-color: #fff; display: flex; align-items: center; gap: 8px; font-size: 0.95em; word-break: break-word; }
 .unit-card.selected { background-color: #e3f2fd; border-color: var(--c-primary); font-weight: bold; }
@@ -349,7 +352,15 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
     <div class="setting-section">
       <div class="section-title">4. 出題形式を選択</div>
       <div class="check-list" id="format-check-list"></div>
-      <div class="form-group" id="format-g-options" style="display:none;">
+      <div class="form-group format-follow-options" id="format-e-options" style="display:none;">
+        <label>【形式E】語句カード</label>
+        <select id="e-sort-variant">
+          <option value="E" selected>全語句カード使用</option>
+          <option value="C">＋不足語句カード追加</option>
+          <option value="D">－不要語句カード排除</option>
+        </select>
+      </div>
+      <div class="form-group format-follow-options" id="format-g-options" style="display:none;">
         <label>【形式G】選択肢数（データのダミー数が足りない場合は自動で減ります）</label>
         <select id="g-choice-count">
           <option value="2">2択</option>
@@ -363,10 +374,8 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
         </select>
         <div class="check-list">
           <label class="check-item"><input type="checkbox" id="g-include-none" checked> 「この中に正答はない」を選択肢に含める（難易度+1）</label>
+          <label class="check-item"><input type="checkbox" id="include-unknown" checked> 「わからない・自信がない」を含める</label>
         </div>
-      </div>
-      <div class="check-list">
-        <label class="check-item"><input type="checkbox" id="include-unknown" checked> 選択式の問題に「わからない・自信がない」を含める</label>
       </div>
     </div>
     <div class="setting-section">
@@ -1748,7 +1757,7 @@ const GRAMMAR_FORMATS = [
     instruction: '次の日本語と同じ意味を持つ英文となるように空所に以下の語句カードを並べ替え、あてはめなさい。ただし、使用しない語句カードが一枚あるのでそれは使用せずに回答しなさい。'
   },
   {
-    key: 'E', label: '並び替え（通常）', difficulty: 6, difficultyLabel: '6',
+    key: 'E', label: '並び替え', difficulty: 6, difficultyLabel: '6〜8（語句カードの使い方で変動）',
     instruction: '次の日本語と同じ意味を持つ英文となるように空所に以下の語句カードを並べ替え、あてはめなさい。'
   },
   {
@@ -1860,11 +1869,13 @@ const GrammarQuizGenerator = (() => {
       return q;
     }
     if (format === 'G') {
-      const maxWords = 1 + row.mcqDummies.length;
-      const wordCount = Math.max(2, Math.min(options.choiceCount, maxWords));
+      const dummyCount = row.mcqDummies.length;
+      const poolSize = 1 + dummyCount;
       const includeNone = !!options.includeNone;
-      // 「この中に正答はない」を含めるときは 1/3 の確率で正答を選択肢から除く
-      const hideCorrect = includeNone && row.mcqDummies.length >= wordCount && Math.random() < 1 / 3;
+      // 「この中に正答はない」があるとき、正答+全ダミーを出し切るとメタ推論で無効になるため最低1つ欠ける
+      const maxWordCards = includeNone ? dummyCount : poolSize;
+      const wordCount = Math.max(1, Math.min(options.choiceCount, maxWordCards));
+      const hideCorrect = includeNone && dummyCount >= wordCount && Math.random() < 1 / 3;
       const dummies = shuffleArray(row.mcqDummies);
 
       let entries;
@@ -1872,7 +1883,7 @@ const GrammarQuizGenerator = (() => {
         entries = dummies.slice(0, wordCount).map(function (t) { return { text: t, isCorrect: false }; });
       } else {
         entries = [{ text: row.mcqAnswer, isCorrect: true }].concat(
-          dummies.slice(0, wordCount - 1).map(function (t) { return { text: t, isCorrect: false }; })
+          dummies.slice(0, Math.max(0, wordCount - 1)).map(function (t) { return { text: t, isCorrect: false }; })
         );
       }
       const choices = shuffleArray(entries);
@@ -3152,6 +3163,7 @@ const GrammarSettingsModule = (() => {
   const shoContainer = document.getElementById('grammar-sho-container');
   const note = document.getElementById('grammar-division-note');
   const formatList = document.getElementById('format-check-list');
+  const eOptions = document.getElementById('format-e-options');
   const gOptions = document.getElementById('format-g-options');
 
   let rows = [];
@@ -3180,8 +3192,11 @@ const GrammarSettingsModule = (() => {
   }
 
   function renderFormatChecks() {
+    if (eOptions && eOptions.parentNode) eOptions.parentNode.removeChild(eOptions);
+    if (gOptions && gOptions.parentNode) gOptions.parentNode.removeChild(gOptions);
     formatList.innerHTML = '';
     GRAMMAR_FORMATS.forEach(f => {
+      if (f.key === 'C' || f.key === 'D') return;
       const lbl = document.createElement('label');
       lbl.className = 'check-item';
       const input = document.createElement('input');
@@ -3194,16 +3209,30 @@ const GrammarSettingsModule = (() => {
       lbl.appendChild(input);
       lbl.appendChild(span);
       formatList.appendChild(lbl);
+      if (f.key === 'E' && eOptions) formatList.appendChild(eOptions);
+      if (f.key === 'G' && gOptions) formatList.appendChild(gOptions);
     });
     updateFormatOptions();
   }
 
+  function getCheckedFormatKeys() {
+    return Array.from(formatList.querySelectorAll('input[type="checkbox"]:checked'))
+      .map(el => el.value)
+      .filter(function (v) { return v.length === 1; });
+  }
+
   function updateFormatOptions() {
-    gOptions.style.display = getSelectedFormats().indexOf('G') !== -1 ? 'block' : 'none';
+    const checked = getCheckedFormatKeys();
+    if (eOptions) eOptions.style.display = checked.indexOf('E') !== -1 ? 'block' : 'none';
+    if (gOptions) gOptions.style.display = checked.indexOf('G') !== -1 ? 'block' : 'none';
   }
 
   function getSelectedFormats() {
-    return Array.from(formatList.querySelectorAll('input:checked')).map(el => el.value);
+    const sortVariantEl = document.getElementById('e-sort-variant');
+    const sortVariant = sortVariantEl ? sortVariantEl.value : 'E';
+    return getCheckedFormatKeys().map(function (key) {
+      return key === 'E' ? sortVariant : key;
+    });
   }
 
   function renderDivisionChecks(container, items) {
