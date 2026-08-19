@@ -1585,6 +1585,7 @@ function fetchVocabCatalogFromDrive_() {
     const bookInfo = {
       bookName: bookName,
       bookId: bookId,
+      bookUrl: file.getUrl(),
       sheets: sheetInfos
     };
 
@@ -1682,7 +1683,14 @@ function registerVocabWords_(sheetName, rows, ssOpt) {
   sheet.getRange(startRow, 1, builtRows.length, VOCAB_HEADERS.length).setValues(builtRows);
   renumberVocabSheet_(sheet);
 
-  return { registeredCount: builtRows.length, sheetName: sheetName };
+  return {
+    registeredCount: builtRows.length,
+    sheetName: sheetName,
+    bookName: ss.getName(),
+    bookId: ss.getId(),
+    bookUrl: ss.getUrl(),
+    sheetUrl: ss.getUrl() + '#gid=' + sheet.getSheetId()
+  };
 }
 
 // =========================================================
@@ -1794,9 +1802,17 @@ function getOrCreateUserLogBook_(folder, userProps) {
 }
 
 function getUserVocabBook_() {
+  const props = PropertiesService.getUserProperties();
+  const bookId = props.getProperty(USER_PROP.MY_VOCAB_BOOK_ID);
+  if (bookId) {
+    try {
+      return SpreadsheetApp.openById(bookId);
+    } catch (e) {
+      // fall through and recreate
+    }
+  }
   ensureUserEnvironment_();
-  const bookId = PropertiesService.getUserProperties().getProperty(USER_PROP.MY_VOCAB_BOOK_ID);
-  return SpreadsheetApp.openById(bookId);
+  return SpreadsheetApp.openById(props.getProperty(USER_PROP.MY_VOCAB_BOOK_ID));
 }
 
 function getUserLogBook_() {
@@ -1815,6 +1831,7 @@ function fetchUserVocabCatalog_() {
     userBooks: [{
       bookName: MY_VOCAB_BOOK_NAME,
       bookId: ss.getId(),
+      bookUrl: ss.getUrl(),
       sheets: sheetInfos
     }]
   };

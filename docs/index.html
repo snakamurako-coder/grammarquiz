@@ -118,6 +118,10 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .simple-meaning-row input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; font-family: inherit; min-height: var(--tap); box-sizing: border-box; }
 .simple-meaning-row select { flex: 0 0 42%; max-width: 180px; min-height: var(--tap); }
 .simple-meaning-remove { flex-shrink: 0; min-width: 40px; padding: 0 8px; }
+.register-dest-row { display: flex; gap: 8px; align-items: stretch; }
+.register-dest-row #register-sheet-name { width: auto; flex: 1; min-width: 0; }
+.register-dest-row .btn-small { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; white-space: nowrap; }
+.register-dest-hint { font-size: 0.82em; color: var(--c-text-sub); margin: 6px 0 0; line-height: 1.4; }
 #register-sheet-name,
 #register-simple-word {
   display: block;
@@ -620,6 +624,8 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
       <div id="manage-sets-panel">
         <div class="setting-section">
           <div class="section-title">マイ単語帳（あなたのDrive）</div>
+          <p class="register-dest-hint">単語登録はここに保存されます。</p>
+          <a id="manage-open-book-btn" class="btn-small" href="#" target="_blank" rel="noopener noreferrer" style="display:none;margin-bottom:12px;">スプレッドシートを開く</a>
           <div id="user-set-list">ログイン後に読み込まれます</div>
         </div>
       </div>
@@ -628,7 +634,11 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
           <div class="section-title">単語登録（マイ単語帳）</div>
           <div class="form-group">
             <label>登録先シート（教材名）</label>
-            <input type="text" id="register-sheet-name" value="デフォルト">
+            <div class="register-dest-row">
+              <input type="text" id="register-sheet-name" value="デフォルト">
+              <a id="register-open-book-btn" class="btn-small" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">スプレッドシートを開く</a>
+            </div>
+            <p class="register-dest-hint">登録先はあなたの Google Drive のブック「マイ単語帳」です。上のシート名が教材名になります。</p>
           </div>
           <div id="register-msg" style="margin-top:4px;font-weight:bold;"></div>
         </div>
@@ -1259,10 +1269,10 @@ const UserBridge = {
     if (res.status !== 'success' || !res.opToken) {
       return res;
     }
-    return this.executeViaIframe_(res.opToken);
+    return this.executeViaIframe_(res.opToken, USER_BRIDGE_WRITE_OPS[op] ? 90000 : 60000);
   },
 
-  executeViaIframe_(opToken) {
+  executeViaIframe_(opToken, timeoutMs) {
     if (!opToken || !window.DASHBOARD_URL) {
       return Promise.resolve({ status: 'error', message: 'DASHBOARD_URL または opToken がありません' });
     }
@@ -1281,7 +1291,7 @@ const UserBridge = {
       }
       var timeout = setTimeout(function () {
         finish({ status: 'error', message: 'UserBridge がタイムアウトしました' });
-      }, 45000);
+      }, timeoutMs || 90000);
       function onMessage(event) {
         if (!event.data || event.data.type !== 'userBridgeComplete') return;
         var result = event.data.result;
@@ -3096,6 +3106,9 @@ const VocabSettingsModule = (() => {
       } catch (e) { console.warn('ユーザーカタログ:', e.message); }
     }
     refreshBookSelect();
+    if (window.VocabRegisterModule && window.VocabRegisterModule.refreshBookShortcut) {
+      window.VocabRegisterModule.refreshBookShortcut();
+    }
   }
 
   function getBooksByType(type) {
@@ -3201,7 +3214,11 @@ const VocabSettingsModule = (() => {
     });
   }
 
-  return { loadCatalog, init, getQuizOptions, refreshBookSelect };
+  function getUserBooks() {
+    return catalog.userBooks || [];
+  }
+
+  return { loadCatalog, init, getQuizOptions, refreshBookSelect, getUserBooks };
 })();
 
 window.VocabSettingsModule = VocabSettingsModule;
@@ -3591,6 +3608,58 @@ const VocabRegisterModule = (() => {
     document.getElementById('register-preview-area').style.display = 'block';
   }
 
+  const BOOK_URL_CACHE_KEY = 'dd_my_vocab_book_url';
+
+  function setBookShortcut(url, sheetUrl) {
+    const href = sheetUrl || url || '';
+    ['register-open-book-btn', 'manage-open-book-btn'].forEach(function (id) {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      if (!href) {
+        btn.style.display = 'none';
+        btn.removeAttribute('href');
+        return;
+      }
+      btn.href = href;
+      btn.style.display = '';
+    });
+    if (url) {
+      try { sessionStorage.setItem(BOOK_URL_CACHE_KEY, url); } catch (e) {}
+    }
+  }
+
+  function bookUrlFrom(book) {
+    if (!book) return '';
+    return book.bookUrl || (book.bookId ? 'https://docs.google.com/spreadsheets/d/' + book.bookId + '/edit' : '');
+  }
+
+  function refreshBookShortcut() {
+    if (!AuthGateService.isValid()) {
+      setBookShortcut('');
+      return;
+    }
+    var books = window.VocabSettingsModule && window.VocabSettingsModule.getUserBooks
+      ? window.VocabSettingsModule.getUserBooks()
+      : [];
+    var fromCatalog = bookUrlFrom(books[0]);
+    if (fromCatalog) {
+      setBookShortcut(fromCatalog);
+      return;
+    }
+    try {
+      var cached = sessionStorage.getItem(BOOK_URL_CACHE_KEY);
+      if (cached) setBookShortcut(cached);
+    } catch (e) {}
+  }
+
+  function applyRegisterResult(result) {
+    const d = (result && result.data) || {};
+    if (d.sheetUrl || d.bookUrl) setBookShortcut(d.bookUrl, d.sheetUrl);
+    const bookName = d.bookName || 'マイ単語帳';
+    const sheetName = d.sheetName || (document.getElementById('register-sheet-name') || {}).value || 'デフォルト';
+    return { bookName: bookName, sheetName: sheetName };
+  }
+
   async function registerRows(rows) {
     const sheetName = document.getElementById('register-sheet-name').value.trim() || 'デフォルト';
     if (!AuthGateService.isValid()) throw new Error('単語登録にはログインが必要です');
@@ -3606,8 +3675,14 @@ const VocabRegisterModule = (() => {
   }
 
   function init() {
-    if (init._done) return;
-    init._done = true;
+    if (!init._done) {
+      init._done = true;
+      bindRegisterUi_();
+    }
+    refreshBookShortcut();
+  }
+
+  function bindRegisterUi_() {
     buildForm();
     setRegisterMode('simple');
     renderSimpleMeanings();
@@ -3646,11 +3721,14 @@ const VocabRegisterModule = (() => {
       if (previewRows.length === 0) return;
       try {
         const result = await registerRows(previewRows);
-        showMsg(result.data.registeredCount + '語を登録しました（' + result.data.sheetName + '）', false);
+        const dest = applyRegisterResult(result);
+        showMsg(result.data.registeredCount + '語を「' + dest.bookName + '」のシート「' + dest.sheetName + '」に登録しました。右のボタンからスプレッドシートを開けます。', false);
         document.getElementById('register-tsv-input').value = '';
         previewRows = [];
         document.getElementById('register-preview-area').style.display = 'none';
-        if (window.VocabSettingsModule) await window.VocabSettingsModule.loadCatalog();
+        if (window.VocabSettingsModule) {
+          window.VocabSettingsModule.loadCatalog().catch(function () {});
+        }
       } catch (e) {
         showMsg('登録エラー: ' + e.message, true);
       }
@@ -3660,9 +3738,12 @@ const VocabRegisterModule = (() => {
       try {
         const row = readSimpleRow();
         const result = await registerRows([row]);
-        showMsg('「' + vocabNorm(row['英単語・熟語の表現']) + '」を登録しました', false);
+        const dest = applyRegisterResult(result);
+        showMsg('「' + vocabNorm(row['英単語・熟語の表現']) + '」を「' + dest.bookName + '」のシート「' + dest.sheetName + '」に登録しました。右のボタンからスプレッドシートを開けます。', false);
         resetSimpleForm();
-        if (window.VocabSettingsModule) await window.VocabSettingsModule.loadCatalog();
+        if (window.VocabSettingsModule) {
+          window.VocabSettingsModule.loadCatalog().catch(function () {});
+        }
       } catch (e) {
         showMsg('登録エラー: ' + e.message, true);
       }
@@ -3672,16 +3753,19 @@ const VocabRegisterModule = (() => {
       try {
         const row = readFormRow();
         const result = await registerRows([row]);
-        showMsg('「' + vocabNorm(row['英単語・熟語の表現']) + '」を登録しました', false);
+        const dest = applyRegisterResult(result);
+        showMsg('「' + vocabNorm(row['英単語・熟語の表現']) + '」を「' + dest.bookName + '」のシート「' + dest.sheetName + '」に登録しました。右のボタンからスプレッドシートを開けます。', false);
         clearForm();
-        if (window.VocabSettingsModule) await window.VocabSettingsModule.loadCatalog();
+        if (window.VocabSettingsModule) {
+          window.VocabSettingsModule.loadCatalog().catch(function () {});
+        }
       } catch (e) {
         showMsg('登録エラー: ' + e.message, true);
       }
     });
   }
 
-  return { init };
+  return { init: init, refreshBookShortcut: refreshBookShortcut };
 })();
 
 window.VocabRegisterModule = VocabRegisterModule;
@@ -5134,6 +5218,8 @@ function showToast_(message) {
 async function loadManagePanel_() {
   if (!AuthGateService.isValid()) {
     document.getElementById('user-set-list').innerHTML = '<p>ログインするとマイ単語帳を表示できます。</p>';
+    const hideBtn = document.getElementById('manage-open-book-btn');
+    if (hideBtn) hideBtn.style.display = 'none';
     return;
   }
   try {
@@ -5144,11 +5230,24 @@ async function loadManagePanel_() {
     const el = document.getElementById('user-set-list');
     if (books.length === 0) {
       el.innerHTML = '<p>マイ単語帳がありません。初回アクセス時に自動作成されます。</p>';
+      const hideBtn = document.getElementById('manage-open-book-btn');
+      if (hideBtn) hideBtn.style.display = 'none';
       return;
+    }
+    const book = books[0];
+    const bookUrl = book.bookUrl || (book.bookId ? 'https://docs.google.com/spreadsheets/d/' + book.bookId + '/edit' : '');
+    const manageBtn = document.getElementById('manage-open-book-btn');
+    if (manageBtn) {
+      if (bookUrl) {
+        manageBtn.href = bookUrl;
+        manageBtn.style.display = '';
+      } else {
+        manageBtn.style.display = 'none';
+      }
     }
     let html = '';
     select.innerHTML = '';
-    books[0].sheets.forEach(function (s) {
+    book.sheets.forEach(function (s) {
       html += '<div class="log-item"><strong>' + s.sheetName + '</strong> — ' + s.wordCount + '語</div>';
       const opt = document.createElement('option');
       opt.value = s.sheetName;
