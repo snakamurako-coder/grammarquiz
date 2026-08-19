@@ -206,9 +206,10 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
   pointer-events: none;
   animation: kb-caret-blink 1s step-end infinite;
 }
-.kb-caret::before { content: '_'; }
-@keyframes kb-caret-blink {
-  50% { opacity: 0; }
+.kb-input-locked {
+  pointer-events: none !important;
+  cursor: default !important;
+  background-color: #eceff1 !important;
 }
 
 /* ソフトウェアキーボード */
@@ -1987,7 +1988,11 @@ const KeyboardModule = (() => {
 
   function init(targetElement, initialText, enterCallback, updateCallback) {
     stopDelRepeat();
+    if (displayElement) {
+      displayElement.classList.remove('kb-input-locked');
+    }
     displayElement = targetElement;
+    if (displayElement) displayElement.classList.remove('kb-input-locked');
     currentInput = initialText || '';
     caretIndex = currentInput.length;
     onEnterCallback = enterCallback;
@@ -2053,6 +2058,7 @@ const KeyboardModule = (() => {
   }
 
   function handleKeyPress(key) {
+    if (!captureEnabled) return;
     let relayout = false;
     if (key === 'Shift') {
       handleShiftLogic();
@@ -2210,7 +2216,20 @@ const KeyboardModule = (() => {
     lastShiftClickTime = now;
   }
 
+  function freezeDisplay() {
+    if (displayAbort) {
+      displayAbort.abort();
+      displayAbort = null;
+    }
+    if (!displayElement) return;
+    displayElement.classList.add('kb-input-locked');
+    displayElement.classList.remove('kb-input-display');
+    displayElement.textContent = currentInput;
+    displayElement.setAttribute('data-kb-value', currentInput);
+  }
+
   function show() {
+    if (!captureEnabled) return;
     kbContainer.style.display = 'block';
   }
 
@@ -2222,6 +2241,7 @@ const KeyboardModule = (() => {
   function deactivate() {
     captureEnabled = false;
     stopDelRepeat();
+    freezeDisplay();
     hide();
   }
 
@@ -2680,6 +2700,7 @@ const TypingModule = (() => {
     }
     if (window.KeyboardModule) window.KeyboardModule.deactivate();
     submitBtn.style.display = 'none';
+    inputDisplay.onclick = null;
   }
 
   return { initGame };
