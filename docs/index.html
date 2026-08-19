@@ -99,6 +99,10 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .vocab-form-grid label { font-size: 0.85em; }
 .vocab-form-grid input, .vocab-form-grid textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; font-family: inherit; }
 .vocab-form-grid textarea { min-height: 60px; resize: vertical; }
+.simple-meaning-row { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
+.simple-meaning-row input { flex: 1; min-width: 0; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; font-family: inherit; }
+.simple-meaning-row select { flex: 0 0 42%; max-width: 180px; }
+.simple-meaning-remove { flex-shrink: 0; min-width: 40px; padding: 0 8px; }
 .vocab-preview-table { width: 100%; border-collapse: collapse; font-size: 0.75em; margin-top: 10px; }
 .vocab-preview-table th, .vocab-preview-table td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; word-break: break-word; }
 .vocab-preview-table th { background: #f5f5f5; }
@@ -599,6 +603,33 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
             <label>登録先シート（教材名）</label>
             <input type="text" id="register-sheet-name" value="デフォルト">
           </div>
+          <div id="register-msg" style="margin-top:4px;font-weight:bold;"></div>
+        </div>
+        <div class="setting-section">
+          <div class="section-title">手動入力</div>
+          <div class="mode-tabs" style="margin-bottom:12px;">
+            <button type="button" class="mode-tab active" id="register-mode-simple" data-register-mode="simple">簡易登録</button>
+            <button type="button" class="mode-tab" id="register-mode-detail" data-register-mode="detail">詳細登録</button>
+          </div>
+          <div id="register-simple-panel">
+            <div class="form-group">
+              <label>英単語・熟語の表現 *</label>
+              <input type="text" id="register-simple-word" placeholder="単語または熟語">
+            </div>
+            <div class="form-group">
+              <label>意味（和訳）</label>
+              <div id="register-simple-meanings"></div>
+              <button type="button" id="register-add-meaning-btn" class="btn-small">＋違う品詞の意味を追加</button>
+            </div>
+            <button type="button" id="register-simple-btn" class="btn-primary" style="margin-top:12px;">登録</button>
+          </div>
+          <div id="register-detail-panel" style="display:none;">
+            <div class="vocab-form-grid" id="register-form-grid"></div>
+            <button type="button" id="register-single-btn" class="btn-primary" style="margin-top:12px;">登録</button>
+          </div>
+        </div>
+        <div class="setting-section">
+          <div class="section-title">TSV一括登録</div>
           <div class="form-group">
             <label>TSV貼り付け（22列・ヘッダなし）</label>
             <textarea id="register-tsv-input" rows="4"></textarea>
@@ -608,12 +639,6 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
             <div id="register-preview-table-wrap" style="overflow-x:auto;"></div>
             <button type="button" id="register-import-btn" class="btn-primary" style="margin-top:12px;">一括登録</button>
           </div>
-          <div id="register-msg" style="margin-top:10px;font-weight:bold;"></div>
-        </div>
-        <div class="setting-section">
-          <div class="section-title">手動入力（1語）</div>
-          <div class="vocab-form-grid" id="register-form-grid"></div>
-          <button type="button" id="register-single-btn" class="btn-primary" style="margin-top:12px;">登録</button>
         </div>
       </div>
       <div id="manage-logs-panel" style="display:none;">
@@ -2938,6 +2963,10 @@ const VOCAB_REGISTER_FIELDS = [
   'メモ', '類義語・同義語', '対義語', '派生語・関連語',
   '英文による定義', 'チャンク', 'チャンク訳', '例文', '例文訳'
 ];
+const VOCAB_SIMPLE_POS = VOCAB_MEANING_KEYS.map(function (key) {
+  return { key: key, label: key.replace('意味＠', '') };
+});
+const VOCAB_IDIOM_KEY = '意味＠熟語・慣用表現';
 const VOCAB_OPTION_NONE = 'この中に正答はない';
 const VOCAB_OPTION_UNKNOWN = 'わからない';
 
@@ -3339,6 +3368,127 @@ window.VocabQuizModule = VocabQuizModule;
 // vocabRegisterModule.js
 const VocabRegisterModule = (() => {
   let previewRows = [];
+  let registerMode = 'simple';
+  let simpleMeanings = [{ meaning: '', posKey: '' }];
+
+  function isMultiWordExpr(text) {
+    return String(text || '').trim().split(/\s+/).filter(Boolean).length >= 2;
+  }
+
+  function setRegisterMode(mode) {
+    registerMode = mode === 'detail' ? 'detail' : 'simple';
+    const simplePanel = document.getElementById('register-simple-panel');
+    const detailPanel = document.getElementById('register-detail-panel');
+    const simpleTab = document.getElementById('register-mode-simple');
+    const detailTab = document.getElementById('register-mode-detail');
+    if (simplePanel) simplePanel.style.display = registerMode === 'simple' ? 'block' : 'none';
+    if (detailPanel) detailPanel.style.display = registerMode === 'detail' ? 'block' : 'none';
+    if (simpleTab) simpleTab.classList.toggle('active', registerMode === 'simple');
+    if (detailTab) detailTab.classList.toggle('active', registerMode === 'detail');
+  }
+
+  function usedPosKeys(exceptIndex) {
+    const used = {};
+    simpleMeanings.forEach(function (row, i) {
+      if (i === exceptIndex) return;
+      if (row.posKey) used[row.posKey] = true;
+    });
+    return used;
+  }
+
+  function firstAvailablePos(exceptIndex) {
+    const used = usedPosKeys(exceptIndex);
+    for (let i = 0; i < VOCAB_SIMPLE_POS.length; i++) {
+      if (!used[VOCAB_SIMPLE_POS[i].key]) return VOCAB_SIMPLE_POS[i].key;
+    }
+    return '';
+  }
+
+  function applyIdiomIfMultiWord() {
+    const wordEl = document.getElementById('register-simple-word');
+    if (!wordEl || !isMultiWordExpr(wordEl.value)) return;
+    const used = usedPosKeys(0);
+    if (used[VOCAB_IDIOM_KEY]) return;
+    simpleMeanings[0].posKey = VOCAB_IDIOM_KEY;
+  }
+
+  function renderSimpleMeanings() {
+    const wrap = document.getElementById('register-simple-meanings');
+    const addBtn = document.getElementById('register-add-meaning-btn');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    simpleMeanings.forEach(function (row, index) {
+      const used = usedPosKeys(index);
+      const line = document.createElement('div');
+      line.className = 'simple-meaning-row';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = '意味（和訳）';
+      input.value = row.meaning;
+      input.addEventListener('input', function () { simpleMeanings[index].meaning = input.value; });
+      const select = document.createElement('select');
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = '品詞';
+      select.appendChild(placeholder);
+      VOCAB_SIMPLE_POS.forEach(function (pos) {
+        if (used[pos.key] && pos.key !== row.posKey) return;
+        const opt = document.createElement('option');
+        opt.value = pos.key;
+        opt.textContent = pos.label;
+        if (pos.key === row.posKey) opt.selected = true;
+        select.appendChild(opt);
+      });
+      select.addEventListener('change', function () {
+        simpleMeanings[index].posKey = select.value;
+        renderSimpleMeanings();
+      });
+      line.appendChild(input);
+      line.appendChild(select);
+      if (index > 0) {
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'btn-small simple-meaning-remove';
+        removeBtn.textContent = '×';
+        removeBtn.setAttribute('aria-label', 'この意味を削除');
+        removeBtn.addEventListener('click', function () {
+          simpleMeanings.splice(index, 1);
+          renderSimpleMeanings();
+        });
+        line.appendChild(removeBtn);
+      }
+      wrap.appendChild(line);
+    });
+    if (addBtn) {
+      addBtn.disabled = firstAvailablePos(-1) === '';
+    }
+  }
+
+  function resetSimpleForm() {
+    const wordEl = document.getElementById('register-simple-word');
+    if (wordEl) wordEl.value = '';
+    simpleMeanings = [{ meaning: '', posKey: '' }];
+    renderSimpleMeanings();
+  }
+
+  function readSimpleRow() {
+    const wordEl = document.getElementById('register-simple-word');
+    const word = wordEl ? wordEl.value.trim() : '';
+    if (!word) throw new Error('英単語・熟語の表現は必須です。');
+    const row = {};
+    VOCAB_REGISTER_FIELDS.forEach(function (field) { row[field] = ''; });
+    row['英単語・熟語の表現'] = word;
+    let hasMeaning = false;
+    simpleMeanings.forEach(function (item) {
+      const meaning = String(item.meaning || '').trim();
+      if (!meaning) return;
+      if (!item.posKey) throw new Error('意味の品詞を選択してください。');
+      row[item.posKey] = meaning;
+      hasMeaning = true;
+    });
+    if (!hasMeaning) throw new Error('意味（和訳）を1つ以上入力してください。');
+    return row;
+  }
 
   function buildForm() {
     const grid = document.getElementById('register-form-grid');
@@ -3432,6 +3582,25 @@ const VocabRegisterModule = (() => {
     if (init._done) return;
     init._done = true;
     buildForm();
+    setRegisterMode('simple');
+    renderSimpleMeanings();
+
+    document.getElementById('register-mode-simple').addEventListener('click', function () { setRegisterMode('simple'); });
+    document.getElementById('register-mode-detail').addEventListener('click', function () { setRegisterMode('detail'); });
+
+    const wordEl = document.getElementById('register-simple-word');
+    if (wordEl) {
+      wordEl.addEventListener('input', function () {
+        applyIdiomIfMultiWord();
+        renderSimpleMeanings();
+      });
+    }
+    document.getElementById('register-add-meaning-btn').addEventListener('click', function () {
+      if (!firstAvailablePos(-1)) return;
+      simpleMeanings.push({ meaning: '', posKey: '' });
+      renderSimpleMeanings();
+    });
+
     document.getElementById('register-parse-tsv-btn').addEventListener('click', function () {
       const text = document.getElementById('register-tsv-input').value;
       if (!text.trim()) { showMsg('TSVを入力してください。', true); return; }
@@ -3453,6 +3622,18 @@ const VocabRegisterModule = (() => {
         document.getElementById('register-tsv-input').value = '';
         previewRows = [];
         document.getElementById('register-preview-area').style.display = 'none';
+        if (window.VocabSettingsModule) await window.VocabSettingsModule.loadCatalog();
+      } catch (e) {
+        showMsg('登録エラー: ' + e.message, true);
+      }
+    });
+
+    document.getElementById('register-simple-btn').addEventListener('click', async function () {
+      try {
+        const row = readSimpleRow();
+        const result = await registerRows([row]);
+        showMsg('「' + vocabNorm(row['英単語・熟語の表現']) + '」を登録しました', false);
+        resetSimpleForm();
         if (window.VocabSettingsModule) await window.VocabSettingsModule.loadCatalog();
       } catch (e) {
         showMsg('登録エラー: ' + e.message, true);
