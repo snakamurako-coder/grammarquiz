@@ -113,10 +113,13 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .profile-header .section-title { margin-bottom: 0; border-bottom: none; padding-bottom: 0; flex: 1; min-width: 0; }
 .profile-logout-btn { flex-shrink: 0; padding: 5px 10px; font-size: 0.8em; background-color: #f44336; border: none; color: white; border-radius: 4px; cursor: pointer; }
 .question-instruction-wrap { margin-bottom: 8px; }
+.question-instruction-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .btn-instruction-toggle { display: inline-block; min-height: 32px; padding: 6px 12px; font-size: 0.82em; background: #eceff1; color: #455a64; border: 1px solid #cfd8dc; border-radius: 6px; cursor: pointer; font-weight: bold; }
 .question-instruction { font-size: 0.85em; color: var(--c-text-sub); line-height: 1.5; margin-top: 8px; }
 .question-ja { font-size: clamp(1.1em, 4.2vw, 1.3em); font-weight: bold; color: var(--c-text); }
-#question-explanation { background: #fff8e1; border-left: 4px solid #ffb300; padding: 12px 14px; border-radius: 8px; margin-top: 12px; font-size: 0.9em; line-height: 1.6; color: var(--c-text); text-align: left; }
+.answer-feedback { display: none; }
+.answer-feedback.is-visible { display: block; margin: 8px 0 14px; }
+#question-explanation { background: #fff8e1; border-left: 4px solid #ffb300; padding: 12px 14px; border-radius: 8px; margin-top: 8px; font-size: 0.9em; line-height: 1.6; color: var(--c-text); text-align: left; }
 #question-explanation .explanation-area { font-weight: bold; display: block; margin-bottom: 4px; color: var(--c-text-sub); font-size: 0.9em; }
 .area-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 5px; }
 .area-label { font-size: 0.85em; font-weight: bold; color: var(--c-text-sub); }
@@ -148,8 +151,36 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 #app-toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 16px); max-width: 90%; padding: 12px 20px; background-color: rgba(38,50,56,0.95); color: #fff; border-radius: 24px; font-size: 0.9em; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.25); opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; z-index: 2000; }
 #app-toast.visible { opacity: 1; transform: translate(-50%, 0); }
 #submit-btn { width: 100%; min-height: 54px; padding: 14px; font-size: 1.15em; background-color: var(--c-success); color: white; border: none; border-radius: 10px; cursor: pointer; margin-top: 10px; }
-#result-msg { margin-top: 12px; font-size: 1.15em; font-weight: bold; text-align: center; line-height: 1.5; word-break: break-word; }
+#result-msg { margin-top: 0; font-size: 1.15em; font-weight: bold; text-align: left; line-height: 1.5; word-break: break-word; }
+.result-verdict-ok { color: var(--c-success); }
+.result-verdict-ng { color: var(--c-danger); }
+.result-verdict-unknown { color: var(--c-warn); }
+.result-filled-sentence { margin-top: 8px; font-size: clamp(1.05em, 4vw, 1.25em); font-weight: bold; color: #444; line-height: 1.45; }
+.answer-in-sentence { color: var(--c-danger); }
+.result-correct-label { margin-top: 6px; font-size: 0.95em; color: var(--c-text-sub); }
 #next-btn { background-color: var(--c-success); }
+#next-btn.btn-next-in-card {
+  width: auto;
+  min-height: 38px;
+  padding: 8px 14px;
+  font-size: 0.88em;
+  margin: 0 0 0 auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.game-footer {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 640px;
+  bottom: 0;
+  z-index: 50;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  background: var(--c-bg);
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
+}
+.game-footer #back-btn { width: 100%; margin: 0; }
 
 /* 不足語入力エリア */
 #missing-word-input-area { background: #fff; padding: 12px; border-radius: 10px; border: 2px solid var(--c-warn); margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
@@ -251,6 +282,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
   .choice-btn.unknown { grid-column: 1 / -1; }
   .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; }
   .dashboard-card.progress-card { grid-column: 1 / -1; }
+  .game-footer { max-width: 720px; }
 }
 
 /* マウス環境のみ hover を有効化（タッチでの hover 固着を防ぐ） */
@@ -580,10 +612,12 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 
   <!-- Game Screen -->
   <div id="game-screen" style="display: none;">
-    <button id="back-btn" class="btn-small" style="margin-bottom: 10px;">← 設定に戻る</button>
     <div class="question-box">
       <div class="question-instruction-wrap">
-        <button type="button" id="question-instruction-btn" class="btn-instruction-toggle">出題指示を確認する</button>
+        <div class="question-instruction-row">
+          <button type="button" id="question-instruction-btn" class="btn-instruction-toggle">出題指示を確認する</button>
+          <button id="next-btn" class="btn-primary btn-next-in-card" style="display: none;">次の問題へ進む</button>
+        </div>
         <div class="question-instruction" id="question-instruction" hidden></div>
       </div>
       <div class="question-ja" id="question-ja"></div>
@@ -608,6 +642,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
         </div>
         <button type="button" class="tts-btn" data-tts-target="sentence-container" aria-label="英文を読み上げ">📢</button>
       </div>
+      <div id="sort-feedback-slot" class="answer-feedback-slot"></div>
       <div class="area-header">
         <div class="area-label">▼ 仮置き場</div>
         <button id="move-all-btn" class="btn-small">↑ 流し込む</button>
@@ -628,6 +663,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
         <div id="choice-sentence-container" class="sentence-container fixed-text" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 0;"></div>
         <button type="button" class="tts-btn" data-tts-target="choice-sentence-container" aria-label="英文を読み上げ">📢</button>
       </div>
+      <div id="choice-feedback-slot" class="answer-feedback-slot"></div>
       <div id="choice-buttons-container" class="choices-grid"></div>
     </div>
 
@@ -638,6 +674,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
         <button type="button" class="tts-btn" data-tts-target="vocab-quiz-word" aria-label="英単語を読み上げ">📢</button>
       </div>
       <div class="vocab-pos-hint" id="vocab-quiz-prompt">この単語の意味として正しいものを選んでください。</div>
+      <div id="vocab-feedback-slot" class="answer-feedback-slot"></div>
       <div id="vocab-choice-buttons" class="choices-grid"></div>
     </div>
 
@@ -647,6 +684,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
         <div id="typing-sentence-container" class="sentence-container fixed-text" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 0;"></div>
         <button type="button" class="tts-btn" data-tts-target="typing-sentence-container" aria-label="英文を読み上げ">📢</button>
       </div>
+      <div id="typing-feedback-slot" class="answer-feedback-slot"></div>
       <div id="typing-input-display" class="typing-display" style="margin-bottom: 15px;"></div>
       <button id="typing-submit-btn" style="display: none; width: 100%; padding: 15px; font-size: 1.2em; background-color: #4caf50; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px;">これで回答する</button>
     </div>
@@ -665,6 +703,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
         </div>
       </div>
       <div id="correction-hint" style="margin-bottom: 10px; color: #666; font-size: 0.95em; font-weight: bold;"></div>
+      <div id="correction-feedback-slot" class="answer-feedback-slot"></div>
 
       <!-- STEP1: 誤りの有無を判断 -->
       <div id="correction-judge-area" class="correction-actions">
@@ -685,12 +724,18 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
       </div>
     </div>
 
-    <div class="en-with-tts" style="align-items:center;margin-top:12px;">
-      <div id="result-msg"></div>
-      <button type="button" class="tts-btn" id="result-tts-btn" hidden aria-label="正答の英文を読み上げ">📢</button>
+    <div id="game-feedback-host">
+      <div id="answer-feedback" class="answer-feedback">
+        <div class="en-with-tts" style="align-items:center;">
+          <div id="result-msg"></div>
+          <button type="button" class="tts-btn" id="result-tts-btn" hidden aria-label="正答の英文を読み上げ">📢</button>
+        </div>
+        <div id="question-explanation" style="display: none;"></div>
+      </div>
     </div>
-    <div id="question-explanation" style="display: none;"></div>
-    <button id="next-btn" class="btn-primary" style="display: none; margin-top: 15px;">次の問題へ進む</button>
+    <footer class="game-footer">
+      <button id="back-btn" class="btn-small">← 設定に戻る</button>
+    </footer>
   </div>
 
   <!-- Result Screen -->
@@ -2088,6 +2133,38 @@ function joinEnglish(prefix, inner, suffix) {
   return s.replace(/\s+/g, ' ').trim();
 }
 
+function setResultVerdict(el, status, text) {
+  if (!el) return;
+  el.innerHTML = '';
+  el.style.color = '';
+  const v = document.createElement('div');
+  v.className = 'result-verdict result-verdict-' + status;
+  v.textContent = text;
+  el.appendChild(v);
+}
+
+/** 空所に当てはめた全文を作り、当てはめた語句だけ赤字にする */
+function appendJoinedEnglishHighlighted(parent, prefix, inner, suffix) {
+  if (!parent) return;
+  const sentence = document.createElement('div');
+  sentence.className = 'result-filled-sentence';
+  const p = prefix || '';
+  const mid = inner || '';
+  const s = suffix || '';
+  if (p) sentence.appendChild(document.createTextNode(mid ? p + ' ' : p));
+  if (mid) {
+    const mark = document.createElement('span');
+    mark.className = 'answer-in-sentence';
+    mark.textContent = mid;
+    sentence.appendChild(mark);
+  }
+  if (s) {
+    const glue = /^[.,!?;:]/.test(s) ? '' : ((mid || p) ? ' ' : '');
+    sentence.appendChild(document.createTextNode(glue + s));
+  }
+  parent.appendChild(sentence);
+}
+
 function shuffleArray(arr) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
@@ -2186,6 +2263,7 @@ const GrammarQuizGenerator = (() => {
       q.choices = choices;
       q.mcqPrefix = row.mcqPrefix;
       q.mcqSuffix = row.mcqSuffix;
+      q.mcqAnswer = row.mcqAnswer;
       q.correctText = hideCorrect ? CHOICE_NONE : row.mcqAnswer;
       q.difficulty = gDifficulty(entries.length, includeNone);
       return q;
@@ -2250,9 +2328,12 @@ const ChoiceModule = (() => {
     Array.from(buttonsContainer.children).forEach(b => b.classList.remove('selected'));
     btn.classList.add('selected');
 
+    const canShowFilled = qData.mcqAnswer && qData.correctText !== CHOICE_NONE;
     if (choice.isCorrect) {
-      resultMsg.textContent = "⭕️ 正解！";
-      resultMsg.style.color = "#4caf50";
+      setResultVerdict(resultMsg, 'ok', '⭕️ 正解！');
+      if (canShowFilled) {
+        appendJoinedEnglishHighlighted(resultMsg, qData.mcqPrefix, qData.mcqAnswer, qData.mcqSuffix);
+      }
       if (window.onQuestionCompleted) window.onQuestionCompleted(true, {
         userAnswer: choice.text,
         correctAnswer: qData.correctText
@@ -2261,11 +2342,17 @@ const ChoiceModule = (() => {
     }
 
     if (choice.isUnknown) {
-      resultMsg.textContent = "復習しましょう。正答: " + qData.correctText;
-      resultMsg.style.color = "#ff9800";
+      setResultVerdict(resultMsg, 'unknown', '復習しましょう。');
     } else {
-      resultMsg.textContent = "❌ 不正解... 正答: " + qData.correctText;
-      resultMsg.style.color = "#f44336";
+      setResultVerdict(resultMsg, 'ng', '❌ 不正解...');
+    }
+    if (canShowFilled) {
+      appendJoinedEnglishHighlighted(resultMsg, qData.mcqPrefix, qData.mcqAnswer, qData.mcqSuffix);
+    } else {
+      const extra = document.createElement('div');
+      extra.className = 'result-correct-label';
+      extra.textContent = '正答: ' + qData.correctText;
+      resultMsg.appendChild(extra);
     }
     if (window.onQuestionCompleted) window.onQuestionCompleted(false, {
       isUnknown: !!choice.isUnknown,
@@ -2340,12 +2427,12 @@ const TypingModule = (() => {
     const assembled = joinEnglish(qData.answerPrefix, userAnswer, qData.answerSuffix);
     const answerMeta = { userAnswer: userAnswer, correctAnswer: qData.expectedInner };
     if (normalizeEnglish(assembled) === normalizeEnglish(qData.fullSentence)) {
-      resultMsg.textContent = "⭕️ 正解！";
-      resultMsg.style.color = "#4caf50";
+      setResultVerdict(resultMsg, 'ok', '⭕️ 正解！');
+      appendJoinedEnglishHighlighted(resultMsg, qData.answerPrefix, userAnswer, qData.answerSuffix);
       if(window.onQuestionCompleted) window.onQuestionCompleted(true, answerMeta);
     } else {
-      resultMsg.textContent = "❌ 惜しい！ 正答: " + qData.expectedInner;
-      resultMsg.style.color = "#f44336";
+      setResultVerdict(resultMsg, 'ng', '❌ 惜しい！');
+      appendJoinedEnglishHighlighted(resultMsg, qData.answerPrefix, qData.expectedInner, qData.answerSuffix);
       if(window.onQuestionCompleted) window.onQuestionCompleted(false, answerMeta);
     }
     if (window.KeyboardModule) window.KeyboardModule.deactivate();
@@ -2515,15 +2602,21 @@ const CorrectionModule = (() => {
     if (window.KeyboardModule) window.KeyboardModule.deactivate();
 
     if (normalizeEnglish(finalSentence) === normalizeEnglish(correctSentence)) {
-      resultMsg.textContent = "⭕️ 正解！ " + correctSentence;
-      resultMsg.style.color = "#4caf50";
+      setResultVerdict(resultMsg, 'ok', '⭕️ 正解！');
+      const sentence = document.createElement('div');
+      sentence.className = 'result-filled-sentence';
+      sentence.textContent = correctSentence;
+      resultMsg.appendChild(sentence);
       if (window.onQuestionCompleted) window.onQuestionCompleted(true, {
         userAnswer: finalSentence,
         correctAnswer: correctSentence
       });
     } else {
-      resultMsg.textContent = "❌ 不正解... 正答: " + correctSentence;
-      resultMsg.style.color = "#f44336";
+      setResultVerdict(resultMsg, 'ng', '❌ 不正解...');
+      const extra = document.createElement('div');
+      extra.className = 'result-correct-label';
+      extra.textContent = '正答: ' + correctSentence;
+      resultMsg.appendChild(extra);
       if (window.onQuestionCompleted) window.onQuestionCompleted(false, {
         userAnswer: finalSentence,
         correctAnswer: correctSentence
@@ -2936,16 +3029,21 @@ const VocabQuizModule = (() => {
     };
 
     if (choice.isCorrect) {
-      resultMsg.textContent = '⭕️ 正解！';
-      resultMsg.style.color = '#4caf50';
+      setResultVerdict(resultMsg, 'ok', '⭕️ 正解！');
       if (window.onQuestionCompleted) window.onQuestionCompleted(true, meta);
     } else if (choice.text === VOCAB_OPTION_UNKNOWN) {
-      resultMsg.textContent = '復習しましょう。正答: ' + qData.correctAnswer;
-      resultMsg.style.color = '#ff9800';
+      setResultVerdict(resultMsg, 'unknown', '復習しましょう。');
+      const extra = document.createElement('div');
+      extra.className = 'result-correct-label';
+      extra.textContent = '正答: ' + qData.correctAnswer;
+      resultMsg.appendChild(extra);
       if (window.onQuestionCompleted) window.onQuestionCompleted(false, meta);
     } else {
-      resultMsg.textContent = '❌ 不正解... 正答: ' + qData.correctAnswer;
-      resultMsg.style.color = '#f44336';
+      setResultVerdict(resultMsg, 'ng', '❌ 不正解...');
+      const extra = document.createElement('div');
+      extra.className = 'result-correct-label';
+      extra.textContent = '正答: ' + qData.correctAnswer;
+      resultMsg.appendChild(extra);
       if (window.onQuestionCompleted) window.onQuestionCompleted(false, meta);
     }
   }
@@ -3388,12 +3486,12 @@ const SortingModule = (() => {
     const assembled = joinEnglish(qData.answerPrefix, inner, qData.answerSuffix);
     const answerMeta = { userAnswer: inner, correctAnswer: qData.expectedInner };
     if (normalizeEnglish(assembled) === normalizeEnglish(qData.fullSentence)) {
-      resultMsg.textContent = "⭕️ 正解！";
-      resultMsg.style.color = "#4caf50";
+      setResultVerdict(resultMsg, 'ok', '⭕️ 正解！');
+      appendJoinedEnglishHighlighted(resultMsg, qData.answerPrefix, inner, qData.answerSuffix);
       if(window.onQuestionCompleted) window.onQuestionCompleted(true, answerMeta);
     } else {
-      resultMsg.textContent = "❌ 不正解... 正答: " + qData.expectedInner;
-      resultMsg.style.color = "#f44336";
+      setResultVerdict(resultMsg, 'ng', '❌ 不正解...');
+      appendJoinedEnglishHighlighted(resultMsg, qData.answerPrefix, qData.expectedInner, qData.answerSuffix);
       if(window.onQuestionCompleted) window.onQuestionCompleted(false, answerMeta);
     }
     if (window.KeyboardModule) window.KeyboardModule.deactivate();
@@ -3833,11 +3931,32 @@ const QUESTION_HANDLERS = {
   'vocab-enja': { ui: 'vocab-quiz-ui', module: VocabQuizModule }
 };
 
+const FEEDBACK_SLOT_BY_FORMAT = {
+  A: 'typing-feedback-slot',
+  B: 'typing-feedback-slot',
+  F: 'typing-feedback-slot',
+  C: 'sort-feedback-slot',
+  D: 'sort-feedback-slot',
+  E: 'sort-feedback-slot',
+  G: 'choice-feedback-slot',
+  H: 'correction-feedback-slot',
+  'vocab-enja': 'vocab-feedback-slot'
+};
+
+function placeAnswerFeedback(format) {
+  const fb = document.getElementById('answer-feedback');
+  if (!fb) return;
+  const slotId = FEEDBACK_SLOT_BY_FORMAT[format] || 'game-feedback-host';
+  const slot = document.getElementById(slotId) || document.getElementById('game-feedback-host');
+  if (slot && fb.parentNode !== slot) slot.appendChild(fb);
+}
+
 function loadQuestionToGame(qData) {
   if (window.KeyboardModule) window.KeyboardModule.deactivate();
   const instructionBtn = document.getElementById('question-instruction-btn');
   const instructionEl = document.getElementById('question-instruction');
   const explanationEl = document.getElementById('question-explanation');
+  const answerFeedback = document.getElementById('answer-feedback');
 
   if (qData.format === 'vocab-enja') {
     if (instructionBtn) instructionBtn.style.display = 'none';
@@ -3862,8 +3981,10 @@ function loadQuestionToGame(qData) {
 
   QUESTION_UI_IDS.forEach(id => { document.getElementById(id).style.display = 'none'; });
   document.getElementById('result-msg').textContent = '';
+  if (answerFeedback) answerFeedback.classList.remove('is-visible');
   explanationEl.style.display = 'none';
   explanationEl.innerHTML = '';
+  placeAnswerFeedback(qData.format);
 
   const handler = QUESTION_HANDLERS[qData.format];
   if (!handler) {
@@ -4051,6 +4172,8 @@ window.onQuestionCompleted = (isCorrect, meta) => {
   if (isCorrect) currentScore++;
 
   if (window.TtsModule) TtsModule.setResultSpeakText(getTtsEnglish_(currentQ));
+  const answerFeedback = document.getElementById('answer-feedback');
+  if (answerFeedback) answerFeedback.classList.add('is-visible');
   document.getElementById('next-btn').style.display = 'block';
 };
 
