@@ -128,7 +128,14 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .choice-btn.selected { background-color: var(--c-primary); color: white; }
 .choice-btn.unknown { border-color: #9e9e9e; color: #757575; text-align: center; font-weight: bold; }
 
-#sentence-container { display: flex; flex-wrap: wrap; align-items: center; background: #fff; padding: 12px; border-radius: var(--radius); margin-bottom: 16px; gap: 8px; box-shadow: var(--shadow); }
+.en-with-tts { display: flex; align-items: flex-start; gap: 8px; }
+.en-with-tts > .tts-target, .en-with-tts > #sentence-container, .en-with-tts > #correction-sentence, .en-with-tts > #choice-sentence-container, .en-with-tts > #typing-sentence-container, .en-with-tts > #correction-live-preview, .en-with-tts > #vocab-quiz-word, .en-with-tts > #result-msg { flex: 1; min-width: 0; }
+.tts-btn { flex-shrink: 0; width: 40px; min-height: 40px; padding: 0; border: 1px solid #bbdefb; border-radius: 8px; background: #e3f2fd; cursor: pointer; font-size: 1.15em; line-height: 1; }
+.tts-btn:active, .tts-btn.speaking { background: #fff8e1; border-color: #ffe082; }
+.tts-btn[hidden] { display: none !important; }
+#sentence-container { display: flex; flex-wrap: wrap; align-items: center; background: #fff; padding: 12px; border-radius: var(--radius); margin-bottom: 0; gap: 8px; box-shadow: var(--shadow); }
+.en-with-tts.sentence-tts-row { margin-bottom: 16px; }
+.en-with-tts.correction-tts-row { margin-bottom: 12px; }
 .fixed-text { font-size: clamp(1.1em, 4vw, 1.3em); font-weight: bold; color: #444; word-break: break-word; }
 .sortable-area { min-height: 56px; padding: 10px; border-radius: var(--radius); display: flex; flex-wrap: wrap; gap: 8px; transition: background-color 0.2s; margin-bottom: 14px; }
 #answer-slot { background-color: #e3f2fd; border: 2px dashed #90caf9; }
@@ -504,6 +511,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
         <button type="button" class="mode-tab manage-sub-tab active" data-manage-tab="sets">マイセット</button>
         <button type="button" class="mode-tab manage-sub-tab" data-manage-tab="register">単語登録</button>
         <button type="button" class="mode-tab manage-sub-tab" data-manage-tab="logs">学習記録</button>
+        <button type="button" class="mode-tab manage-sub-tab" data-manage-tab="settings">詳細設定</button>
       </div>
       <div id="manage-sets-panel">
         <div class="setting-section">
@@ -541,6 +549,28 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
           <div id="user-logs-list">ログイン後に読み込まれます</div>
         </div>
       </div>
+      <div id="manage-settings-panel" style="display:none;">
+        <div class="setting-section">
+          <div class="section-title">読み上げ（TTS）</div>
+          <p style="font-size:0.9em;color:#666;margin-bottom:12px;">問題画面の英文わきの「📢」で読み上げます。端末のブラウザ音声（Web Speech API）を使います。</p>
+          <div class="form-group">
+            <label>英語の種類</label>
+            <select id="tts-locale-select">
+              <option value="en-US" selected>アメリカ英語</option>
+              <option value="en-GB">イギリス英語</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>声</label>
+            <select id="tts-gender-select">
+              <option value="female" selected>女性（推奨）</option>
+              <option value="male">男性</option>
+            </select>
+          </div>
+          <p id="tts-voice-status" style="font-size:0.85em;color:#555;margin-bottom:10px;">音声を準備しています...</p>
+          <button type="button" id="tts-preview-btn" class="btn-small">サンプルを再生</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -566,10 +596,13 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
       <div class="area-header">
         <div class="area-label">▼ 回答欄（並べてください）</div>
       </div>
-      <div id="sentence-container">
-        <span id="prefix-text" class="fixed-text"></span>
-        <div id="answer-slot" class="sortable-area"></div>
-        <span id="suffix-text" class="fixed-text"></span>
+      <div class="en-with-tts sentence-tts-row">
+        <div id="sentence-container">
+          <span id="prefix-text" class="fixed-text"></span>
+          <div id="answer-slot" class="sortable-area"></div>
+          <span id="suffix-text" class="fixed-text"></span>
+        </div>
+        <button type="button" class="tts-btn" data-tts-target="sentence-container" aria-label="英文を読み上げ">📢</button>
       </div>
       <div class="area-header">
         <div class="area-label">▼ 仮置き場</div>
@@ -587,30 +620,45 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 
     <!-- 4択問題用 UI -->
     <div id="choice-ui" style="display:none;">
-      <div id="choice-sentence-container" class="sentence-container fixed-text" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px;"></div>
+      <div class="en-with-tts sentence-tts-row">
+        <div id="choice-sentence-container" class="sentence-container fixed-text" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 0;"></div>
+        <button type="button" class="tts-btn" data-tts-target="choice-sentence-container" aria-label="英文を読み上げ">📢</button>
+      </div>
       <div id="choice-buttons-container" class="choices-grid"></div>
     </div>
 
     <!-- 単語学習 N択 UI -->
     <div id="vocab-quiz-ui" style="display:none;">
-      <div class="vocab-word-display" id="vocab-quiz-word"></div>
+      <div class="en-with-tts sentence-tts-row">
+        <div class="vocab-word-display" id="vocab-quiz-word"></div>
+        <button type="button" class="tts-btn" data-tts-target="vocab-quiz-word" aria-label="英単語を読み上げ">📢</button>
+      </div>
       <div class="vocab-pos-hint" id="vocab-quiz-prompt">この単語の意味として正しいものを選んでください。</div>
       <div id="vocab-choice-buttons" class="choices-grid"></div>
     </div>
 
     <!-- タイピング（和文英訳・空所）用 UI -->
     <div id="typing-ui" style="display:none;">
-      <div id="typing-sentence-container" class="sentence-container fixed-text" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;"></div>
+      <div class="en-with-tts sentence-tts-row" id="typing-sentence-tts-row">
+        <div id="typing-sentence-container" class="sentence-container fixed-text" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 0;"></div>
+        <button type="button" class="tts-btn" data-tts-target="typing-sentence-container" aria-label="英文を読み上げ">📢</button>
+      </div>
       <div id="typing-input-display" class="typing-display" style="margin-bottom: 15px;"></div>
       <button id="typing-submit-btn" style="display: none; width: 100%; padding: 15px; font-size: 1.2em; background-color: #4caf50; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px;">これで回答する</button>
     </div>
 
     <!-- 正誤判断指摘訂正用 UI -->
     <div id="correction-ui" style="display:none;">
-      <div id="correction-sentence" class="sentence-container"></div>
+      <div class="en-with-tts correction-tts-row">
+        <div id="correction-sentence" class="sentence-container"></div>
+        <button type="button" class="tts-btn" data-tts-target="correction-sentence" aria-label="英文を読み上げ">📢</button>
+      </div>
       <div id="correction-live-wrap" style="display: none;">
         <div class="area-label correction-live-label">▼ 修正後の英文</div>
-        <div id="correction-live-preview" class="correction-live-preview" aria-live="polite"></div>
+        <div class="en-with-tts">
+          <div id="correction-live-preview" class="correction-live-preview" aria-live="polite"></div>
+          <button type="button" class="tts-btn" data-tts-target="correction-live-preview" aria-label="修正後の英文を読み上げ">📢</button>
+        </div>
       </div>
       <div id="correction-hint" style="margin-bottom: 10px; color: #666; font-size: 0.95em; font-weight: bold;"></div>
 
@@ -633,7 +681,10 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
       </div>
     </div>
 
-    <div id="result-msg"></div>
+    <div class="en-with-tts" style="align-items:center;margin-top:12px;">
+      <div id="result-msg"></div>
+      <button type="button" class="tts-btn" id="result-tts-btn" hidden aria-label="正答の英文を読み上げ">📢</button>
+    </div>
     <div id="question-explanation" style="display: none;"></div>
     <button id="next-btn" class="btn-primary" style="display: none; margin-top: 15px;">次の問題へ進む</button>
   </div>
@@ -740,6 +791,231 @@ const BackendSyncStatus = (() => {
   };
 })();
 window.BackendSyncStatus = BackendSyncStatus;
+
+/** ブラウザ TTS（GitHub Pages 上の HTML だけで動作。サーバー不要） */
+const TtsModule = (() => {
+  const STORAGE_KEY = 'digitaldrill_tts_settings';
+  const DEFAULTS = { locale: 'en-US', gender: 'female' };
+  const FEMALE_HINTS = ['female', 'woman', 'zira', 'aria', 'jenny', 'sonia', 'sara', 'susan', 'samantha', 'victoria', 'karen', 'moira', 'tessa', 'hazel', 'eva', 'linda', 'heather', 'catherine', 'michelle', 'amy', 'emma', 'libby', 'natasha', 'salli', 'ivy', 'joanna', 'kendra', 'kimberly', 'nicole', 'olivia', 'raveena', 'aditi'];
+  const MALE_HINTS = ['male', 'man', 'david', 'guy', 'ryan', 'george', 'daniel', 'mark', 'fred', 'james', 'thomas', 'ravi', 'aaron', 'brian', 'matthew', 'justin', 'joey', 'kevin', 'stephen', 'andrew'];
+  let bound = false;
+
+  function load() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      return {
+        locale: parsed.locale === 'en-GB' ? 'en-GB' : 'en-US',
+        gender: parsed.gender === 'male' ? 'male' : 'female'
+      };
+    } catch (e) {
+      return { locale: DEFAULTS.locale, gender: DEFAULTS.gender };
+    }
+  }
+
+  function save(next) {
+    const data = {
+      locale: next && next.locale === 'en-GB' ? 'en-GB' : 'en-US',
+      gender: next && next.gender === 'male' ? 'male' : 'female'
+    };
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
+    refreshSettingsUi();
+    return data;
+  }
+
+  function supported() {
+    return !!(window.speechSynthesis && window.SpeechSynthesisUtterance);
+  }
+
+  function voices() {
+    if (!supported()) return [];
+    return speechSynthesis.getVoices() || [];
+  }
+
+  function normalizeLang(lang) {
+    return String(lang || '').toLowerCase().replace('_', '-');
+  }
+
+  function genderScore(name, gender) {
+    const n = String(name || '').toLowerCase();
+    if (n === 'google us english' || n.indexOf('google us english') === 0) {
+      return gender === 'female' ? 22 : -8;
+    }
+    if (n.indexOf('google uk english female') !== -1) return gender === 'female' ? 24 : -20;
+    if (n.indexOf('google uk english male') !== -1) return gender === 'male' ? 24 : -20;
+    let female = FEMALE_HINTS.some(function (h) { return n.indexOf(h) !== -1; });
+    let male = MALE_HINTS.some(function (h) { return n.indexOf(h) !== -1; });
+    if (gender === 'female') return female ? 22 : (male ? -18 : 0);
+    return male ? 22 : (female ? -18 : 0);
+  }
+
+  function qualityScore(voice) {
+    const n = String(voice.name || '').toLowerCase();
+    let s = 0;
+    if (n.indexOf('neural') !== -1) s += 42;
+    if (n.indexOf('natural') !== -1) s += 36;
+    if (n.indexOf('online') !== -1) s += 28;
+    if (n.indexOf('google') !== -1) s += 26;
+    if (n.indexOf('premium') !== -1 || n.indexOf('enhanced') !== -1) s += 18;
+    if (voice.localService === false) s += 8;
+    return s;
+  }
+
+  function pickVoice() {
+    const settings = load();
+    const want = normalizeLang(settings.locale);
+    const list = voices().filter(function (v) { return /^en(-|$)/i.test(normalizeLang(v.lang)); });
+    if (!list.length) return null;
+    let best = null;
+    let bestScore = -9999;
+    list.forEach(function (v) {
+      const lang = normalizeLang(v.lang);
+      let score = qualityScore(v) + genderScore(v.name, settings.gender);
+      if (lang === want) score += 55;
+      else if (lang.indexOf(want.slice(0, 2)) === 0) score += 8;
+      if (score > bestScore) {
+        bestScore = score;
+        best = v;
+      }
+    });
+    return best;
+  }
+
+  function normalizeSpeakText(text) {
+    return String(text || '')
+      .replace(/[📢⭕️❌⚠️✅]/g, ' ')
+      .replace(/\(_{2,}\)/g, ', ')
+      .replace(/_{3,}/g, ', ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function textFromElement(el) {
+    if (!el) return '';
+    return normalizeSpeakText(el.innerText || el.textContent || '');
+  }
+
+  function speak(text) {
+    if (!supported()) {
+      alert('このブラウザは音声読み上げに対応していません。');
+      return;
+    }
+    const utterText = normalizeSpeakText(text);
+    if (!utterText) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(utterText);
+    const voice = pickVoice();
+    const settings = load();
+    if (voice) {
+      u.voice = voice;
+      u.lang = voice.lang || settings.locale;
+    } else {
+      u.lang = settings.locale;
+    }
+    u.rate = 0.95;
+    u.pitch = 1;
+    document.querySelectorAll('.tts-btn').forEach(function (b) { b.classList.remove('speaking'); });
+    u.onend = function () {
+      document.querySelectorAll('.tts-btn').forEach(function (b) { b.classList.remove('speaking'); });
+    };
+    speechSynthesis.speak(u);
+  }
+
+  function stop() {
+    if (supported()) speechSynthesis.cancel();
+    document.querySelectorAll('.tts-btn').forEach(function (b) { b.classList.remove('speaking'); });
+  }
+
+  function refreshTargetButtons() {
+    document.querySelectorAll('.tts-btn[data-tts-target]').forEach(function (btn) {
+      const el = document.getElementById(btn.getAttribute('data-tts-target'));
+      const text = textFromElement(el);
+      btn.hidden = !text;
+    });
+  }
+
+  function setResultSpeakText(text) {
+    const btn = document.getElementById('result-tts-btn');
+    if (!btn) return;
+    const cleaned = normalizeSpeakText(text);
+    if (!cleaned) {
+      btn.hidden = true;
+      btn.removeAttribute('data-tts-text');
+      return;
+    }
+    btn.setAttribute('data-tts-text', cleaned);
+    btn.hidden = false;
+  }
+
+  function refreshSettingsUi() {
+    const settings = load();
+    const localeEl = document.getElementById('tts-locale-select');
+    const genderEl = document.getElementById('tts-gender-select');
+    const statusEl = document.getElementById('tts-voice-status');
+    if (localeEl) localeEl.value = settings.locale;
+    if (genderEl) genderEl.value = settings.gender;
+    if (!statusEl) return;
+    if (!supported()) {
+      statusEl.textContent = 'このブラウザは Web Speech API に対応していません。';
+      return;
+    }
+    const voice = pickVoice();
+    if (voice) {
+      statusEl.textContent = '使用する音声: ' + voice.name + '（' + voice.lang + '）';
+    } else {
+      statusEl.textContent = '英語音声が見つかりません。端末の音声設定を確認してください。';
+    }
+  }
+
+  function preview() {
+    const settings = load();
+    speak(settings.locale === 'en-GB'
+      ? 'This is a sample of British English.'
+      : 'This is a sample of American English.');
+  }
+
+  function bindUi() {
+    if (bound) return;
+    bound = true;
+    document.addEventListener('click', function (e) {
+      const btn = e.target.closest('.tts-btn');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      let text = btn.getAttribute('data-tts-text') || '';
+      if (!text) {
+        const targetId = btn.getAttribute('data-tts-target');
+        if (targetId) text = textFromElement(document.getElementById(targetId));
+      }
+      btn.classList.add('speaking');
+      speak(text);
+    });
+    const localeEl = document.getElementById('tts-locale-select');
+    const genderEl = document.getElementById('tts-gender-select');
+    const previewBtn = document.getElementById('tts-preview-btn');
+    if (localeEl) {
+      localeEl.addEventListener('change', function () {
+        save({ locale: localeEl.value, gender: load().gender });
+      });
+    }
+    if (genderEl) {
+      genderEl.addEventListener('change', function () {
+        save({ locale: load().locale, gender: genderEl.value });
+      });
+    }
+    if (previewBtn) previewBtn.addEventListener('click', preview);
+    if (supported()) {
+      speechSynthesis.addEventListener('voiceschanged', refreshSettingsUi);
+      refreshSettingsUi();
+    } else {
+      refreshSettingsUi();
+    }
+  }
+
+  return {
+    load, save, speak, stop, pickVoice, refreshTargetButtons, setResultSpeakText, refreshSettingsUi, bindUi, supported
+  };
+})();
+window.TtsModule = TtsModule;
 
 /** 認証入口 URL（GAS①: ユーザー権限で getActiveUser() が使える） */
 function getAuthLoginUrl_() {
@@ -2138,6 +2414,7 @@ const CorrectionModule = (() => {
     const replacement = inputDisplay.textContent || '';
     finalSentence = computeFinalSentence_(replacement);
     livePreviewEl.textContent = finalSentence;
+    if (window.TtsModule) TtsModule.refreshTargetButtons();
   }
 
   function renderTokens() {
@@ -2874,10 +3151,18 @@ const ReadingSessionModule = (() => {
     }
     const w = words[currentIndex];
     progressEl.textContent = '単語 ' + (currentIndex + 1) + ' / ' + words.length;
+    const wordText = vocabNorm(w['英単語・熟語の表現']);
+    const exampleText = vocabNorm(w['例文']);
     cardEl.innerHTML =
-      '<div class="vocab-word-display">' + vocabNorm(w['英単語・熟語の表現']) + '</div>' +
-      '<p><strong>チャンク:</strong> ' + vocabNorm(w['チャンク']) + '</p>' +
-      '<p><strong>例文:</strong> ' + vocabNorm(w['例文']) + '</p>' +
+      '<div class="en-with-tts">' +
+        '<div class="vocab-word-display">' + escapeHtml_(wordText) + '</div>' +
+        (wordText ? '<button type="button" class="tts-btn" data-tts-text="' + escapeHtml_(wordText) + '" aria-label="英単語を読み上げ">📢</button>' : '') +
+      '</div>' +
+      '<p><strong>チャンク:</strong> ' + escapeHtml_(vocabNorm(w['チャンク'])) + '</p>' +
+      '<div class="en-with-tts" style="align-items:flex-start;margin:8px 0;">' +
+        '<p style="margin:0;flex:1;"><strong>例文:</strong> ' + escapeHtml_(exampleText) + '</p>' +
+        (exampleText ? '<button type="button" class="tts-btn" data-tts-text="' + escapeHtml_(exampleText) + '" aria-label="例文を読み上げ">📢</button>' : '') +
+      '</div>' +
       '<button type="button" class="btn-small" id="reading-next-word-btn">次の単語へ</button>';
     document.getElementById('reading-next-word-btn').onclick = function () {
       currentIndex++;
@@ -3479,6 +3764,7 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
 });
 
 elements.backBtn.addEventListener('click', () => {
+  if (window.TtsModule) TtsModule.stop();
   screens.game.style.display = 'none';
   screens.settings.style.display = 'block';
 });
@@ -3570,6 +3856,20 @@ function loadQuestionToGame(qData) {
   }
   document.getElementById(handler.ui).style.display = 'block';
   handler.module.initGame(qData);
+  const resultTtsBtn = document.getElementById('result-tts-btn');
+  if (resultTtsBtn) {
+    resultTtsBtn.hidden = true;
+    resultTtsBtn.removeAttribute('data-tts-text');
+  }
+  const typingRow = document.getElementById('typing-sentence-tts-row');
+  if (typingRow) {
+    const typingText = (document.getElementById('typing-sentence-container').textContent || '').trim();
+    typingRow.style.display = typingText ? 'flex' : 'none';
+  }
+  if (window.TtsModule) {
+    TtsModule.stop();
+    TtsModule.refreshTargetButtons();
+  }
 }
 
 /** 回答後に解説（ターゲット文法領域つき）を表示する */
@@ -3608,6 +3908,18 @@ function getQuestionPrompt_(q) {
   return q.japanese || q.presentedSentence || q.word || '';
 }
 
+function getTtsEnglish_(q) {
+  if (!q) return '';
+  if (q.format === 'vocab-enja') return q.word || '';
+  if (q.fullSentence) return q.fullSentence;
+  if (q.correctSentence) return q.correctSentence;
+  if (q.presentedSentence) return q.presentedSentence;
+  if (q.mcqPrefix || q.mcqSuffix) {
+    return joinEnglish(q.mcqPrefix, q.mcqAnswer || q.correctText || '', q.mcqSuffix);
+  }
+  return '';
+}
+
 function getDefaultCorrectAnswer_(q) {
   if (!q) return '';
   if (q.format === 'vocab-enja') return q.correctAnswer || '';
@@ -3639,10 +3951,18 @@ function renderResultReviewList_() {
     html += '<div class="result-review-item ' + statusClass + '">';
     html += '<div class="result-review-head"><span class="result-review-no">Q' + (i + 1) + '</span>';
     html += '<span class="result-review-status">' + statusLabel + '</span></div>';
-    html += '<div class="result-review-prompt">' + escapeHtml_(item.prompt) + '</div>';
+    html += '<div class="result-review-prompt">' + escapeHtml_(item.prompt);
+    if (item.format === 'vocab-enja' && item.prompt) {
+      html += ' <button type="button" class="tts-btn" data-tts-text="' + escapeHtml_(String(item.prompt).replace(/（.*?）/g, '')) + '" aria-label="読み上げ">📢</button>';
+    }
+    html += '</div>';
     html += '<div class="result-review-answer"><span class="result-review-label">あなたの回答</span> ' + escapeHtml_(item.userAnswer || '—') + '</div>';
     if (!item.isCorrect) {
-      html += '<div class="result-review-correct"><span class="result-review-label">正答</span> ' + escapeHtml_(item.correctAnswer || '—') + '</div>';
+      html += '<div class="result-review-correct"><span class="result-review-label">正答</span> ' + escapeHtml_(item.correctAnswer || '—');
+      if (item.correctAnswer && /[A-Za-z]/.test(item.correctAnswer)) {
+        html += ' <button type="button" class="tts-btn" data-tts-text="' + escapeHtml_(item.correctAnswer) + '" aria-label="正答を読み上げ">📢</button>';
+      }
+      html += '</div>';
     }
     if (item.grammarArea || item.explanation) {
       html += '<div class="result-review-explanation">';
@@ -3713,6 +4033,7 @@ window.onQuestionCompleted = (isCorrect, meta) => {
   }
   if (isCorrect) currentScore++;
 
+  if (window.TtsModule) TtsModule.setResultSpeakText(getTtsEnglish_(currentQ));
   document.getElementById('next-btn').style.display = 'block';
 };
 
@@ -3824,6 +4145,7 @@ function getResultSavedMessage_() {
 }
 
 function showResultScreen() {
+  if (window.TtsModule) TtsModule.stop();
   screens.game.style.display = 'none';
   const resultScreen = document.getElementById('result-screen');
   resultScreen.style.display = 'block';
@@ -3941,8 +4263,11 @@ function initModeTabs() {
       document.getElementById('manage-sets-panel').style.display = name === 'sets' ? 'block' : 'none';
       document.getElementById('manage-register-panel').style.display = name === 'register' ? 'block' : 'none';
       document.getElementById('manage-logs-panel').style.display = name === 'logs' ? 'block' : 'none';
+      const settingsPanel = document.getElementById('manage-settings-panel');
+      if (settingsPanel) settingsPanel.style.display = name === 'settings' ? 'block' : 'none';
       if (name === 'register' && window.VocabRegisterModule) window.VocabRegisterModule.init();
       if (name === 'logs') fetchUserLogs();
+      if (name === 'settings' && window.TtsModule) TtsModule.refreshSettingsUi();
     });
   });
 
@@ -4347,6 +4672,7 @@ function renderMyPage(logs) {
 // ログアウト機能
 document.addEventListener('DOMContentLoaded', () => {
   bindLoginScreen_();
+  if (window.TtsModule) TtsModule.bindUi();
   const logoutBtn = document.getElementById('logout-btn');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', async () => {
