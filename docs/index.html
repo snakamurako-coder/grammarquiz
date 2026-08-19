@@ -65,8 +65,9 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .format-follow-options > label { margin-bottom: 6px; }
 .format-follow-options .check-list { margin-top: 8px; }
 .unit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.unit-card { border: 1px solid #cfd8dc; min-height: var(--tap); padding: 10px 12px; border-radius: 10px; cursor: pointer; background-color: #fff; display: flex; align-items: center; gap: 8px; font-size: 0.95em; word-break: break-word; }
+.unit-card { border: 1px solid #cfd8dc; min-height: var(--tap); padding: 10px 12px; border-radius: 10px; cursor: pointer; background-color: #fff; display: flex; align-items: center; gap: 8px; font-size: 0.95em; word-break: break-word; text-align: left; font-family: inherit; width: 100%; color: inherit; }
 .unit-card.selected { background-color: #e3f2fd; border-color: var(--c-primary); font-weight: bold; }
+.filter-axis-hint { font-size: 0.82em; color: var(--c-text-sub); margin: 0 0 12px; line-height: 1.45; }
 .btn-primary { width: 100%; min-height: 54px; padding: 14px; font-size: 1.15em; font-weight: bold; background-color: var(--c-primary); color: white; border: none; border-radius: 10px; cursor: pointer; }
 #result-review-list { text-align: left; max-height: 55vh; overflow-y: auto; margin-bottom: 16px; }
 .result-review-item { border-radius: 10px; padding: 12px; margin-bottom: 10px; border-left: 4px solid #ccc; background: #fafafa; }
@@ -400,7 +401,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
     
     <div id="grammar-settings-panel">
     <div class="setting-section">
-      <div class="section-title">1. 学年・科目</div>
+      <div class="section-title">1. 学年・区分</div>
       <div class="form-group">
         <select id="subject-select">
           <option value="">読み込み中...</option>
@@ -408,11 +409,12 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
       </div>
     </div>
     <div class="setting-section">
-      <div class="section-title">2. 単元を選択</div>
+      <div class="section-title">2. 教材</div>
       <div class="unit-grid" id="unit-container"></div>
     </div>
     <div class="setting-section">
-      <div class="section-title">3. 大単元・小単元で絞り込み（任意）</div>
+      <div class="section-title">3. 絞り込み</div>
+      <p class="filter-axis-hint">シート内の各見出し列の値で絞り込みます。大単元・小単元・ターゲット文法領域は包括関係ではなく、チェックした条件をすべて満たす問題（AND）が残ります。同じ軸で複数チェックした場合はその軸ではいずれかに一致。未チェックの軸は絞り込みなしです。</p>
       <div class="form-group">
         <label>大単元</label>
         <div class="division-grid" id="grammar-dai-container"></div>
@@ -420,6 +422,10 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
       <div class="form-group">
         <label>小単元</label>
         <div class="division-grid" id="grammar-sho-container"></div>
+      </div>
+      <div class="form-group">
+        <label>ターゲット文法領域</label>
+        <div class="division-grid" id="grammar-area-container"></div>
       </div>
       <div id="grammar-division-note" style="font-size:0.85em;color:#666;"></div>
     </div>
@@ -3872,9 +3878,11 @@ function getSelectedSubjectName() {
 // grammarSettings.js
 // 単元選択・大単元/小単元フィルタ・出題形式の選択を管理する
 const GrammarSettingsModule = (() => {
+  const SETTINGS_KEY = 'dd_grammar_filter_settings';
   const unitContainer = document.getElementById('unit-container');
   const daiContainer = document.getElementById('grammar-dai-container');
   const shoContainer = document.getElementById('grammar-sho-container');
+  const areaContainer = document.getElementById('grammar-area-container');
   const note = document.getElementById('grammar-division-note');
   const formatList = document.getElementById('format-check-list');
   const eOptions = document.getElementById('format-e-options');
@@ -3884,17 +3892,59 @@ const GrammarSettingsModule = (() => {
   let loadedKey = '';
   let grammarCatalog = {};
 
+  function emptyBookState() {
+    return { units: null, dai: [], sho: [], area: [] };
+  }
+
+  function readSettings() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (!parsed || typeof parsed !== 'object') return { subject: '', books: {} };
+      if (!parsed.books || typeof parsed.books !== 'object') parsed.books = {};
+      return parsed;
+    } catch (e) {
+      return { subject: '', books: {} };
+    }
+  }
+
+  function writeSettings(next) {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch (e) {}
+  }
+
+  function bookState(subject) {
+    const all = readSettings();
+    return (subject && all.books[subject]) ? all.books[subject] : emptyBookState();
+  }
+
+  function persistCurrent() {
+    const subject = getSelectedSubjectName();
+    if (!subject) return;
+    const all = readSettings();
+    all.subject = subject;
+    all.books[subject] = {
+      units: getSelectedUnits(),
+      dai: selectedDivisions(daiContainer),
+      sho: selectedDivisions(shoContainer),
+      area: selectedDivisions(areaContainer)
+    };
+    writeSettings(all);
+  }
+
   function selectionKey() {
     return getSelectedSubjectName() + '|' + getSelectedUnits().join(',');
   }
 
   function getSelectedUnits() {
-    return Array.from(unitContainer.querySelectorAll('input:checked')).map(el => el.value);
+    return Array.from(unitContainer.querySelectorAll('.unit-card.selected')).map(function (el) {
+      return el.dataset.unit;
+    }).filter(Boolean);
   }
 
   function renderSubjects() {
     const select = elements.subject;
-    const prev = select.value;
+    const saved = readSettings();
+    const prev = saved.subject || select.value;
     select.innerHTML = '';
     const names = Object.keys(grammarCatalog).sort(function (a, b) {
       return a.localeCompare(b, 'ja');
@@ -3915,25 +3965,31 @@ const GrammarSettingsModule = (() => {
     });
   }
 
+  function setUnitSelected(btn, selected) {
+    btn.classList.toggle('selected', selected);
+    btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  }
+
   function renderUnits() {
     unitContainer.innerHTML = '';
     const subject = getSelectedSubjectName();
     const units = grammarCatalog[subject] || [];
+    const savedUnits = bookState(subject).units;
+    const useSaved = Array.isArray(savedUnits) && savedUnits.some(function (u) { return units.indexOf(u) >= 0; });
     units.forEach(function (unit) {
-      const lbl = document.createElement('label');
-      lbl.className = 'unit-card selected';
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.value = unit;
-      input.checked = true;
-      input.style.display = 'none';
-      input.addEventListener('change', function (e) {
-        lbl.classList.toggle('selected', e.target.checked);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'unit-card';
+      btn.dataset.unit = unit;
+      btn.textContent = unit;
+      const selected = useSaved ? savedUnits.indexOf(unit) >= 0 : true;
+      setUnitSelected(btn, selected);
+      btn.addEventListener('click', function () {
+        setUnitSelected(btn, !btn.classList.contains('selected'));
+        persistCurrent();
         refreshDivisions();
       });
-      lbl.appendChild(input);
-      lbl.appendChild(document.createTextNode(' ' + unit));
-      unitContainer.appendChild(lbl);
+      unitContainer.appendChild(btn);
     });
   }
 
@@ -3991,15 +4047,20 @@ const GrammarSettingsModule = (() => {
     });
   }
 
-  function renderDivisionChecks(container, items) {
+  function renderDivisionChecks(container, items, savedChecked) {
     container.innerHTML = '';
-    items.forEach(item => {
+    const saved = savedChecked || [];
+    items.forEach(function (item) {
       const lbl = document.createElement('label');
       lbl.className = 'check-item';
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.value = item;
-      input.checked = false;
+      input.checked = saved.indexOf(item) >= 0;
+      input.addEventListener('change', function () {
+        persistCurrent();
+        updateFilterNote();
+      });
       const span = document.createElement('span');
       span.textContent = item;
       lbl.appendChild(input);
@@ -4008,8 +4069,9 @@ const GrammarSettingsModule = (() => {
     });
   }
 
-  /** チェックした項目だけで絞り込む。未選択＝絞り込みなし */
+  /** チェックした項目だけで絞り込む。未選択＝その軸は絞り込みなし */
   function selectedDivisions(container) {
+    if (!container) return [];
     return Array.from(container.querySelectorAll('input:checked')).map(el => el.value);
   }
 
@@ -4024,29 +4086,57 @@ const GrammarSettingsModule = (() => {
     loadedKey = '';
     daiContainer.innerHTML = '';
     shoContainer.innerHTML = '';
+    if (areaContainer) areaContainer.innerHTML = '';
+  }
+
+  function matchesAxis_(value, selected) {
+    if (!selected || selected.length === 0) return true;
+    return selected.indexOf(value) !== -1;
+  }
+
+  function getFilteredRows() {
+    const dai = selectedDivisions(daiContainer);
+    const sho = selectedDivisions(shoContainer);
+    const area = selectedDivisions(areaContainer);
+    return rows.filter(function (r) {
+      return matchesAxis_(r.daiUnit, dai)
+        && matchesAxis_(r.shoUnit, sho)
+        && matchesAxis_(r.grammarArea, area);
+    });
+  }
+
+  function updateFilterNote() {
+    if (!rows.length) return;
+    const filtered = getFilteredRows();
+    const broken = rows.filter(r => (r.warnings || []).length > 0);
+    note.textContent = '読み込み ' + rows.length + '件 ／ 絞り込み後 ' + filtered.length + '件（3軸は AND。未チェックの軸は指定なし）'
+      + (broken.length ? ' ⚠️ 英文全文と組み立て結果が一致しないデータ ' + broken.length + '件（通し番号: ' + broken.map(r => r.id).join(', ') + '）' : '');
   }
 
   async function loadRows(forceRefresh) {
     const key = selectionKey();
     const loaded = await fetchGrammarRows(getSelectedSubjectName(), getSelectedUnits().join(','), forceRefresh);
-    if (key !== selectionKey()) return; // 読み込み中に選択が変わっていたら破棄
+    if (key !== selectionKey()) return;
     rows = loaded;
     loadedKey = key;
-    renderDivisionChecks(daiContainer, uniqueValues(rows, 'daiUnit'));
-    renderDivisionChecks(shoContainer, uniqueValues(rows, 'shoUnit'));
-    const broken = rows.filter(r => (r.warnings || []).length > 0);
-    note.textContent = `${rows.length}件のデータを読み込みました。（大単元・小単元は未選択＝絞り込みなし）`
-      + (broken.length ? ` ⚠️ 英文全文と組み立て結果が一致しないデータ ${broken.length}件（通し番号: ${broken.map(r => r.id).join(', ')}）` : '');
+    const saved = bookState(getSelectedSubjectName());
+    renderDivisionChecks(daiContainer, uniqueValues(rows, 'daiUnit'), saved.dai);
+    renderDivisionChecks(shoContainer, uniqueValues(rows, 'shoUnit'), saved.sho);
+    if (areaContainer) {
+      renderDivisionChecks(areaContainer, uniqueValues(rows, 'grammarArea'), saved.area);
+    }
+    persistCurrent();
+    updateFilterNote();
   }
 
   async function refreshDivisions() {
     resetRows();
     if (!getSelectedSubjectName()) {
-      note.textContent = 'grammarquizzes フォルダに学習セット（Googleスプレッドシート）を置いてください。';
+      note.textContent = 'grammarquizzes フォルダに学習セット（Googleスプレッドシート／Pages の JSON）を置いてください。';
       return;
     }
     if (getSelectedUnits().length === 0) {
-      note.textContent = '単元を1つ以上選択してください。';
+      note.textContent = '教材を1つ以上選択してください。';
       return;
     }
     note.textContent = 'データを読み込み中...';
@@ -4066,21 +4156,12 @@ const GrammarSettingsModule = (() => {
   async function prepareForStart() {
     resetRows();
     if (getSelectedUnits().length === 0) {
-      throw new Error('単元を1つ以上選択してください。');
+      throw new Error('教材を1つ以上選択してください。');
     }
     await loadRows(false);
     if (rows.length === 0) {
       throw new Error('問題データが0件です。キャッシュ更新後に再度お試しください。');
     }
-  }
-
-  function getFilteredRows() {
-    const dai = selectedDivisions(daiContainer);
-    const sho = selectedDivisions(shoContainer);
-    return rows.filter(r =>
-      (dai.length === 0 || dai.indexOf(r.daiUnit) !== -1) &&
-      (sho.length === 0 || sho.indexOf(r.shoUnit) !== -1)
-    );
   }
 
   function getQuizOptions() {
@@ -4102,6 +4183,9 @@ const GrammarSettingsModule = (() => {
   }
 
   elements.subject.addEventListener('change', () => {
+    const all = readSettings();
+    all.subject = getSelectedSubjectName();
+    writeSettings(all);
     renderUnits();
     refreshDivisions();
   });
@@ -4115,7 +4199,7 @@ elements.startBtn.addEventListener('click', async () => {
   currentAppMode = 'grammar';
 
   if (GrammarSettingsModule.getSelectedUnits().length === 0) {
-    alert("単元を1つ以上選択してください。");
+    alert("教材を1つ以上選択してください。");
     return;
   }
 
@@ -4147,7 +4231,7 @@ elements.startBtn.addEventListener('click', async () => {
 
     const generated = GrammarQuizGenerator.buildQuestions(rows, options);
     if (generated.length === 0) {
-      alert("選択した出題形式で生成できる問題がありません。形式の選択か大単元・小単元の絞り込みを見直してください。");
+      alert("選択した出題形式で生成できる問題がありません。形式の選択か絞り込みを見直してください。");
       return;
     }
     const questions = AlgorithmModule.buildQuestionSet(generated, mode);
@@ -4166,7 +4250,7 @@ elements.startBtn.addEventListener('click', async () => {
       document.getElementById('result-screen').style.display = 'none';
       screens.game.style.display = 'block';
     } else {
-      alert("選択した条件で出題できる問題がありません。単元・絞り込み・出題形式を確認してください。");
+      alert("選択した条件で出題できる問題がありません。教材・絞り込み・出題形式を確認してください。");
     }
   } catch (error) {
     console.error(error);
