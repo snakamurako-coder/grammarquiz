@@ -57,8 +57,19 @@ button:active { opacity: 0.9; }
 .section-title { font-size: 1.05em; font-weight: bold; color: #455a64; margin-bottom: 12px; border-bottom: 2px solid #eceff1; padding-bottom: 6px; }
 .register-manual-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid #eceff1; padding-bottom: 6px; }
 .register-manual-header .section-title { margin-bottom: 0; border-bottom: none; padding-bottom: 0; flex: 1; min-width: 0; }
-.register-mode-tabs { display: flex; gap: 6px; flex-shrink: 0; }
-.register-mode-tabs .mode-tab { flex: none; min-width: 0; min-height: 36px; padding: 6px 10px; font-size: 0.82em; }
+#register-mode-toggle {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 0.82em;
+  font-weight: bold;
+  background: #fff;
+  color: var(--c-primary-dark);
+  border: 2px solid var(--c-primary);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
 .form-group { margin-bottom: 15px; }
 label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; color: var(--c-text-sub); }
 select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; background-color: #f9f9f9; color: inherit; }
@@ -624,10 +635,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
         <div class="setting-section">
           <div class="register-manual-header">
             <div class="section-title">手動入力</div>
-            <div class="mode-tabs register-mode-tabs">
-              <button type="button" class="mode-tab active" id="register-mode-simple" data-register-mode="simple">簡易登録</button>
-              <button type="button" class="mode-tab" id="register-mode-detail" data-register-mode="detail">詳細登録</button>
-            </div>
+            <button type="button" id="register-mode-toggle" aria-pressed="false">簡易登録 ⇔ 詳細登録</button>
           </div>
           <div id="register-simple-panel">
             <div class="form-group">
@@ -3397,12 +3405,13 @@ const VocabRegisterModule = (() => {
     registerMode = mode === 'detail' ? 'detail' : 'simple';
     const simplePanel = document.getElementById('register-simple-panel');
     const detailPanel = document.getElementById('register-detail-panel');
-    const simpleTab = document.getElementById('register-mode-simple');
-    const detailTab = document.getElementById('register-mode-detail');
+    const toggle = document.getElementById('register-mode-toggle');
     if (simplePanel) simplePanel.style.display = registerMode === 'simple' ? 'block' : 'none';
     if (detailPanel) detailPanel.style.display = registerMode === 'detail' ? 'block' : 'none';
-    if (simpleTab) simpleTab.classList.toggle('active', registerMode === 'simple');
-    if (detailTab) detailTab.classList.toggle('active', registerMode === 'detail');
+    if (toggle) {
+      toggle.setAttribute('aria-pressed', registerMode === 'detail' ? 'true' : 'false');
+      toggle.textContent = registerMode === 'simple' ? '簡易登録 ⇔ 詳細登録' : '詳細登録 ⇔ 簡易登録';
+    }
   }
 
   function usedPosKeys(exceptIndex) {
@@ -3603,8 +3612,9 @@ const VocabRegisterModule = (() => {
     setRegisterMode('simple');
     renderSimpleMeanings();
 
-    document.getElementById('register-mode-simple').addEventListener('click', function () { setRegisterMode('simple'); });
-    document.getElementById('register-mode-detail').addEventListener('click', function () { setRegisterMode('detail'); });
+    document.getElementById('register-mode-toggle').addEventListener('click', function () {
+      setRegisterMode(registerMode === 'simple' ? 'detail' : 'simple');
+    });
 
     const wordEl = document.getElementById('register-simple-word');
     if (wordEl) {
