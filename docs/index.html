@@ -55,6 +55,10 @@ button:active { opacity: 0.9; }
 .backend-sync-status.busy { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
 .setting-section { background: #fff; padding: 16px; border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 16px; }
 .section-title { font-size: 1.05em; font-weight: bold; color: #455a64; margin-bottom: 12px; border-bottom: 2px solid #eceff1; padding-bottom: 6px; }
+.register-manual-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid #eceff1; padding-bottom: 6px; }
+.register-manual-header .section-title { margin-bottom: 0; border-bottom: none; padding-bottom: 0; flex: 1; min-width: 0; }
+.register-mode-tabs { display: flex; gap: 6px; flex-shrink: 0; }
+.register-mode-tabs .mode-tab { flex: none; min-width: 0; min-height: 36px; padding: 6px 10px; font-size: 0.82em; }
 .form-group { margin-bottom: 15px; }
 label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; color: var(--c-text-sub); }
 select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; background-color: #f9f9f9; color: inherit; }
@@ -100,9 +104,21 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .vocab-form-grid input, .vocab-form-grid textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; font-family: inherit; }
 .vocab-form-grid textarea { min-height: 60px; resize: vertical; }
 .simple-meaning-row { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
-.simple-meaning-row input { flex: 1; min-width: 0; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; font-family: inherit; }
-.simple-meaning-row select { flex: 0 0 42%; max-width: 180px; }
+.simple-meaning-row input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; font-family: inherit; min-height: var(--tap); box-sizing: border-box; }
+.simple-meaning-row select { flex: 0 0 42%; max-width: 180px; min-height: var(--tap); }
 .simple-meaning-remove { flex-shrink: 0; min-width: 40px; padding: 0 8px; }
+#register-sheet-name,
+#register-simple-word {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--tap);
+  padding: 10px 12px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 16px;
+  font-family: inherit;
+}
 .vocab-preview-table { width: 100%; border-collapse: collapse; font-size: 0.75em; margin-top: 10px; }
 .vocab-preview-table th, .vocab-preview-table td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; word-break: break-word; }
 .vocab-preview-table th { background: #f5f5f5; }
@@ -606,10 +622,12 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
           <div id="register-msg" style="margin-top:4px;font-weight:bold;"></div>
         </div>
         <div class="setting-section">
-          <div class="section-title">手動入力</div>
-          <div class="mode-tabs" style="margin-bottom:12px;">
-            <button type="button" class="mode-tab active" id="register-mode-simple" data-register-mode="simple">簡易登録</button>
-            <button type="button" class="mode-tab" id="register-mode-detail" data-register-mode="detail">詳細登録</button>
+          <div class="register-manual-header">
+            <div class="section-title">手動入力</div>
+            <div class="mode-tabs register-mode-tabs">
+              <button type="button" class="mode-tab active" id="register-mode-simple" data-register-mode="simple">簡易登録</button>
+              <button type="button" class="mode-tab" id="register-mode-detail" data-register-mode="detail">詳細登録</button>
+            </div>
           </div>
           <div id="register-simple-panel">
             <div class="form-group">
