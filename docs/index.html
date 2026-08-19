@@ -186,16 +186,40 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 /* 不足語入力エリア */
 #missing-word-input-area { background: #fff; padding: 12px; border-radius: 10px; border: 2px solid var(--c-warn); margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .input-label { font-weight: bold; color: var(--c-warn); flex-shrink: 0; }
-#missing-word-display { flex: 1 1 120px; padding: 10px 12px; font-size: 1.15em; border: 2px solid #ccc; border-radius: 8px; background-color: #f9f9f9; min-height: var(--tap); display: flex; align-items: center; cursor: pointer; }
+#missing-word-display { flex: 1 1 120px; padding: 10px 12px; font-size: 1.15em; border: 2px solid #ccc; border-radius: 8px; background-color: #f9f9f9; min-height: var(--tap); display: flex; align-items: center; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 #create-card-btn { min-height: var(--tap); padding: 10px 16px; background-color: var(--c-warn); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
 #create-card-btn:disabled { background-color: #ccc; cursor: not-allowed; }
+.kb-input-display {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-touch-callout: none !important;
+  flex-wrap: wrap;
+  align-items: center;
+  line-height: 1.4;
+}
+.kb-ch { white-space: pre; }
+.kb-caret {
+  display: inline-block;
+  min-width: 0.65em;
+  color: #1565c0;
+  font-weight: bold;
+  pointer-events: none;
+  animation: kb-caret-blink 1s step-end infinite;
+}
+.kb-caret::before { content: '_'; }
+@keyframes kb-caret-blink {
+  50% { opacity: 0; }
+}
 
 /* ソフトウェアキーボード */
-#keyboard-container { position: fixed; bottom: 0; left: 0; width: 100%; background-color: #d2d6da; padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); box-shadow: 0 -2px 10px rgba(0,0,0,0.15); z-index: 1000; display: none; user-select: none; touch-action: manipulation; }
+#keyboard-container { position: fixed; bottom: 0; left: 0; width: 100%; background-color: #d2d6da; padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); box-shadow: 0 -2px 10px rgba(0,0,0,0.15); z-index: 1000; display: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+#keyboard-container, #keyboard-container * { user-select: none !important; -webkit-user-select: none !important; -webkit-touch-callout: none !important; -webkit-user-drag: none; }
 .keyboard-row { display: flex; justify-content: center; gap: 5px; margin-bottom: 6px; padding: 0 6px; max-width: 640px; margin-left: auto; margin-right: auto; }
-.key { background-color: #fff; border: none; border-radius: 6px; height: 48px; flex-grow: 1; max-width: 48px; font-size: 1.15em; color: #000; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 1px 0 rgba(0,0,0,0.2); touch-action: manipulation; transition: background-color 0.1s; }
+.key { background-color: #fff; border: none; border-radius: 6px; height: 48px; flex-grow: 1; max-width: 48px; font-size: 1.15em; color: #000; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 1px 0 rgba(0,0,0,0.2); touch-action: manipulation; transition: background-color 0.1s; user-select: none; -webkit-user-select: none; }
+.key .key-label { pointer-events: none; user-select: none; }
 .key:active { background-color: #adb5bd; }
 .key.wide { max-width: 74px; font-size: 0.9em; background-color: #adb5bd; }
+.key.del { max-width: 52px; font-size: 0.78em; font-weight: bold; background-color: #eceff1; }
 .key.space { max-width: 260px; }
 .key.enter { max-width: 110px; background-color: var(--c-warn); color: white; font-weight: bold; }
 .key.activated { background-color: #333 !important; color: #fff; }
@@ -267,7 +291,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .correction-confirm-inline { width: auto !important; min-height: 44px; padding: 10px 14px; font-size: 0.92em; background-color: var(--c-success); color: white; border: none; border-radius: 8px; cursor: pointer; white-space: nowrap; }
 .correction-live-preview { background: #f5f5f5; border: 1px solid #cfd8dc; border-radius: 10px; padding: 14px; font-size: clamp(1.05em, 4vw, 1.2em); word-break: break-word; text-align: left; min-height: 48px; }
 .correction-live-label { margin: 8px 0 6px; text-align: left; }
-.correction-input-display, .typing-display { min-height: 40px; padding: 10px; border: 2px solid #ccc; border-radius: 4px; background-color: #fff; cursor: text; font-size: 1.2em; text-align: left; }
+.correction-input-display, .typing-display { min-height: 40px; padding: 10px; border: 2px solid #ccc; border-radius: 4px; background-color: #fff; cursor: text; font-size: 1.2em; text-align: left; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .correction-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 #correction-preview-sentence { background: #e8f5e9; border: 2px solid #a5d6a7; border-radius: 10px; padding: 14px; font-size: clamp(1.1em, 4vw, 1.25em); font-weight: bold; word-break: break-word; }
 #correction-input-display { min-height: var(--tap) !important; display: flex; align-items: center; }
@@ -1881,71 +1905,146 @@ window.SrsModule = SrsModule;
 
 const KeyboardModule = (() => {
   const kbContainer = document.getElementById('keyboard-container');
-  
-  let currentInput = "";
+  const LONG_PRESS_MS = 450;
+  const DEL_REPEAT_DELAY_MS = 400;
+  const DEL_REPEAT_MS = 60;
+  const END_TAP_SLACK_PX = 22;
+
+  let currentInput = '';
+  let caretIndex = 0;
   let shiftState = 0;
   let lastShiftClickTime = 0;
   let displayElement = null;
   let onEnterCallback = null;
   let onUpdateCallback = null;
   let captureEnabled = false;
+  let displayAbort = null;
+  let delDelayTimer = null;
+  let delRepeatTimer = null;
 
   const keyLayout = {
     normal: [
-      ["!", "\"", ",", ".", "&", "'", "(", ")", "-", "¥"],
-      ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
-      ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
-      ["Shift", "z", "x", "c", "v", "b", "n", "m", "Back"],
-      ["Space", "Enter"]
+      ['!', '"', '&', "'", '(', ')', '-', '¥', 'Back'],
+      ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+      ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+      ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.'],
+      ['Shift', 'Space', 'Enter']
     ],
     shifted: [
-      ["!", "\"", ",", ".", "&", "'", "(", ")", "-", "¥"],
-      ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
-      ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
-      ["Shift", "Z", "X", "C", "V", "B", "N", "M", "Back"],
-      ["Space", "Enter"]
+      ['!', '"', '&', "'", '(', ')', '-', '¥', 'Back'],
+      ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+      ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
+      ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.'],
+      ['Shift', 'Space', 'Enter']
     ]
   };
 
+  function clampCaret() {
+    caretIndex = Math.max(0, Math.min(currentInput.length, caretIndex));
+  }
+
+  function insertText(str) {
+    currentInput = currentInput.slice(0, caretIndex) + str + currentInput.slice(caretIndex);
+    caretIndex += str.length;
+  }
+
+  function deleteBackward() {
+    if (caretIndex <= 0) return false;
+    currentInput = currentInput.slice(0, caretIndex - 1) + currentInput.slice(caretIndex);
+    caretIndex -= 1;
+    return true;
+  }
+
+  function stopDelRepeat() {
+    if (delDelayTimer) {
+      clearTimeout(delDelayTimer);
+      delDelayTimer = null;
+    }
+    if (delRepeatTimer) {
+      clearInterval(delRepeatTimer);
+      delRepeatTimer = null;
+    }
+  }
+
+  function startDelRepeat() {
+    stopDelRepeat();
+    delDelayTimer = setTimeout(function () {
+      delRepeatTimer = setInterval(function () {
+        if (!deleteBackward()) {
+          stopDelRepeat();
+          return;
+        }
+        updateInputDisplay();
+      }, DEL_REPEAT_MS);
+    }, DEL_REPEAT_DELAY_MS);
+  }
+
+  function keyLabel(key) {
+    if (key === 'Back') return 'Del';
+    if (key === 'Space') return '空白';
+    return key;
+  }
+
   function init(targetElement, initialText, enterCallback, updateCallback) {
+    stopDelRepeat();
     displayElement = targetElement;
-    currentInput = initialText || "";
+    currentInput = initialText || '';
+    caretIndex = currentInput.length;
     onEnterCallback = enterCallback;
     onUpdateCallback = updateCallback;
     captureEnabled = true;
+    bindDisplayCaret(displayElement);
     updateInputDisplay();
     renderKeyboard();
   }
 
   function renderKeyboard() {
-    kbContainer.innerHTML = ''; 
+    kbContainer.innerHTML = '';
     const rows = (shiftState > 0) ? keyLayout.shifted : keyLayout.normal;
 
-    rows.forEach((row) => {
+    rows.forEach(function (row) {
       const rowDiv = document.createElement('div');
       rowDiv.className = 'keyboard-row';
-      
-      row.forEach(key => {
-        const keyBtn = document.createElement('button');
-        keyBtn.className = 'key';
-        
-        if (key === "Back") keyBtn.textContent = "⌫";
-        else if (key === "Space") keyBtn.textContent = "空白"; 
-        else keyBtn.textContent = key;
 
-        if (key === "Shift") {
+      row.forEach(function (key) {
+        const keyBtn = document.createElement('button');
+        keyBtn.type = 'button';
+        keyBtn.className = 'key';
+        keyBtn.tabIndex = -1;
+
+        const label = document.createElement('span');
+        label.className = 'key-label';
+        if (key === 'Shift' && shiftState === 2) {
+          label.innerHTML = '⬆️<span style="font-size:0.6em">LOCK</span>';
+        } else {
+          label.textContent = keyLabel(key);
+        }
+        keyBtn.appendChild(label);
+
+        if (key === 'Shift') {
           keyBtn.classList.add('wide');
           if (shiftState === 1) keyBtn.classList.add('activated');
-          if (shiftState === 2) keyBtn.innerHTML = '⬆️<span style="font-size:0.6em">LOCK</span>';
         }
-        if (key === "Back") keyBtn.classList.add('wide');
-        if (key === "Space") keyBtn.classList.add('space');
-        if (key === "Enter") keyBtn.classList.add('enter');
+        if (key === 'Back') keyBtn.classList.add('del');
+        if (key === 'Space') keyBtn.classList.add('space');
+        if (key === 'Enter') keyBtn.classList.add('enter');
 
-        keyBtn.addEventListener('pointerdown', (e) => {
-          e.preventDefault(); 
-          handleKeyPress(key);
+        keyBtn.addEventListener('pointerdown', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (keyBtn.setPointerCapture) {
+            try { keyBtn.setPointerCapture(e.pointerId); } catch (err) {}
+          }
+          if (key === 'Back') {
+            handleKeyPress('Back');
+            startDelRepeat();
+          } else {
+            handleKeyPress(key);
+          }
         });
+        keyBtn.addEventListener('pointerup', stopDelRepeat);
+        keyBtn.addEventListener('pointercancel', stopDelRepeat);
+        keyBtn.addEventListener('lostpointercapture', stopDelRepeat);
 
         rowDiv.appendChild(keyBtn);
       });
@@ -1954,35 +2053,153 @@ const KeyboardModule = (() => {
   }
 
   function handleKeyPress(key) {
-    if (key === "Shift") {
+    let relayout = false;
+    if (key === 'Shift') {
       handleShiftLogic();
-    } else if (key === "Back") {
-      currentInput = currentInput.slice(0, -1);
-    } else if (key === "Space") {
-      currentInput += " ";
-    } else if (key === "Enter") {
+      relayout = true;
+    } else if (key === 'Back') {
+      deleteBackward();
+    } else if (key === 'Space') {
+      insertText(' ');
+      if (shiftState === 1) {
+        shiftState = 0;
+        relayout = true;
+      }
+    } else if (key === 'Enter') {
       if (typeof window.tryAdvanceToNextQuestion_ === 'function' && window.tryAdvanceToNextQuestion_()) {
         return;
       }
-      if (onEnterCallback) {
-        onEnterCallback(currentInput);
-      }
+      if (onEnterCallback) onEnterCallback(currentInput);
       return;
     } else {
-      currentInput += key;
-      if (shiftState === 1) shiftState = 0;
+      insertText(key);
+      if (shiftState === 1) {
+        shiftState = 0;
+        relayout = true;
+      }
     }
     updateInputDisplay();
-    renderKeyboard(); 
+    if (relayout) renderKeyboard();
+  }
+
+  function appendCharSpan(ch, index) {
+    const s = document.createElement('span');
+    s.className = 'kb-ch';
+    s.dataset.i = String(index);
+    s.textContent = ch === ' ' ? '\u00a0' : ch;
+    displayElement.appendChild(s);
   }
 
   function updateInputDisplay() {
+    clampCaret();
     if (displayElement) {
-      displayElement.textContent = currentInput;
+      displayElement.classList.add('kb-input-display');
+      displayElement.setAttribute('data-kb-value', currentInput);
+      displayElement.innerHTML = '';
+      const before = currentInput.slice(0, caretIndex);
+      const after = currentInput.slice(caretIndex);
+      for (let i = 0; i < before.length; i++) appendCharSpan(before.charAt(i), i);
+      const caret = document.createElement('span');
+      caret.className = 'kb-caret';
+      caret.setAttribute('aria-hidden', 'true');
+      displayElement.appendChild(caret);
+      for (let i = 0; i < after.length; i++) appendCharSpan(after.charAt(i), caretIndex + i);
     }
-    if (onUpdateCallback) {
-      onUpdateCallback(currentInput);
+    if (onUpdateCallback) onUpdateCallback(currentInput);
+  }
+
+  function caretIndexFromPoint(clientX, clientY) {
+    if (!displayElement) return currentInput.length;
+    const chars = displayElement.querySelectorAll('.kb-ch');
+    if (!chars.length) return 0;
+    let best = currentInput.length;
+    let bestDist = Infinity;
+    for (let i = 0; i < chars.length; i++) {
+      const r = chars[i].getBoundingClientRect();
+      const midX = r.left + r.width / 2;
+      const midY = r.top + r.height / 2;
+      const idx = clientX < midX ? i : i + 1;
+      const d = Math.hypot(clientX - midX, clientY - midY);
+      if (d < bestDist) {
+        bestDist = d;
+        best = idx;
+      }
     }
+    return Math.max(0, Math.min(currentInput.length, best));
+  }
+
+  function isPointNearTextEnd(clientX, clientY) {
+    if (!displayElement) return true;
+    const chars = displayElement.querySelectorAll('.kb-ch');
+    if (!chars.length) return true;
+    const last = chars[chars.length - 1].getBoundingClientRect();
+    const inLastLine = clientY >= last.top - 8 && clientY <= last.bottom + 8;
+    if (inLastLine && clientX >= last.left + last.width * 0.45) return true;
+    if (clientX >= last.right - END_TAP_SLACK_PX) {
+      const box = displayElement.getBoundingClientRect();
+      if (clientY >= box.top && clientY <= box.bottom) return true;
+    }
+    return false;
+  }
+
+  function bindDisplayCaret(el) {
+    if (displayAbort) displayAbort.abort();
+    displayAbort = new AbortController();
+    if (!el) return;
+    const sig = { signal: displayAbort.signal };
+    let longTimer = null;
+    let picking = false;
+    let startX = 0;
+    let startY = 0;
+
+    function clearLong() {
+      if (longTimer) {
+        clearTimeout(longTimer);
+        longTimer = null;
+      }
+    }
+
+    el.addEventListener('contextmenu', function (e) { e.preventDefault(); }, sig);
+    el.addEventListener('selectstart', function (e) { e.preventDefault(); }, sig);
+    el.addEventListener('pointerdown', function (e) {
+      if (!captureEnabled) return;
+      e.preventDefault();
+      e.stopPropagation();
+      picking = false;
+      startX = e.clientX;
+      startY = e.clientY;
+      clearLong();
+      longTimer = setTimeout(function () {
+        picking = true;
+        caretIndex = caretIndexFromPoint(startX, startY);
+        updateInputDisplay();
+      }, LONG_PRESS_MS);
+    }, sig);
+    el.addEventListener('pointermove', function (e) {
+      if (!picking) return;
+      caretIndex = caretIndexFromPoint(e.clientX, e.clientY);
+      updateInputDisplay();
+    }, sig);
+    function finishPointer(e) {
+      if (!captureEnabled) return;
+      const wasPicking = picking;
+      const x = e.clientX;
+      const y = e.clientY;
+      clearLong();
+      picking = false;
+      if (wasPicking) {
+        caretIndex = caretIndexFromPoint(x, y);
+      } else if (isPointNearTextEnd(startX, startY) || isPointNearTextEnd(x, y)) {
+        caretIndex = currentInput.length;
+      }
+      updateInputDisplay();
+      show();
+    }
+    el.addEventListener('pointerup', finishPointer, sig);
+    el.addEventListener('pointercancel', function () {
+      clearLong();
+      picking = false;
+    }, sig);
   }
 
   function handleShiftLogic() {
@@ -1998,16 +2215,22 @@ const KeyboardModule = (() => {
   }
 
   function hide() {
+    stopDelRepeat();
     kbContainer.style.display = 'none';
   }
 
   function deactivate() {
     captureEnabled = false;
+    stopDelRepeat();
     hide();
   }
 
   function isCaptureEnabled() {
     return captureEnabled;
+  }
+
+  function getInput() {
+    return currentInput;
   }
 
   function handlePhysicalKey_(e) {
@@ -2016,12 +2239,24 @@ const KeyboardModule = (() => {
 
     if (e.key === 'Enter') {
       e.preventDefault();
-      handleKeyPress('Enter');
+      if (!e.repeat) handleKeyPress('Enter');
       return true;
     }
-    if (e.key === 'Backspace') {
+    if (e.key === 'Backspace' || e.key === 'Delete') {
       e.preventDefault();
       handleKeyPress('Back');
+      return true;
+    }
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      caretIndex = Math.max(0, caretIndex - 1);
+      updateInputDisplay();
+      return true;
+    }
+    if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      caretIndex = Math.min(currentInput.length, caretIndex + 1);
+      updateInputDisplay();
       return true;
     }
     if (e.key === ' ') {
@@ -2037,12 +2272,17 @@ const KeyboardModule = (() => {
     return false;
   }
 
-  function resetInput(text = "") {
-    currentInput = text;
+  function resetInput(text) {
+    currentInput = text || '';
+    caretIndex = currentInput.length;
     updateInputDisplay();
   }
 
-  // 物理キーボードサポート（入力欄をタップしなくても captureEnabled 中は受け付ける）
+  kbContainer.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  kbContainer.addEventListener('selectstart', function (e) { e.preventDefault(); });
+  window.addEventListener('pointerup', stopDelRepeat);
+  window.addEventListener('pointercancel', stopDelRepeat);
+
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.repeat) {
       if (!captureEnabled && typeof window.tryAdvanceToNextQuestion_ === 'function' && window.tryAdvanceToNextQuestion_()) {
@@ -2063,7 +2303,8 @@ const KeyboardModule = (() => {
     hide,
     deactivate,
     isCaptureEnabled,
-    resetInput
+    resetInput,
+    getInput
   };
 })();
 
@@ -2416,7 +2657,7 @@ const TypingModule = (() => {
     }
 
     submitBtn.onclick = () => {
-      const text = inputDisplay.textContent || '';
+      const text = (window.KeyboardModule ? KeyboardModule.getInput() : inputDisplay.getAttribute('data-kb-value')) || '';
       if (text) checkAnswer(text);
     };
   }
@@ -2517,7 +2758,7 @@ const CorrectionModule = (() => {
 
   function updateLivePreview() {
     if (!livePreviewEl) return;
-    const replacement = inputDisplay.textContent || '';
+    const replacement = (window.KeyboardModule ? KeyboardModule.getInput() : inputDisplay.getAttribute('data-kb-value')) || '';
     finalSentence = computeFinalSentence_(replacement);
     livePreviewEl.textContent = finalSentence;
     if (window.TtsModule) TtsModule.refreshTargetButtons();
@@ -3448,7 +3689,7 @@ const SortingModule = (() => {
           recreateUserCard();
           return;
         }
-        const text = (missDisplay.textContent || '').trim();
+        const text = ((window.KeyboardModule ? KeyboardModule.getInput() : missDisplay.getAttribute('data-kb-value')) || '').trim();
         if (text) createCardAction(text);
       };
     }
@@ -3477,7 +3718,7 @@ const SortingModule = (() => {
     const prevText = createdCard.textContent || '';
     removeUserMadeCard();
     checkSubmitVisibility();
-    const current = (missDisplay.textContent || '').trim();
+    const current = ((window.KeyboardModule ? KeyboardModule.getInput() : missDisplay.getAttribute('data-kb-value')) || '').trim();
     const restore = current || prevText;
     if (window.KeyboardModule) {
       window.KeyboardModule.resetInput(restore);
