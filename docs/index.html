@@ -206,6 +206,10 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
   pointer-events: none;
   animation: kb-caret-blink 1s step-end infinite;
 }
+.kb-caret::before { content: '_'; }
+@keyframes kb-caret-blink {
+  50% { opacity: 0; }
+}
 .kb-input-locked {
   pointer-events: none !important;
   cursor: default !important;
@@ -399,7 +403,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
       <div class="section-title">1. 学年・科目</div>
       <div class="form-group">
         <select id="subject-select">
-          <option value="jhs2" selected>中学2年 英語</option>
+          <option value="">読み込み中...</option>
         </select>
       </div>
     </div>
@@ -1419,6 +1423,13 @@ const PresetModule = (() => {
       force);
   }
 
+  function getGrammarCatalog(force) {
+    return resolve_('grammar_catalog',
+      function (m) { return m.catalog || null; },
+      function () { return gasRun('apiGetGrammarCatalog'); },
+      force);
+  }
+
   function getVocabWords(bookName, sheetName, filtersJson, includeBookPool, force) {
     const manifestKey = bookName + '::' + sheetName;
     return resolve_('vocab_words_' + manifestKey + '_' + (filtersJson || '{}'),
@@ -1438,7 +1449,7 @@ const PresetModule = (() => {
       force);
   }
 
-  return { getVocabCatalog, getVocabWords, getQuestions, clearAll, refreshAll, revalidate };
+  return { getVocabCatalog, getVocabWords, getGrammarCatalog, getQuestions, clearAll, refreshAll, revalidate };
 })();
 window.PresetModule = PresetModule;
 
@@ -1654,6 +1665,8 @@ async function gasFetch_(fnName, args) {
   var target;
   if (fnName === 'apiGetVocabCatalog') {
     target = url + '?action=getVocabCatalog';
+  } else if (fnName === 'apiGetGrammarCatalog') {
+    target = url + '?action=getGrammarCatalog';
   } else if (fnName === 'apiGetQuestions') {
     target = url + '?action=getQuestions&subject=' + encodeURIComponent(args[0])
       + '&unit=' + encodeURIComponent(args[1]);
@@ -3826,11 +3839,6 @@ let currentVocabSetName = '';
 let currentVocabBookName = '';
 let currentVocabSheetName = '';
 
-// 科目（スプレッドシート名）ごとの単元（シート名）
-const GRAMMAR_UNITS = {
-  "中学2年 英語": ["不定詞"]
-};
-
 // UI要素
 const screens = {
   login: document.getElementById('login-screen'),
@@ -3858,7 +3866,7 @@ if (questionInstructionBtn && questionInstructionEl) {
 // セレクトボックスの表示テキスト（実際のスプレッドシート名として使われるもの）を取得
 function getSelectedSubjectName() {
   const select = elements.subject;
-  return select.options[select.selectedIndex].text;
+  return (select && select.value) ? select.value : '';
 }
 
 // grammarSettings.js
@@ -3874,6 +3882,7 @@ const GrammarSettingsModule = (() => {
 
   let rows = [];
   let loadedKey = '';
+  let grammarCatalog = {};
 
   function selectionKey() {
     return getSelectedSubjectName() + '|' + getSelectedUnits().join(',');
@@ -3883,18 +3892,59 @@ const GrammarSettingsModule = (() => {
     return Array.from(unitContainer.querySelectorAll('input:checked')).map(el => el.value);
   }
 
+  function renderSubjects() {
+    const select = elements.subject;
+    const prev = select.value;
+    select.innerHTML = '';
+    const names = Object.keys(grammarCatalog).sort(function (a, b) {
+      return a.localeCompare(b, 'ja');
+    });
+    if (names.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '（grammarquizzes に学習セットがありません）';
+      select.appendChild(opt);
+      return;
+    }
+    names.forEach(function (name) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      if (name === prev) opt.selected = true;
+      select.appendChild(opt);
+    });
+  }
+
   function renderUnits() {
     unitContainer.innerHTML = '';
-    GRAMMAR_UNITS[getSelectedSubjectName()].forEach(unit => {
+    const subject = getSelectedSubjectName();
+    const units = grammarCatalog[subject] || [];
+    units.forEach(function (unit) {
       const lbl = document.createElement('label');
       lbl.className = 'unit-card selected';
-      lbl.innerHTML = `<input type="checkbox" value="${unit}" checked style="display:none;"> ${unit}`;
-      lbl.querySelector('input').addEventListener('change', e => {
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = unit;
+      input.checked = true;
+      input.style.display = 'none';
+      input.addEventListener('change', function (e) {
         lbl.classList.toggle('selected', e.target.checked);
         refreshDivisions();
       });
+      lbl.appendChild(input);
+      lbl.appendChild(document.createTextNode(' ' + unit));
       unitContainer.appendChild(lbl);
     });
+  }
+
+  async function loadCatalog(force) {
+    const result = await PresetModule.getGrammarCatalog(!!force);
+    if (result.status !== 'success') {
+      throw new Error(result.message || '学習セット一覧の取得に失敗しました');
+    }
+    grammarCatalog = result.data || {};
+    renderSubjects();
+    renderUnits();
   }
 
   function renderFormatChecks() {
@@ -3991,6 +4041,10 @@ const GrammarSettingsModule = (() => {
 
   async function refreshDivisions() {
     resetRows();
+    if (!getSelectedSubjectName()) {
+      note.textContent = 'grammarquizzes フォルダに学習セット（Googleスプレッドシート）を置いてください。';
+      return;
+    }
     if (getSelectedUnits().length === 0) {
       note.textContent = '単元を1つ以上選択してください。';
       return;
@@ -4001,6 +4055,11 @@ const GrammarSettingsModule = (() => {
     } catch (e) {
       note.textContent = 'データの読み込みに失敗しました: ' + e.message;
     }
+  }
+
+  async function reloadCatalog(force) {
+    await loadCatalog(!!force);
+    await refreshDivisions();
   }
 
   /** 学習開始時に使う。教材の版が変わっていなければキャッシュのまま */
@@ -4035,8 +4094,11 @@ const GrammarSettingsModule = (() => {
 
   function init() {
     renderFormatChecks();
-    renderUnits();
-    refreshDivisions();
+    loadCatalog(false).then(function () {
+      return refreshDivisions();
+    }).catch(function (e) {
+      note.textContent = '学習セットの読み込みに失敗しました: ' + e.message;
+    });
   }
 
   elements.subject.addEventListener('change', () => {
@@ -4044,7 +4106,7 @@ const GrammarSettingsModule = (() => {
     refreshDivisions();
   });
 
-  return { init, refreshDivisions, prepareForStart, getSelectedUnits, getFilteredRows, getQuizOptions };
+  return { init, refreshDivisions, reloadCatalog, prepareForStart, getSelectedUnits, getFilteredRows, getQuizOptions };
 })();
 
 window.GrammarSettingsModule = GrammarSettingsModule;
@@ -4755,7 +4817,11 @@ function initModeTabs() {
 }
 
 async function reloadPresetScreens_() {
-  await GrammarSettingsModule.refreshDivisions();
+  if (window.GrammarSettingsModule && GrammarSettingsModule.reloadCatalog) {
+    await GrammarSettingsModule.reloadCatalog(false);
+  } else {
+    await GrammarSettingsModule.refreshDivisions();
+  }
   if (window.VocabSettingsModule) await window.VocabSettingsModule.loadCatalog(false);
 }
 

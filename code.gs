@@ -129,6 +129,13 @@ function doGet(e) {
       } catch (error) {
         return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
       }
+    } else if (action === 'getGrammarCatalog') {
+      try {
+        const data = fetchCatalogFromDrive();
+        return sendResponse({ status: "success", data: data });
+      } catch (error) {
+        return sendResponse({ status: "error", message: error.toString(), stack: error.stack });
+      }
     } else if (action === 'getVocabCatalog') {
       try {
         const data = fetchVocabCatalogFromDrive_();
@@ -246,11 +253,8 @@ function fetchQuestionsFromSheet(params) {
     throw new Error("subject (学年・科目) と unit (単元名) のパラメータが必須です。");
   }
 
-  const materialsFolder = getMaterialsFolder();
-  const files = materialsFolder.getFilesByName(subject);
-  if (!files.hasNext()) throw new Error("スプレッドシートが見つかりません: " + subject);
-  const spreadsheetFile = files.next();
-  const ss = SpreadsheetApp.open(spreadsheetFile);
+  // 学習セットは grammarquizzes 内のスプレッドシート名で開く（ID の登録は不要）
+  const ss = openGrammarBookByName_(subject);
 
   const unitList = unit.split(',').map(u => u.trim());
   const questions = [];
@@ -336,18 +340,45 @@ function fetchQuestionsFromSheet(params) {
   return questions;
 }
 
+function openGrammarBookByName_(subjectName) {
+  const materialsFolder = getMaterialsFolder();
+  const files = materialsFolder.getFilesByName(subjectName);
+  while (files.hasNext()) {
+    const file = files.next();
+    if (file.getMimeType() === MimeType.GOOGLE_SHEETS) {
+      return SpreadsheetApp.open(file);
+    }
+  }
+  throw new Error("スプレッドシートが見つかりません: " + subjectName);
+}
+
+function isGrammarUnitSheet_(sheet) {
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) {
+    return (h === null || h === undefined) ? '' : h.toString().trim();
+  });
+  return headers.indexOf('英文全文') >= 0 && headers.indexOf('日本語訳') >= 0;
+}
+
+/**
+ * grammarquizzes フォルダ内の Google スプレッドシートをすべて学習セットとして列挙する。
+ * ブック名＝科目、シート名＝単元。ID の登録は不要。
+ * （高速化する場合は、同じ構造の JSON を GitHub Pages の manifest に載せる）
+ */
 function fetchCatalogFromDrive() {
   const materialsFolder = getMaterialsFolder();
 
   const catalog = {};
   const files = materialsFolder.getFilesByType(MimeType.GOOGLE_SHEETS);
-  
+
   while (files.hasNext()) {
     const file = files.next();
     const subjectName = file.getName();
     const ss = SpreadsheetApp.open(file);
-    const sheets = ss.getSheets();
-    const unitNames = sheets.map(s => s.getName());
+    const unitNames = ss.getSheets()
+      .filter(function (s) { return isGrammarUnitSheet_(s); })
+      .map(function (s) { return s.getName(); });
+    if (unitNames.length === 0) continue;
     catalog[subjectName] = unitNames;
   }
 
@@ -1006,14 +1037,13 @@ function syncSampleQuestionBooksIfNeeded_() {
 }
 
 /**
- * index.html の GRAMMAR_UNITS と揃えたサンプル問題ブックを grammarquizzes 内に用意する。
- * @return {Object} 科目名 → スプレッドシートID
+ * サンプル問題ブックを grammarquizzes 内に用意する。
+ * フォルダ内の追加ブックは削除しない（名前で自動認識する）。
+ * @return {Object} 科目名 → スプレッドシートID（参考用。配信時は ID を使わない）
  */
 function ensureSampleQuestionBooks_(materialsFolder, force, created, reused) {
   const catalog = getSampleQuestionCatalog_();
   const subjectNames = Object.keys(catalog);
-  purgeObsoleteSampleQuestionBooks_(materialsFolder, subjectNames, created);
-
   const bookIds = {};
 
   subjectNames.forEach(function (subjectName) {
@@ -1036,21 +1066,6 @@ function ensureSampleQuestionBooks_(materialsFolder, force, created, reused) {
   });
 
   return bookIds;
-}
-
-/** grammarquizzes 内でカタログに無いスプレッドシート（旧サンプルブック）をゴミ箱へ移動 */
-function purgeObsoleteSampleQuestionBooks_(materialsFolder, allowedSubjectNames, created) {
-  const allowed = {};
-  allowedSubjectNames.forEach(function (name) { allowed[name] = true; });
-  const files = materialsFolder.getFilesByType(MimeType.GOOGLE_SHEETS);
-  while (files.hasNext()) {
-    const file = files.next();
-    const name = file.getName();
-    if (!allowed[name]) {
-      file.setTrashed(true);
-      if (created) created.push('削除:' + name);
-    }
-  }
 }
 
 function ensureSampleUnitSheets_(ss, units) {
