@@ -1,0 +1,33 @@
+---
+description: データ管理方式の変更時に Claude/Gem 用データ生成プロンプトを同期更新する
+globs: code.gs,docs/index.html,docs/gem_system_prompt.md,docs/grammar_gem_system_prompt.md
+alwaysApply: false
+---
+
+# データ生成プロンプトの同期更新
+
+教材データの管理方式（列構成・記法・検算ロジック・出題形式・取り込み経路など）を変更したら、
+対応する **Claude/Gem/GPT 用のシステムプロンプト兼手順書も必ず同じ変更で更新**すること。
+
+## 対象ドキュメント
+
+| 変更したデータ | 更新するプロンプト |
+|---|---|
+| 文法・語法問題（`GRAMMAR_HEADERS` / `GRAMMAR_FORMATS` / `parseBracketSentence_` 等） | `docs/grammar_gem_system_prompt.md` |
+| 単語帳（`VOCAB_HEADERS` 等） | `docs/gem_system_prompt.md` |
+
+## 更新が必要な主な変更
+
+- 列の追加・削除・並び順・見出し表記の変更
+- `( )` 記法や区切り文字、検算（連結＝英文全文）ルールの変更
+- 出題形式 A〜H の追加・削除・成立条件の変更
+- 空欄の扱い（例：`(未登録)` の要否）の変更
+- 取り込み経路（Excel/スプレッドシート・JSON/Pages 等）の変更
+
+## 手順
+
+1. 変更後の仕様を「正」（`code.gs` の定義・`docs/index.html` の `GRAMMAR_FORMATS`）に合わせる。
+2. プロンプト側の列構成表・システムプロンプト（コピー用）・出力例（TSV/JSON）・検算チェックリストを漏れなく反映する。
+3. ドキュメント内の値・例が実装と一致しているか確認する（見出し名・形式キー・記法）。
+
+> 実装だけ変えてプロンプトを更新し忘れると、生成データが仕様とズレて取り込み時に壊れる。必ずセットで変更すること。

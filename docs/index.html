@@ -274,9 +274,13 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
     <div class="header-title">DigitalDrill（デジドリ） ログイン</div>
     <div class="setting-section" style="text-align: center; padding: 40px 10px;">
       <p style="margin-bottom: 20px; font-size: 1.1em; color: #555;">システムを利用するには Google アカウントで認証が必要です。</p>
-      <p style="margin-bottom: 24px; font-size: 0.9em; color: #777;">Google でサインインし、ホワイトリスト照合後に学習画面へ進みます。</p>
-      <div id="google-signin-container" style="display:flex;justify-content:center;margin:0 auto 8px;"></div>
-      <button type="button" id="login-via-gas-btn" class="btn-primary" style="max-width:320px;margin:0 auto;display:none;">Googleアカウントでログイン（GAS経由）</button>
+      <p style="margin-bottom: 20px; font-size: 0.9em; color: #777;">どちらかの方法でサインインしてください。ホワイトリスト照合後に学習画面へ進みます。</p>
+      <p style="margin: 0 auto 8px; max-width: 320px; font-size: 0.85em; font-weight: bold; color: #455a64; text-align: left;">Googleでサインイン</p>
+      <div id="google-signin-container" style="display:flex;justify-content:center;margin:0 auto 4px;"></div>
+      <p style="margin: 0 auto 18px; max-width: 320px; font-size: 0.8em; color: #888; text-align: left;">このページ上でログインします。</p>
+      <p style="margin: 0 auto 8px; max-width: 320px; font-size: 0.85em; font-weight: bold; color: #455a64; text-align: left;">Googleアカウントでログイン（GAS経由）</p>
+      <button type="button" id="login-via-gas-btn" class="btn-primary" style="max-width:320px;margin:0 auto;display:block;">GAS経由でログイン</button>
+      <p style="margin: 8px auto 0; max-width: 320px; font-size: 0.8em; color: #888; text-align: left;">学校アカウントで上のボタンが出ない場合はこちらです。</p>
       <div id="login-msg" style="margin-top: 15px; color: #f44336; font-weight: bold;"></div>
     </div>
   </div>
@@ -4484,11 +4488,9 @@ function initGoogleLogin_() {
   var clientId = getGoogleClientId_();
   var container = document.getElementById('google-signin-container');
   var msgEl = document.getElementById('login-msg');
-  var fallbackBtn = document.getElementById('login-via-gas-btn');
 
   if (!clientId) {
-    if (msgEl) msgEl.textContent = 'GOOGLE_CLIENT_ID が設定されていません（config.js）';
-    if (fallbackBtn) fallbackBtn.style.display = 'block';
+    if (msgEl) msgEl.textContent = 'GOOGLE_CLIENT_ID が設定されていません（config.js）。GAS経由でログインしてください。';
     return;
   }
 
@@ -4500,8 +4502,7 @@ function initGoogleLogin_() {
         setTimeout(tryInit_, 100);
         return;
       }
-      if (msgEl) msgEl.textContent = 'Google ログインの読み込みに失敗しました。ページを再読み込みしてください。';
-      if (fallbackBtn) fallbackBtn.style.display = 'block';
+      if (msgEl) msgEl.textContent = 'Google でサインインの読み込みに失敗しました。GAS経由でログインするか、ページを再読み込みしてください。';
       return;
     }
     google.accounts.id.initialize({
