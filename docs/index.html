@@ -1070,7 +1070,7 @@ const AuthGateService = {
     if (this.getUser()) return this.getUser();
     try {
       var url = window.API_URL + '?action=getAuthUser&token=' + encodeURIComponent(this.getToken());
-      var res = await fetch(url, { redirect: 'follow' });
+      var res = await fetch(url, gasFetchOptions_({ redirect: 'follow' }));
       var data = await parseGasJson_(res);
       if (data.status === 'success' && data.user) {
         localStorage.setItem(this.USER_KEY, JSON.stringify(data.user));
@@ -1087,11 +1087,11 @@ const AuthGateService = {
     this.clear();
     if (token && window.API_URL) {
       try {
-        await BackendSyncStatus.track(fetch(window.API_URL, {
+        await BackendSyncStatus.track(fetch(window.API_URL, gasFetchOptions_({
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ action: 'logout', authToken: token })
-        }));
+        })));
       } catch (e) {}
     }
   }
@@ -1546,6 +1546,19 @@ function gasRun(fnName) {
   return gasFetch_(fnName, args);
 }
 
+/**
+ * GAS② への fetch。Google ログイン Cookie を付けると、
+ * /exec → googleusercontent のリダイレクトでアカウントにより 404 になる。
+ */
+function gasFetchOptions_(options) {
+  options = options || {};
+  var next = {};
+  Object.keys(options).forEach(function (k) { next[k] = options[k]; });
+  next.redirect = options.redirect || 'follow';
+  next.credentials = 'omit';
+  return next;
+}
+
 async function parseGasJson_(res) {
   if (!res.ok) throw new Error('HTTP error ' + res.status);
   var text = await res.text();
@@ -1594,7 +1607,7 @@ async function fetchWithBackoff_(url, options, maxAttempts) {
       await new Promise(function (r) { setTimeout(r, waitMs); });
     }
     try {
-      var res = await fetch(url, options);
+      var res = await fetch(url, gasFetchOptions_(options));
       if (res.status === 429 || res.status >= 500) {
         lastError = new Error('サーバー混雑中（HTTP ' + res.status + '）');
         continue;
@@ -4462,11 +4475,11 @@ async function handleGoogleCredential_(credential) {
   }
   if (msgEl) msgEl.textContent = '認証中…';
   try {
-    var res = await fetch(window.API_URL, {
+    var res = await fetchWithBackoff_(window.API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'login', idToken: credential })
-    });
+    }, 2);
     var data = await parseGasJson_(res);
     if (data.status === 'success' && data.authToken) {
       AuthGateService.save(data.authToken, data.user);
@@ -4480,7 +4493,12 @@ async function handleGoogleCredential_(credential) {
     }
     if (msgEl) msgEl.textContent = data.message || 'ログインに失敗しました';
   } catch (e) {
-    if (msgEl) msgEl.textContent = 'ログインエラー: ' + (e.message || e);
+    var detail = String(e.message || e);
+    if (/404/.test(detail)) {
+      if (msgEl) msgEl.textContent = 'ログインに失敗しました。下の「GAS経由でログイン」を使ってください。';
+      return;
+    }
+    if (msgEl) msgEl.textContent = 'ログインエラー: ' + detail;
   }
 }
 
