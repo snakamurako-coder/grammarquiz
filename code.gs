@@ -1318,17 +1318,38 @@ function ensureMyVocabSampleSheet_(ss) {
 }
 
 function ensureVocabSheetHeader_(sheet) {
-  const firstCell = sheet.getLastRow() > 0 ? sheet.getRange(1, 1).getValue() : '';
+  const lastRow = sheet.getLastRow();
+  const firstCell = lastRow > 0 ? sheet.getRange(1, 1).getValue() : '';
   if (firstCell !== '通し番号') {
-    if (sheet.getLastRow() === 0) {
+    if (lastRow === 0) {
       sheet.appendRow(VOCAB_HEADERS);
     } else {
       sheet.insertRowBefore(1);
-      sheet.getRange(1, 1, 1, VOCAB_HEADERS.length).setValues([VOCAB_HEADERS]);
     }
-    sheet.getRange(1, 1, 1, VOCAB_HEADERS.length).setFontWeight('bold');
-    sheet.setFrozenRows(1);
   }
+  sheet.getRange(1, 1, 1, VOCAB_HEADERS.length).setValues([VOCAB_HEADERS]);
+  sheet.getRange(1, 1, 1, VOCAB_HEADERS.length).setFontWeight('bold');
+  sheet.setFrozenRows(1);
+}
+
+function spreadsheetEditUrl_(ss, sheet) {
+  let url = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/edit';
+  if (sheet) url += '#gid=' + sheet.getSheetId();
+  return url;
+}
+
+function isFileInFolder_(fileId, folder) {
+  if (!fileId || !folder) return false;
+  try {
+    const parents = DriveApp.getFileById(fileId).getParents();
+    const targetId = folder.getId();
+    while (parents.hasNext()) {
+      if (parents.next().getId() === targetId) return true;
+    }
+  } catch (e) {
+    return false;
+  }
+  return false;
 }
 
 function ensureSampleVocabBooks_(vocabularyFolder, force, created, reused) {
@@ -1683,13 +1704,14 @@ function registerVocabWords_(sheetName, rows, ssOpt) {
   sheet.getRange(startRow, 1, builtRows.length, VOCAB_HEADERS.length).setValues(builtRows);
   renumberVocabSheet_(sheet);
 
+  const bookUrl = spreadsheetEditUrl_(ss);
   return {
     registeredCount: builtRows.length,
     sheetName: sheetName,
     bookName: ss.getName(),
     bookId: ss.getId(),
-    bookUrl: ss.getUrl(),
-    sheetUrl: ss.getUrl() + '#gid=' + sheet.getSheetId()
+    bookUrl: bookUrl,
+    sheetUrl: spreadsheetEditUrl_(ss, sheet)
   };
 }
 
@@ -1760,10 +1782,7 @@ function ensureUserEnvironment_() {
   try {
     const props = PropertiesService.getUserProperties();
     const folder = ensureUserDataFolder_();
-
-    const created = [];
-    const reused = [];
-    const vocabBook = getOrCreateMyVocabBook_(folder, false, created, reused);
+    const vocabBook = getOrCreateUserVocabBook_(folder);
     props.setProperty(USER_PROP.MY_VOCAB_BOOK_ID, vocabBook.getId());
 
     const logBook = getOrCreateUserLogBook_(folder, props);
@@ -1801,18 +1820,36 @@ function getOrCreateUserLogBook_(folder, userProps) {
   return ss;
 }
 
-function getUserVocabBook_() {
+function getOrCreateUserVocabBook_(userFolder) {
   const props = PropertiesService.getUserProperties();
   const bookId = props.getProperty(USER_PROP.MY_VOCAB_BOOK_ID);
-  if (bookId) {
+  if (bookId && isFileInFolder_(bookId, userFolder)) {
     try {
-      return SpreadsheetApp.openById(bookId);
+      const ss = SpreadsheetApp.openById(bookId);
+      ensureMyVocabDefaultSheet_(ss);
+      return ss;
     } catch (e) {
-      // fall through and recreate
+      // fall through and recreate in the user folder
     }
   }
-  ensureUserEnvironment_();
-  return SpreadsheetApp.openById(props.getProperty(USER_PROP.MY_VOCAB_BOOK_ID));
+
+  const existingFile = findChildSpreadsheetByName_(userFolder, MY_VOCAB_BOOK_NAME);
+  let ss;
+  const createdNew = !existingFile;
+  if (existingFile) {
+    ss = SpreadsheetApp.open(existingFile);
+  } else {
+    ss = createSpreadsheetInFolder_(MY_VOCAB_BOOK_NAME, userFolder);
+  }
+  ensureMyVocabDefaultSheet_(ss);
+  if (createdNew) ensureMyVocabSampleSheet_(ss);
+  props.setProperty(USER_PROP.MY_VOCAB_BOOK_ID, ss.getId());
+  return ss;
+}
+
+function getUserVocabBook_() {
+  const folder = ensureUserDataFolder_();
+  return getOrCreateUserVocabBook_(folder);
 }
 
 function getUserLogBook_() {
@@ -1831,7 +1868,7 @@ function fetchUserVocabCatalog_() {
     userBooks: [{
       bookName: MY_VOCAB_BOOK_NAME,
       bookId: ss.getId(),
-      bookUrl: ss.getUrl(),
+      bookUrl: spreadsheetEditUrl_(ss),
       sheets: sheetInfos
     }]
   };

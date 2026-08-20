@@ -3519,9 +3519,7 @@ const VocabRegisterModule = (() => {
     const wordEl = document.getElementById('register-simple-word');
     const word = wordEl ? wordEl.value.trim() : '';
     if (!word) throw new Error('英単語・熟語の表現は必須です。');
-    const row = {};
-    VOCAB_REGISTER_FIELDS.forEach(function (field) { row[field] = ''; });
-    row['英単語・熟語の表現'] = word;
+    const row = { '英単語・熟語の表現': word };
     let hasMeaning = false;
     simpleMeanings.forEach(function (item) {
       const meaning = String(item.meaning || '').trim();
@@ -3660,10 +3658,21 @@ const VocabRegisterModule = (() => {
     return { bookName: bookName, sheetName: sheetName };
   }
 
+  function compactVocabRow_(row) {
+    const out = {};
+    Object.keys(row).forEach(function (key) {
+      const v = String(row[key] == null ? '' : row[key]).trim();
+      if (!v || v === VOCAB_UNREGISTERED) return;
+      out[key] = v;
+    });
+    return out;
+  }
+
   async function registerRows(rows) {
     const sheetName = document.getElementById('register-sheet-name').value.trim() || 'デフォルト';
     if (!AuthGateService.isValid()) throw new Error('単語登録にはログインが必要です');
-    const result = await UserBridge.call('registerVocabWords', { sheetName: sheetName, rows: rows });
+    const compactRows = rows.map(compactVocabRow_);
+    const result = await UserBridge.call('registerVocabWords', { sheetName: sheetName, rows: compactRows });
     if (result.status !== 'success') throw new Error(result.message || '登録失敗');
     return result;
   }
@@ -3672,6 +3681,22 @@ const VocabRegisterModule = (() => {
     const el = document.getElementById('register-msg');
     el.textContent = text;
     el.style.color = isError ? '#f44336' : '#4caf50';
+  }
+
+  let registerBusy = false;
+  async function runRegister_(btn, fn) {
+    if (registerBusy) return;
+    registerBusy = true;
+    if (btn) btn.disabled = true;
+    showMsg('登録中です。完了までこのまま待ってください…', false);
+    try {
+      await fn();
+    } catch (e) {
+      showMsg('登録エラー: ' + e.message, true);
+    } finally {
+      registerBusy = false;
+      if (btn) btn.disabled = false;
+    }
   }
 
   function init() {
@@ -3717,51 +3742,36 @@ const VocabRegisterModule = (() => {
       }
     });
 
-    document.getElementById('register-import-btn').addEventListener('click', async function () {
-      if (previewRows.length === 0) return;
-      try {
+    document.getElementById('register-import-btn').addEventListener('click', function () {
+      runRegister_(document.getElementById('register-import-btn'), async function () {
+        if (previewRows.length === 0) return;
         const result = await registerRows(previewRows);
         const dest = applyRegisterResult(result);
         showMsg(result.data.registeredCount + '語を「' + dest.bookName + '」のシート「' + dest.sheetName + '」に登録しました。右のボタンからスプレッドシートを開けます。', false);
         document.getElementById('register-tsv-input').value = '';
         previewRows = [];
         document.getElementById('register-preview-area').style.display = 'none';
-        if (window.VocabSettingsModule) {
-          window.VocabSettingsModule.loadCatalog().catch(function () {});
-        }
-      } catch (e) {
-        showMsg('登録エラー: ' + e.message, true);
-      }
+      });
     });
 
-    document.getElementById('register-simple-btn').addEventListener('click', async function () {
-      try {
+    document.getElementById('register-simple-btn').addEventListener('click', function () {
+      runRegister_(document.getElementById('register-simple-btn'), async function () {
         const row = readSimpleRow();
         const result = await registerRows([row]);
         const dest = applyRegisterResult(result);
         showMsg('「' + vocabNorm(row['英単語・熟語の表現']) + '」を「' + dest.bookName + '」のシート「' + dest.sheetName + '」に登録しました。右のボタンからスプレッドシートを開けます。', false);
         resetSimpleForm();
-        if (window.VocabSettingsModule) {
-          window.VocabSettingsModule.loadCatalog().catch(function () {});
-        }
-      } catch (e) {
-        showMsg('登録エラー: ' + e.message, true);
-      }
+      });
     });
 
-    document.getElementById('register-single-btn').addEventListener('click', async function () {
-      try {
+    document.getElementById('register-single-btn').addEventListener('click', function () {
+      runRegister_(document.getElementById('register-single-btn'), async function () {
         const row = readFormRow();
         const result = await registerRows([row]);
         const dest = applyRegisterResult(result);
         showMsg('「' + vocabNorm(row['英単語・熟語の表現']) + '」を「' + dest.bookName + '」のシート「' + dest.sheetName + '」に登録しました。右のボタンからスプレッドシートを開けます。', false);
         clearForm();
-        if (window.VocabSettingsModule) {
-          window.VocabSettingsModule.loadCatalog().catch(function () {});
-        }
-      } catch (e) {
-        showMsg('登録エラー: ' + e.message, true);
-      }
+      });
     });
   }
 
