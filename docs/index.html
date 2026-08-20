@@ -101,8 +101,38 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .result-review-explanation { background: #fff8e1; border-left: 3px solid #ffb300; padding: 10px 12px; border-radius: 8px; margin-top: 8px; font-size: 0.88em; line-height: 1.55; color: var(--c-text); }
 .result-review-explanation .result-review-grammar-area { font-weight: bold; display: block; margin-bottom: 4px; color: var(--c-text-sub); font-size: 0.92em; }
 
-.btn-primary:active { background-color: var(--c-primary-dark); }
+.btn-primary:active { background-color: var(--c-primary-dark); transform: scale(0.98); }
 .btn-primary:disabled { background-color: #b0bec5; }
+.btn-primary.is-busy:disabled { background-color: var(--c-primary); color: #fff; }
+.btn-small.is-busy:disabled { background-color: #546e7a; color: #fff; }
+.btn-small:active { transform: scale(0.98); }
+@keyframes btn-busy-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(21, 101, 192, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(21, 101, 192, 0); }
+}
+@keyframes btn-busy-shimmer {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(120%); }
+}
+button.is-busy,
+.btn-primary.is-busy,
+.btn-small.is-busy {
+  position: relative;
+  overflow: hidden;
+  transform: scale(0.97);
+  pointer-events: none;
+  animation: btn-busy-pulse 1s ease-in-out infinite;
+}
+button.is-busy::after,
+.btn-primary.is-busy::after,
+.btn-small.is-busy::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.38), transparent);
+  animation: btn-busy-shimmer 0.9s linear infinite;
+}
 
 /* モード切替タブ */
 .mode-tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
@@ -123,7 +153,7 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .register-dest-row .btn-small { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; white-space: nowrap; }
 .register-dest-hint { font-size: 0.82em; color: var(--c-text-sub); margin: 6px 0 0; line-height: 1.4; }
 #register-sheet-name,
-#register-simple-word {
+.register-simple-word {
   display: block;
   width: 100%;
   box-sizing: border-box;
@@ -133,6 +163,23 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
   border-radius: 8px;
   font-size: 16px;
   font-family: inherit;
+}
+.register-card-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.register-card {
+  background: #f7fbff;
+  border: 1px solid #bbdefb;
+  border-radius: 12px;
+  padding: 12px;
+}
+.register-card-title { font-weight: bold; color: var(--c-primary-dark); margin-bottom: 10px; font-size: 0.92em; }
+.register-card.is-sending { outline: 2px solid var(--c-primary); }
+.register-card.is-sending input,
+.register-card.is-sending select,
+.register-card.is-sending textarea,
+.register-card.is-sending button:not(.is-busy) { pointer-events: none; opacity: 0.65; }
+.register-card-msg { min-height: 1.2em; margin-top: 8px; font-size: 0.85em; font-weight: bold; }
+@media (min-width: 760px) {
+  .register-card-grid { grid-template-columns: 1fr 1fr; }
 }
 .vocab-preview-table { width: 100%; border-collapse: collapse; font-size: 0.75em; margin-top: 10px; }
 .vocab-preview-table th, .vocab-preview-table td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; word-break: break-word; }
@@ -647,22 +694,8 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
             <div class="section-title">手動入力</div>
             <button type="button" id="register-mode-toggle" aria-pressed="false">簡易登録 ⇔ 詳細登録</button>
           </div>
-          <div id="register-simple-panel">
-            <div class="form-group">
-              <label>英単語・熟語の表現 *</label>
-              <input type="text" id="register-simple-word" placeholder="単語または熟語">
-            </div>
-            <div class="form-group">
-              <label>意味（和訳）</label>
-              <div id="register-simple-meanings"></div>
-              <button type="button" id="register-add-meaning-btn" class="btn-small">＋違う品詞の意味を追加</button>
-            </div>
-            <button type="button" id="register-simple-btn" class="btn-primary" style="margin-top:12px;">登録</button>
-          </div>
-          <div id="register-detail-panel" style="display:none;">
-            <div class="vocab-form-grid" id="register-form-grid"></div>
-            <button type="button" id="register-single-btn" class="btn-primary" style="margin-top:12px;">登録</button>
-          </div>
+          <p class="register-dest-hint">カードは2枚あります。一方の登録中にも、もう一方へ次の単語を入力できます。</p>
+          <div class="register-card-grid" id="register-card-grid"></div>
         </div>
         <div class="setting-section">
           <div class="section-title">TSV一括登録</div>
@@ -1242,6 +1275,87 @@ const AuthGateService = {
 
 window.AuthGateService = AuthGateService;
 
+const LocalStore = {
+  get: function (key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      return JSON.parse(raw);
+    } catch (e) {
+      return fallback;
+    }
+  },
+  set: function (key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+  },
+  remove: function (key) {
+    try { localStorage.removeItem(key); } catch (e) {}
+  }
+};
+
+const SendOutbox = {
+  KEY: 'dd_send_outbox',
+  list: function () {
+    const items = LocalStore.get(this.KEY, []);
+    return Array.isArray(items) ? items : [];
+  },
+  save: function (items) {
+    LocalStore.set(this.KEY, items);
+  },
+  add: function (op, payload) {
+    const items = this.list();
+    const item = {
+      id: Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      op: op,
+      payload: payload,
+      ts: Date.now(),
+      attempts: 0
+    };
+    items.push(item);
+    this.save(items);
+    return item.id;
+  },
+  remove: function (id) {
+    this.save(this.list().filter(function (item) { return item.id !== id; }));
+  },
+  bumpAttempt: function (id) {
+    const items = this.list();
+    items.forEach(function (item) {
+      if (item.id === id) item.attempts = (item.attempts || 0) + 1;
+    });
+    this.save(items);
+  }
+};
+
+const BusyButton = {
+  start: function (btn, pendingText) {
+    if (!btn) return;
+    if (btn.dataset.idleHtml == null) btn.dataset.idleHtml = btn.innerHTML;
+    btn.classList.add('is-busy');
+    btn.setAttribute('aria-busy', 'true');
+    btn.disabled = true;
+    const idle = (btn.dataset.idleLabel || btn.textContent || '').replace(/\s+/g, ' ').trim();
+    btn.dataset.idleLabel = idle;
+    btn.textContent = pendingText || (idle.replace(/する$/, '') + '中…');
+  },
+  end: function (btn) {
+    if (!btn) return;
+    btn.classList.remove('is-busy');
+    btn.removeAttribute('aria-busy');
+    btn.disabled = false;
+    if (btn.dataset.idleHtml != null) btn.innerHTML = btn.dataset.idleHtml;
+  },
+  run: async function (btn, fn, pendingText) {
+    this.start(btn, pendingText);
+    try {
+      return await fn();
+    } finally {
+      this.end(btn);
+    }
+  }
+};
+window.BusyButton = BusyButton;
+
 const USER_BRIDGE_WRITE_OPS = {
   saveSessionLog: true,
   upsertItemStates: true,
@@ -1306,10 +1420,18 @@ const UserBridge = {
     });
   },
 
-  async call(op, payload) {
+  async call(op, payload, opts) {
     var self = this;
+    opts = opts || {};
+    var outboxId = opts.outboxId || null;
+    if (!opts.skipOutbox && USER_BRIDGE_WRITE_OPS[op]) {
+      outboxId = SendOutbox.add(op, payload);
+    }
     var run = self._chain.then(function () {
-      var opPromise = self.queueOp(op, payload);
+      var opPromise = self.queueOp(op, payload).then(function (res) {
+        if (outboxId && res && res.status === 'success') SendOutbox.remove(outboxId);
+        return res;
+      });
       if (USER_BRIDGE_WRITE_OPS[op]) {
         return BackendSyncStatus.track(opPromise);
       }
@@ -1320,6 +1442,27 @@ const UserBridge = {
   }
 };
 window.UserBridge = UserBridge;
+
+async function flushSendOutbox_() {
+  if (!AuthGateService.isValid()) return;
+  const items = SendOutbox.list();
+  if (!items.length) return;
+  let recovered = 0;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if ((item.attempts || 0) >= 5) continue;
+    SendOutbox.bumpAttempt(item.id);
+    try {
+      const res = await UserBridge.call(item.op, item.payload, { skipOutbox: true, outboxId: item.id });
+      if (res && res.status === 'success') recovered++;
+    } catch (e) {
+      console.warn('未送信データの再送に失敗:', e);
+    }
+  }
+  if (recovered > 0 && typeof showToast_ === 'function') {
+    showToast_('未送信だったデータを ' + recovered + ' 件、再送しました。');
+  }
+}
 
 /**
  * プリセット取得（ハイブリッド）
@@ -3410,9 +3553,27 @@ window.VocabQuizModule = VocabQuizModule;
 
 // vocabRegisterModule.js
 const VocabRegisterModule = (() => {
+  const CARD_COUNT = 2;
+  const DRAFT_KEY = 'dd_vocab_register_draft';
+  const BOOK_URL_CACHE_KEY = 'dd_my_vocab_book_url';
   let previewRows = [];
   let registerMode = 'simple';
-  let simpleMeanings = [{ meaning: '', posKey: '' }];
+  let cardStates = [];
+  let draftTimer = null;
+  let draftReady = false;
+
+  function emptyMeanings() {
+    return [{ meaning: '', posKey: '' }];
+  }
+
+  function cardEl(index) {
+    return document.querySelector('.register-card[data-card="' + index + '"]');
+  }
+
+  function qsCard(index, selector) {
+    const el = cardEl(index);
+    return el ? el.querySelector(selector) : null;
+  }
 
   function isMultiWordExpr(text) {
     return String(text || '').trim().split(/\s+/).filter(Boolean).length >= 2;
@@ -3420,56 +3581,62 @@ const VocabRegisterModule = (() => {
 
   function setRegisterMode(mode) {
     registerMode = mode === 'detail' ? 'detail' : 'simple';
-    const simplePanel = document.getElementById('register-simple-panel');
-    const detailPanel = document.getElementById('register-detail-panel');
+    document.querySelectorAll('.register-simple-panel').forEach(function (panel) {
+      panel.style.display = registerMode === 'simple' ? 'block' : 'none';
+    });
+    document.querySelectorAll('.register-detail-panel').forEach(function (panel) {
+      panel.style.display = registerMode === 'detail' ? 'block' : 'none';
+    });
     const toggle = document.getElementById('register-mode-toggle');
-    if (simplePanel) simplePanel.style.display = registerMode === 'simple' ? 'block' : 'none';
-    if (detailPanel) detailPanel.style.display = registerMode === 'detail' ? 'block' : 'none';
     if (toggle) {
       toggle.setAttribute('aria-pressed', registerMode === 'detail' ? 'true' : 'false');
       toggle.textContent = registerMode === 'simple' ? '簡易登録 ⇔ 詳細登録' : '詳細登録 ⇔ 簡易登録';
     }
+    saveDraftSoon_();
   }
 
-  function usedPosKeys(exceptIndex) {
+  function usedPosKeys(cardIndex, exceptIndex) {
     const used = {};
-    simpleMeanings.forEach(function (row, i) {
+    (cardStates[cardIndex].meanings || []).forEach(function (row, i) {
       if (i === exceptIndex) return;
       if (row.posKey) used[row.posKey] = true;
     });
     return used;
   }
 
-  function firstAvailablePos(exceptIndex) {
-    const used = usedPosKeys(exceptIndex);
+  function firstAvailablePos(cardIndex, exceptIndex) {
+    const used = usedPosKeys(cardIndex, exceptIndex);
     for (let i = 0; i < VOCAB_SIMPLE_POS.length; i++) {
       if (!used[VOCAB_SIMPLE_POS[i].key]) return VOCAB_SIMPLE_POS[i].key;
     }
     return '';
   }
 
-  function applyIdiomIfMultiWord() {
-    const wordEl = document.getElementById('register-simple-word');
+  function applyIdiomIfMultiWord(cardIndex) {
+    const wordEl = qsCard(cardIndex, '.register-simple-word');
     if (!wordEl || !isMultiWordExpr(wordEl.value)) return;
-    const used = usedPosKeys(0);
+    const used = usedPosKeys(cardIndex, 0);
     if (used[VOCAB_IDIOM_KEY]) return;
-    simpleMeanings[0].posKey = VOCAB_IDIOM_KEY;
+    cardStates[cardIndex].meanings[0].posKey = VOCAB_IDIOM_KEY;
   }
 
-  function renderSimpleMeanings() {
-    const wrap = document.getElementById('register-simple-meanings');
-    const addBtn = document.getElementById('register-add-meaning-btn');
+  function renderSimpleMeanings(cardIndex) {
+    const wrap = qsCard(cardIndex, '.register-simple-meanings');
+    const addBtn = qsCard(cardIndex, '.register-add-meaning-btn');
     if (!wrap) return;
     wrap.innerHTML = '';
-    simpleMeanings.forEach(function (row, index) {
-      const used = usedPosKeys(index);
+    cardStates[cardIndex].meanings.forEach(function (row, index) {
+      const used = usedPosKeys(cardIndex, index);
       const line = document.createElement('div');
       line.className = 'simple-meaning-row';
       const input = document.createElement('input');
       input.type = 'text';
       input.placeholder = '意味（和訳）';
       input.value = row.meaning;
-      input.addEventListener('input', function () { simpleMeanings[index].meaning = input.value; });
+      input.addEventListener('input', function () {
+        cardStates[cardIndex].meanings[index].meaning = input.value;
+        saveDraftSoon_();
+      });
       const select = document.createElement('select');
       const placeholder = document.createElement('option');
       placeholder.value = '';
@@ -3484,8 +3651,9 @@ const VocabRegisterModule = (() => {
         select.appendChild(opt);
       });
       select.addEventListener('change', function () {
-        simpleMeanings[index].posKey = select.value;
-        renderSimpleMeanings();
+        cardStates[cardIndex].meanings[index].posKey = select.value;
+        renderSimpleMeanings(cardIndex);
+        saveDraftSoon_();
       });
       line.appendChild(input);
       line.appendChild(select);
@@ -3496,32 +3664,36 @@ const VocabRegisterModule = (() => {
         removeBtn.textContent = '×';
         removeBtn.setAttribute('aria-label', 'この意味を削除');
         removeBtn.addEventListener('click', function () {
-          simpleMeanings.splice(index, 1);
-          renderSimpleMeanings();
+          cardStates[cardIndex].meanings.splice(index, 1);
+          renderSimpleMeanings(cardIndex);
+          saveDraftSoon_();
         });
         line.appendChild(removeBtn);
       }
       wrap.appendChild(line);
     });
-    if (addBtn) {
-      addBtn.disabled = firstAvailablePos(-1) === '';
-    }
+    if (addBtn) addBtn.disabled = firstAvailablePos(cardIndex, -1) === '' || cardStates[cardIndex].submitting;
   }
 
-  function resetSimpleForm() {
-    const wordEl = document.getElementById('register-simple-word');
+  function resetCard(cardIndex) {
+    cardStates[cardIndex].meanings = emptyMeanings();
+    const wordEl = qsCard(cardIndex, '.register-simple-word');
     if (wordEl) wordEl.value = '';
-    simpleMeanings = [{ meaning: '', posKey: '' }];
-    renderSimpleMeanings();
+    VOCAB_REGISTER_FIELDS.forEach(function (field) {
+      const el = qsCard(cardIndex, '[data-field="' + field + '"]');
+      if (el) el.value = '';
+    });
+    renderSimpleMeanings(cardIndex);
+    saveDraftNow_();
   }
 
-  function readSimpleRow() {
-    const wordEl = document.getElementById('register-simple-word');
+  function readSimpleRow(cardIndex) {
+    const wordEl = qsCard(cardIndex, '.register-simple-word');
     const word = wordEl ? wordEl.value.trim() : '';
     if (!word) throw new Error('英単語・熟語の表現は必須です。');
     const row = { '英単語・熟語の表現': word };
     let hasMeaning = false;
-    simpleMeanings.forEach(function (item) {
+    cardStates[cardIndex].meanings.forEach(function (item) {
       const meaning = String(item.meaning || '').trim();
       if (!meaning) return;
       if (!item.posKey) throw new Error('意味の品詞を選択してください。');
@@ -3532,8 +3704,9 @@ const VocabRegisterModule = (() => {
     return row;
   }
 
-  function buildForm() {
-    const grid = document.getElementById('register-form-grid');
+  function buildForm(cardIndex) {
+    const grid = qsCard(cardIndex, '.register-form-grid');
+    if (!grid) return;
     grid.innerHTML = '';
     VOCAB_REGISTER_FIELDS.forEach(function (field) {
       const wrap = document.createElement('div');
@@ -3545,25 +3718,19 @@ const VocabRegisterModule = (() => {
       const input = document.createElement(isLong ? 'textarea' : 'input');
       input.dataset.field = field;
       input.placeholder = field === '英単語・熟語の表現' ? '必須' : '';
+      input.addEventListener('input', saveDraftSoon_);
       wrap.appendChild(input);
       grid.appendChild(wrap);
     });
   }
 
-  function readFormRow() {
+  function readFormRow(cardIndex) {
     const row = {};
     VOCAB_REGISTER_FIELDS.forEach(function (field) {
-      const el = document.querySelector('#register-form-grid [data-field="' + field + '"]');
+      const el = qsCard(cardIndex, '[data-field="' + field + '"]');
       row[field] = el ? el.value : '';
     });
     return row;
-  }
-
-  function clearForm() {
-    VOCAB_REGISTER_FIELDS.forEach(function (field) {
-      const el = document.querySelector('#register-form-grid [data-field="' + field + '"]');
-      if (el) el.value = '';
-    });
   }
 
   function parseTsv(text) {
@@ -3605,8 +3772,6 @@ const VocabRegisterModule = (() => {
     wrap.innerHTML = html;
     document.getElementById('register-preview-area').style.display = 'block';
   }
-
-  const BOOK_URL_CACHE_KEY = 'dd_my_vocab_book_url';
 
   function setBookShortcut(url, sheetUrl) {
     const href = sheetUrl || url || '';
@@ -3679,23 +3844,137 @@ const VocabRegisterModule = (() => {
 
   function showMsg(text, isError) {
     const el = document.getElementById('register-msg');
+    if (!el) return;
     el.textContent = text;
     el.style.color = isError ? '#f44336' : '#4caf50';
   }
 
-  let registerBusy = false;
-  async function runRegister_(btn, fn) {
-    if (registerBusy) return;
-    registerBusy = true;
-    if (btn) btn.disabled = true;
-    showMsg('登録中です。完了までこのまま待ってください…', false);
+  function showCardMsg(cardIndex, text, isError) {
+    const el = qsCard(cardIndex, '.register-card-msg');
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = isError ? '#f44336' : '#4caf50';
+    showMsg(text, isError);
+  }
+
+  function setCardSending(cardIndex, sending) {
+    cardStates[cardIndex].submitting = sending;
+    const card = cardEl(cardIndex);
+    if (card) card.classList.toggle('is-sending', sending);
+  }
+
+  function collectDraft_() {
+    const cards = [];
+    for (let i = 0; i < CARD_COUNT; i++) {
+      const wordEl = qsCard(i, '.register-simple-word');
+      const detail = {};
+      VOCAB_REGISTER_FIELDS.forEach(function (field) {
+        const el = qsCard(i, '[data-field="' + field + '"]');
+        if (el && el.value) detail[field] = el.value;
+      });
+      cards.push({
+        word: wordEl ? wordEl.value : '',
+        meanings: (cardStates[i] && cardStates[i].meanings) ? cardStates[i].meanings : emptyMeanings(),
+        detail: detail
+      });
+    }
+    const tsvEl = document.getElementById('register-tsv-input');
+    const sheetEl = document.getElementById('register-sheet-name');
+    return {
+      mode: registerMode,
+      sheetName: sheetEl ? sheetEl.value : 'デフォルト',
+      tsv: tsvEl ? tsvEl.value : '',
+      cards: cards
+    };
+  }
+
+  function saveDraftNow_() {
+    if (!draftReady) return;
+    LocalStore.set(DRAFT_KEY, collectDraft_());
+  }
+
+  function saveDraftSoon_() {
+    if (!draftReady) return;
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(saveDraftNow_, 250);
+  }
+
+  function applyDraft_(draft) {
+    if (!draft) return;
+    if (draft.sheetName) {
+      const sheetEl = document.getElementById('register-sheet-name');
+      if (sheetEl) sheetEl.value = draft.sheetName;
+    }
+    if (draft.tsv) {
+      const tsvEl = document.getElementById('register-tsv-input');
+      if (tsvEl) tsvEl.value = draft.tsv;
+    }
+    if (draft.mode) setRegisterMode(draft.mode);
+    (draft.cards || []).forEach(function (card, i) {
+      if (i >= CARD_COUNT) return;
+      cardStates[i].meanings = (card.meanings && card.meanings.length) ? card.meanings : emptyMeanings();
+      const wordEl = qsCard(i, '.register-simple-word');
+      if (wordEl) wordEl.value = card.word || '';
+      const detail = card.detail || {};
+      VOCAB_REGISTER_FIELDS.forEach(function (field) {
+        const el = qsCard(i, '[data-field="' + field + '"]');
+        if (el) el.value = detail[field] || '';
+      });
+      renderSimpleMeanings(i);
+    });
+  }
+
+  function buildCardHtml_(index) {
+    return ''
+      + '<article class="register-card" data-card="' + index + '">'
+      + '<div class="register-card-title">カード ' + (index + 1) + '</div>'
+      + '<div class="register-simple-panel">'
+      + '<div class="form-group"><label>英単語・熟語の表現 *</label>'
+      + '<input type="text" class="register-simple-word" placeholder="単語または熟語"></div>'
+      + '<div class="form-group"><label>意味（和訳）</label>'
+      + '<div class="register-simple-meanings"></div>'
+      + '<button type="button" class="btn-small register-add-meaning-btn">＋違う品詞の意味を追加</button></div>'
+      + '<button type="button" class="btn-primary register-simple-btn" style="margin-top:12px;">登録</button>'
+      + '</div>'
+      + '<div class="register-detail-panel" style="display:none;">'
+      + '<div class="vocab-form-grid register-form-grid"></div>'
+      + '<button type="button" class="btn-primary register-single-btn" style="margin-top:12px;">登録</button>'
+      + '</div>'
+      + '<div class="register-card-msg"></div>'
+      + '</article>';
+  }
+
+  function setCardBusy(cardIndex, btn, pendingText) {
+    setCardSending(cardIndex, true);
+    if (window.BusyButton) BusyButton.start(btn, pendingText);
+  }
+
+  function clearCardBusy(cardIndex, btn) {
+    setCardSending(cardIndex, false);
+    if (window.BusyButton) BusyButton.end(btn);
+  }
+
+  async function submitCard_(cardIndex, btn, readRowFn) {
+    if (cardStates[cardIndex].submitting) return;
+    let row;
     try {
-      await fn();
+      row = readRowFn(cardIndex);
     } catch (e) {
-      showMsg('登録エラー: ' + e.message, true);
+      showCardMsg(cardIndex, e.message, true);
+      return;
+    }
+    setCardBusy(cardIndex, btn, '登録中…');
+    showCardMsg(cardIndex, '登録中です。もう一方のカードには入力できます。', false);
+    saveDraftNow_();
+    try {
+      const result = await registerRows([row]);
+      const dest = applyRegisterResult(result);
+      resetCard(cardIndex);
+      showCardMsg(cardIndex, '「' + vocabNorm(row['英単語・熟語の表現']) + '」を「' + dest.bookName + '」のシート「' + dest.sheetName + '」に登録しました。', false);
+    } catch (e) {
+      showCardMsg(cardIndex, '登録エラー: ' + e.message, true);
     } finally {
-      registerBusy = false;
-      if (btn) btn.disabled = false;
+      clearCardBusy(cardIndex, btn);
     }
   }
 
@@ -3703,79 +3982,95 @@ const VocabRegisterModule = (() => {
     if (!init._done) {
       init._done = true;
       bindRegisterUi_();
+      applyDraft_(LocalStore.get(DRAFT_KEY, null));
+      draftReady = true;
     }
     refreshBookShortcut();
   }
 
   function bindRegisterUi_() {
-    buildForm();
+    const grid = document.getElementById('register-card-grid');
+    cardStates = [];
+    let html = '';
+    for (let i = 0; i < CARD_COUNT; i++) {
+      cardStates.push({ meanings: emptyMeanings(), submitting: false });
+      html += buildCardHtml_(i);
+    }
+    grid.innerHTML = html;
+
+    for (let i = 0; i < CARD_COUNT; i++) {
+      buildForm(i);
+      renderSimpleMeanings(i);
+      (function (cardIndex) {
+        const wordEl = qsCard(cardIndex, '.register-simple-word');
+        if (wordEl) {
+          wordEl.addEventListener('input', function () {
+            applyIdiomIfMultiWord(cardIndex);
+            renderSimpleMeanings(cardIndex);
+            saveDraftSoon_();
+          });
+        }
+        qsCard(cardIndex, '.register-add-meaning-btn').addEventListener('click', function () {
+          if (!firstAvailablePos(cardIndex, -1)) return;
+          cardStates[cardIndex].meanings.push({ meaning: '', posKey: '' });
+          renderSimpleMeanings(cardIndex);
+          saveDraftSoon_();
+        });
+        qsCard(cardIndex, '.register-simple-btn').addEventListener('click', function () {
+          submitCard_(cardIndex, this, readSimpleRow);
+        });
+        qsCard(cardIndex, '.register-single-btn').addEventListener('click', function () {
+          submitCard_(cardIndex, this, readFormRow);
+        });
+      })(i);
+    }
+
     setRegisterMode('simple');
-    renderSimpleMeanings();
 
     document.getElementById('register-mode-toggle').addEventListener('click', function () {
       setRegisterMode(registerMode === 'simple' ? 'detail' : 'simple');
     });
 
-    const wordEl = document.getElementById('register-simple-word');
-    if (wordEl) {
-      wordEl.addEventListener('input', function () {
-        applyIdiomIfMultiWord();
-        renderSimpleMeanings();
-      });
-    }
-    document.getElementById('register-add-meaning-btn').addEventListener('click', function () {
-      if (!firstAvailablePos(-1)) return;
-      simpleMeanings.push({ meaning: '', posKey: '' });
-      renderSimpleMeanings();
+    const sheetEl = document.getElementById('register-sheet-name');
+    if (sheetEl) sheetEl.addEventListener('input', saveDraftSoon_);
+    const tsvEl = document.getElementById('register-tsv-input');
+    if (tsvEl) tsvEl.addEventListener('input', saveDraftSoon_);
+
+    window.addEventListener('pagehide', saveDraftNow_);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') saveDraftNow_();
     });
 
     document.getElementById('register-parse-tsv-btn').addEventListener('click', function () {
-      const text = document.getElementById('register-tsv-input').value;
-      if (!text.trim()) { showMsg('TSVを入力してください。', true); return; }
-      try {
+      const btn = this;
+      BusyButton.run(btn, async function () {
+        const text = document.getElementById('register-tsv-input').value;
+        if (!text.trim()) { showMsg('TSVを入力してください。', true); return; }
         const rows = parseTsv(text);
         if (rows.length === 0) { showMsg('有効な行がありません。', true); return; }
         renderPreview(rows);
+        saveDraftNow_();
         showMsg(rows.length + '語をプレビューしました。', false);
-      } catch (e) {
-        showMsg('TSV解析エラー: ' + e.message, true);
-      }
+      }, '解析中…');
     });
 
     document.getElementById('register-import-btn').addEventListener('click', function () {
-      runRegister_(document.getElementById('register-import-btn'), async function () {
+      const btn = this;
+      BusyButton.run(btn, async function () {
         if (previewRows.length === 0) return;
+        saveDraftNow_();
         const result = await registerRows(previewRows);
         const dest = applyRegisterResult(result);
-        showMsg(result.data.registeredCount + '語を「' + dest.bookName + '」のシート「' + dest.sheetName + '」に登録しました。右のボタンからスプレッドシートを開けます。', false);
+        showMsg(result.data.registeredCount + '語を「' + dest.bookName + '」のシート「' + dest.sheetName + '」に登録しました。', false);
         document.getElementById('register-tsv-input').value = '';
         previewRows = [];
         document.getElementById('register-preview-area').style.display = 'none';
-      });
-    });
-
-    document.getElementById('register-simple-btn').addEventListener('click', function () {
-      runRegister_(document.getElementById('register-simple-btn'), async function () {
-        const row = readSimpleRow();
-        const result = await registerRows([row]);
-        const dest = applyRegisterResult(result);
-        showMsg('「' + vocabNorm(row['英単語・熟語の表現']) + '」を「' + dest.bookName + '」のシート「' + dest.sheetName + '」に登録しました。右のボタンからスプレッドシートを開けます。', false);
-        resetSimpleForm();
-      });
-    });
-
-    document.getElementById('register-single-btn').addEventListener('click', function () {
-      runRegister_(document.getElementById('register-single-btn'), async function () {
-        const row = readFormRow();
-        const result = await registerRows([row]);
-        const dest = applyRegisterResult(result);
-        showMsg('「' + vocabNorm(row['英単語・熟語の表現']) + '」を「' + dest.bookName + '」のシート「' + dest.sheetName + '」に登録しました。右のボタンからスプレッドシートを開けます。', false);
-        clearForm();
-      });
+        saveDraftNow_();
+      }, '一括登録中…');
     });
   }
 
-  return { init: init, refreshBookShortcut: refreshBookShortcut };
+  return { init: init, refreshBookShortcut: refreshBookShortcut, saveDraft: saveDraftNow_ };
 })();
 
 window.VocabRegisterModule = VocabRegisterModule;
@@ -3874,23 +4169,31 @@ const ReadingSessionModule = (() => {
   async function submitTranscript() {
     const transcript = document.getElementById('reading-transcript').value.trim();
     if (!transcript) { alert('テキストを入力するか、音声認識してください'); return; }
+    LocalStore.set('dd_reading_transcript_draft', {
+      transcript: transcript,
+      ts: Date.now()
+    });
+    const btn = document.getElementById('reading-submit-btn');
     const msgEl = document.getElementById('reading-result-msg');
-    msgEl.textContent = '採点中...';
-    msgEl.style.color = '#555';
-    try {
-      const d = scoreReadingTranscriptClient_(sessionData, transcript);
-      currentScore = d.matched;
-      totalQuestionsCount = d.total;
-      sessionStartTime = sessionStartTs;
-      await saveSessionResultsUnified('reading', currentReadingSetName || sessionData.setName);
-      msgEl.textContent = 'スコア: ' + d.score + '% （' + d.matched + '/' + d.total + ' 語一致）';
-      msgEl.style.color = d.score >= 80 ? '#4caf50' : '#ff9800';
-      document.getElementById('reading-submit-btn').style.display = 'none';
-      document.getElementById('reading-back-settings-btn').style.display = 'block';
-    } catch (e) {
-      msgEl.textContent = 'エラー: ' + e.message;
-      msgEl.style.color = '#f44336';
-    }
+    await BusyButton.run(btn, async function () {
+      msgEl.textContent = '採点中...';
+      msgEl.style.color = '#555';
+      try {
+        const d = scoreReadingTranscriptClient_(sessionData, transcript);
+        currentScore = d.matched;
+        totalQuestionsCount = d.total;
+        sessionStartTime = sessionStartTs;
+        await saveSessionResultsUnified('reading', currentReadingSetName || sessionData.setName);
+        msgEl.textContent = 'スコア: ' + d.score + '% （' + d.matched + '/' + d.total + ' 語一致）';
+        msgEl.style.color = d.score >= 80 ? '#4caf50' : '#ff9800';
+        document.getElementById('reading-submit-btn').style.display = 'none';
+        document.getElementById('reading-back-settings-btn').style.display = 'block';
+        LocalStore.remove('dd_reading_transcript_draft');
+      } catch (e) {
+        msgEl.textContent = 'エラー: ' + e.message;
+        msgEl.style.color = '#f44336';
+      }
+    }, '採点中…');
   }
 
   function backToSettings() {
@@ -4522,46 +4825,40 @@ elements.startBtn.addEventListener('click', async () => {
     if (unInput && currentUserId !== "Guest") unInput.value = currentUserId;
   }
   
-  // UX：ロード中の表現
-  elements.startBtn.disabled = true;
-  const originalText = elements.startBtn.textContent;
-  elements.startBtn.textContent = "問題を読み込み中...";
+  await BusyButton.run(elements.startBtn, async function () {
+    try {
+      await GrammarSettingsModule.prepareForStart();
+      const rows = GrammarSettingsModule.getFilteredRows();
+      const mode = document.querySelector('input[name="play-mode"]:checked').value;
 
-  try {
-    await GrammarSettingsModule.prepareForStart();
-    const rows = GrammarSettingsModule.getFilteredRows();
-    const mode = document.querySelector('input[name="play-mode"]:checked').value;
+      const generated = GrammarQuizGenerator.buildQuestions(rows, options);
+      if (generated.length === 0) {
+        alert("選択した出題形式で生成できる問題がありません。形式の選択か絞り込みを見直してください。");
+        return;
+      }
+      const questions = AlgorithmModule.buildQuestionSet(generated, mode);
 
-    const generated = GrammarQuizGenerator.buildQuestions(rows, options);
-    if (generated.length === 0) {
-      alert("選択した出題形式で生成できる問題がありません。形式の選択か絞り込みを見直してください。");
-      return;
+      if (questions.length > 0) {
+        currentQuestionDataList = questions;
+        totalQuestionsCount = questions.length;
+        currentQuestionIndex = 0;
+        currentScore = 0;
+        sessionAnswerLog = [];
+        sessionPersistedToServer = true;
+        sessionStartTime = Date.now();
+        BackendSyncStatus.refresh();
+        loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
+        screens.settings.style.display = 'none';
+        document.getElementById('result-screen').style.display = 'none';
+        screens.game.style.display = 'block';
+      } else {
+        alert("選択した条件で出題できる問題がありません。教材・絞り込み・出題形式を確認してください。");
+      }
+    } catch (error) {
+      console.error(error);
+      alert("通信エラーが発生しました: " + error.message);
     }
-    const questions = AlgorithmModule.buildQuestionSet(generated, mode);
-    
-    if (questions.length > 0) {
-      currentQuestionDataList = questions;
-      totalQuestionsCount = questions.length;
-      currentQuestionIndex = 0;
-      currentScore = 0;
-      sessionAnswerLog = [];
-      sessionPersistedToServer = true;
-      sessionStartTime = Date.now();
-      BackendSyncStatus.refresh();
-      loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
-      screens.settings.style.display = 'none';
-      document.getElementById('result-screen').style.display = 'none';
-      screens.game.style.display = 'block';
-    } else {
-      alert("選択した条件で出題できる問題がありません。教材・絞り込み・出題形式を確認してください。");
-    }
-  } catch (error) {
-    console.error(error);
-    alert("通信エラーが発生しました: " + error.message);
-  } finally {
-    elements.startBtn.disabled = false;
-    elements.startBtn.textContent = originalText;
-  }
+  }, '読み込み中…');
 });
 
 document.getElementById('vocab-start-btn').addEventListener('click', async () => {
@@ -4574,63 +4871,58 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
     return;
   }
 
-  btn.disabled = true;
-  const originalText = btn.textContent;
-  btn.textContent = '単語を読み込み中...';
+  await BusyButton.run(btn, async function () {
+    try {
+      let result;
+      const bookType = document.getElementById('vocab-book-type').value;
+      if (bookType === 'user' && AuthGateService.isValid()) {
+        result = await UserBridge.call('getVocabWords', {
+          sheetName: options.sheetName,
+          filtersJson: JSON.stringify(options.filters)
+        });
+        if (result.status === 'success') result = { status: 'success', data: result.data };
+      } else {
+        result = await PresetModule.getVocabWords(options.bookName, options.sheetName, JSON.stringify(options.filters), true, false);
+      }
+      if (result.status !== 'success') throw new Error(result.message || '単語取得失敗');
 
-  try {
-    let result;
-    const bookType = document.getElementById('vocab-book-type').value;
-    if (bookType === 'user' && AuthGateService.isValid()) {
-      result = await UserBridge.call('getVocabWords', {
-        sheetName: options.sheetName,
-        filtersJson: JSON.stringify(options.filters)
-      });
-      if (result.status === 'success') result = { status: 'success', data: result.data };
-    } else {
-      result = await PresetModule.getVocabWords(options.bookName, options.sheetName, JSON.stringify(options.filters), true, false);
+      const words = result.data.words || [];
+      const pool = result.data.pool || [];
+      const bookPool = result.data.bookPool || pool;
+
+      if (words.length === 0) {
+        alert('条件に合う単語がありません。');
+        return;
+      }
+
+      currentVocabSetName = options.bookName + ' / ' + options.sheetName;
+      currentVocabBookName = options.bookName;
+      currentVocabSheetName = options.sheetName;
+
+      const questions = prepareVocabQuestions(words, pool, bookPool, options, null);
+      if (questions.length === 0) {
+        alert('出題できる問題がありません。');
+        return;
+      }
+
+      currentQuestionDataList = questions;
+      totalQuestionsCount = questions.length;
+      currentQuestionIndex = 0;
+      currentScore = 0;
+      sessionAnswerLog = [];
+      sessionPersistedToServer = true;
+      sessionStartTime = Date.now();
+      BackendSyncStatus.refresh();
+
+      loadQuestionToGame(currentQuestionDataList[0]);
+      screens.settings.style.display = 'none';
+      document.getElementById('result-screen').style.display = 'none';
+      screens.game.style.display = 'block';
+    } catch (error) {
+      console.error(error);
+      alert('通信エラーが発生しました: ' + error.message);
     }
-    if (result.status !== 'success') throw new Error(result.message || '単語取得失敗');
-
-    const words = result.data.words || [];
-    const pool = result.data.pool || [];
-    const bookPool = result.data.bookPool || pool;
-
-    if (words.length === 0) {
-      alert('条件に合う単語がありません。');
-      return;
-    }
-
-    currentVocabSetName = options.bookName + ' / ' + options.sheetName;
-    currentVocabBookName = options.bookName;
-    currentVocabSheetName = options.sheetName;
-
-    const questions = prepareVocabQuestions(words, pool, bookPool, options, null);
-    if (questions.length === 0) {
-      alert('出題できる問題がありません。');
-      return;
-    }
-
-    currentQuestionDataList = questions;
-    totalQuestionsCount = questions.length;
-    currentQuestionIndex = 0;
-    currentScore = 0;
-    sessionAnswerLog = [];
-    sessionPersistedToServer = true;
-    sessionStartTime = Date.now();
-    BackendSyncStatus.refresh();
-
-    loadQuestionToGame(currentQuestionDataList[0]);
-    screens.settings.style.display = 'none';
-    document.getElementById('result-screen').style.display = 'none';
-    screens.game.style.display = 'block';
-  } catch (error) {
-    console.error(error);
-    alert('通信エラーが発生しました: ' + error.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = originalText;
-  }
+  }, '読み込み中…');
 });
 
 elements.backBtn.addEventListener('click', () => {
@@ -5171,24 +5463,23 @@ function initModeTabs() {
     readingStartBtn.addEventListener('click', async function () {
       const sheet = document.getElementById('reading-sheet-select').value;
       if (!sheet) { alert('シートを選択してください'); return; }
-      readingStartBtn.disabled = true;
-      await ReadingSessionModule.startSession(sheet);
-      readingStartBtn.disabled = false;
+      await BusyButton.run(readingStartBtn, async function () {
+        await ReadingSessionModule.startSession(sheet);
+      }, '開始中…');
     });
   }
 
   document.getElementById('cache-refresh-btn').addEventListener('click', async function () {
     const btn = this;
-    btn.disabled = true;
-    try {
-      await PresetModule.refreshAll();
-      await reloadPresetScreens_();
-      showToast_('教材を最新に更新しました。');
-    } catch (e) {
-      alert('更新エラー: ' + e.message);
-    } finally {
-      btn.disabled = false;
-    }
+    await BusyButton.run(btn, async function () {
+      try {
+        await PresetModule.refreshAll();
+        await reloadPresetScreens_();
+        showToast_('教材を最新に更新しました。');
+      } catch (e) {
+        alert('更新エラー: ' + e.message);
+      }
+    }, '更新中…');
   });
 
   // 裏側の版チェックで教材の更新を検知したら、設定画面を静かに描き直す
@@ -5317,6 +5608,7 @@ window.onLoginSuccess = function(user) {
   fetchUserLogs();
   PresetModule.revalidate();
   ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
+  flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
   BackendSyncStatus.refresh();
 };
 
@@ -5454,6 +5746,7 @@ function bindLoginScreen_() {
       if (msgEl) msgEl.textContent = 'DASHBOARD_URL が設定されていません（config.js）';
       return;
     }
+    BusyButton.start(btn, '移動中…');
     window.location.href = url;
   });
 }
