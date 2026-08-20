@@ -423,7 +423,7 @@ button.is-busy::after,
       <p style="margin-bottom: 20px; font-size: 0.9em; color: #777;">どちらかの方法でサインインしてください。ホワイトリスト照合後に学習画面へ進みます。</p>
       <p style="margin: 0 auto 8px; max-width: 320px; font-size: 0.85em; font-weight: bold; color: #455a64; text-align: left;">Googleでサインイン</p>
       <div id="google-signin-container" style="display:flex;justify-content:center;margin:0 auto 4px;"></div>
-      <p style="margin: 0 auto 18px; max-width: 320px; font-size: 0.8em; color: #888; text-align: left;">このページ上でログインします。</p>
+      <p style="margin: 0 auto 18px; max-width: 320px; font-size: 0.8em; color: #888; text-align: left;">このページ上でログインします。初回は Drive・スプレッドシートへのアクセス許可も求められます（マイ単語帳・学習記録の保存に必要）。</p>
       <p style="margin: 0 auto 8px; max-width: 320px; font-size: 0.85em; font-weight: bold; color: #455a64; text-align: left;">Googleアカウントでログイン（GAS経由）</p>
       <button type="button" id="login-via-gas-btn" class="btn-primary" style="max-width:320px;margin:0 auto;display:block;">GAS経由でログイン</button>
       <p style="margin: 8px auto 0; max-width: 320px; font-size: 0.8em; color: #888; text-align: left;">学校アカウントで上のボタンが出ない場合はこちらです。</p>
@@ -685,7 +685,7 @@ button.is-busy::after,
               <input type="text" id="register-sheet-name" value="デフォルト">
               <a id="register-open-book-btn" class="btn-small" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">スプレッドシートを開く</a>
             </div>
-            <p class="register-dest-hint">登録先はあなたの Google Drive のブック「マイ単語帳」です。上のシート名が教材名になります。</p>
+            <p class="register-dest-hint">登録先はあなたの Google Drive「DigitalDrill_MyData / マイ単語帳」です。Google ログイン時に Drive 権限を許可してください。</p>
           </div>
           <div id="register-msg" style="margin-top:4px;font-weight:bold;"></div>
         </div>
@@ -904,6 +904,7 @@ button.is-busy::after,
   <div id="keyboard-container"></div>
 <script src="config.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="user-drive.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script>
 /** true: GAS① 認証ゲート必須（短命 auth トークン） */
@@ -1261,6 +1262,7 @@ const AuthGateService = {
   async logout() {
     var token = this.getToken();
     this.clear();
+    if (window.UserDriveModule) UserDriveModule.clearAuth();
     if (token && window.API_URL) {
       try {
         await BackendSyncStatus.track(fetch(window.API_URL, gasFetchOptions_({
@@ -1362,13 +1364,26 @@ const USER_BRIDGE_WRITE_OPS = {
   registerVocabWords: true
 };
 
-/** UserBridge: GAS② キュー → GAS① iframe 実行（同時実行すると postMessage が取り違えられるため直列化） */
+/** UserBridge: 優先 UserDriveModule（GCP OAuth + Drive/Sheets API）、フォールバック GAS iframe */
 const UserBridge = {
   _chain: Promise.resolve(),
+  _useDriveApi: true,
 
   async queueOp(op, payload) {
     if (!AuthGateService.isValid()) {
       return { status: 'error', message: 'ログインが必要です' };
+    }
+    if (this._useDriveApi && window.UserDriveModule && UserDriveModule.isEnabled()) {
+      try {
+        await UserDriveModule.ensureAuthorized();
+        return UserDriveModule.dispatch(op, payload || {});
+      } catch (e) {
+        const msg = String(e.message || e);
+        if (/access_denied|popup_closed|user_cancelled/i.test(msg)) {
+          return { status: 'error', message: 'Drive へのアクセスが許可されていません。Google サインインで Drive 権限を許可してください。', code: 'drive_auth_required' };
+        }
+        console.warn('UserDriveModule 失敗、GAS UserBridge へフォールバック:', msg);
+      }
     }
     const res = await parseGasJson_(await fetchWithBackoff_(window.API_URL, {
       method: 'POST',
@@ -5605,10 +5620,23 @@ window.onLoginSuccess = function(user) {
   initModeTabs();
   initVocabModules();
   if (window.VocabRegisterModule) window.VocabRegisterModule.init();
-  fetchUserLogs();
+  if (window.UserDriveModule && UserDriveModule.isEnabled()) {
+    UserDriveModule.ensureAuthorized().then(function () {
+      fetchUserLogs();
+      ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
+      flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
+    }).catch(function (e) {
+      console.warn('Drive 認可:', e.message || e);
+      if (typeof showToast_ === 'function') {
+        showToast_('マイ単語帳・学習記録を使うには Google の Drive 権限が必要です。再ログイン時に許可してください。');
+      }
+    });
+  } else {
+    fetchUserLogs();
+    ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
+    flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
+  }
   PresetModule.revalidate();
-  ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
-  flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
   BackendSyncStatus.refresh();
 };
 

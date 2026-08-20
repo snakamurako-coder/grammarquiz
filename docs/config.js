@@ -6,6 +6,8 @@ window.DIGITALDRILL_CONFIG = {
   DASHBOARD_URL: 'https://script.google.com/macros/s/AKfycbxN9pnUp_mG6QHBKJz2WPaS-YqZlrhUaSI1XjTc3aXbmivNowfQPAi1Vi0WmpmfcDSo/exec',
   /** Google Identity Services（Pages 上のログインボタン用） */
   GOOGLE_CLIENT_ID: '505252303455-84r495bnnsgiefcrv24ro2qtohlgbk2h.apps.googleusercontent.com',
+  /** ユーザー Drive 操作用 OAuth スコープ（GCP で Drive API / Sheets API を有効化し、同意画面に登録） */
+  GOOGLE_DRIVE_SCOPES: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive',
   /**
    * 静的プリセット manifest（Pages 相対パス）。
    * 教材の取得は「キャッシュ → この manifest → GAS② API」のハイブリッド。
