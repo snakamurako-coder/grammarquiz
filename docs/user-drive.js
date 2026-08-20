@@ -49,9 +49,15 @@ const UserDriveModule = (function () {
     return !!getClientId_();
   }
 
+  function metaStorageKey_() {
+    const user = window.AuthGateService && AuthGateService.getUser ? AuthGateService.getUser() : null;
+    const account = user && user.account ? String(user.account).toLowerCase() : '';
+    return account ? META_KEY + ':' + account.replace(/[^a-z0-9@._+-]/gi, '_') : META_KEY;
+  }
+
   function loadMeta_() {
     try {
-      const raw = localStorage.getItem(META_KEY);
+      const raw = localStorage.getItem(metaStorageKey_());
       return raw ? JSON.parse(raw) : {};
     } catch (e) {
       return {};
@@ -59,7 +65,7 @@ const UserDriveModule = (function () {
   }
 
   function saveMeta_(meta) {
-    try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch (e) {}
+    try { localStorage.setItem(metaStorageKey_(), JSON.stringify(meta)); } catch (e) {}
   }
 
   function normField_(value) {
@@ -191,10 +197,25 @@ const UserDriveModule = (function () {
     });
   }
 
-  async function driveVerifyFile_(fileId) {
+  async function driveVerifyOwnedRootFolder_(folderId) {
     try {
-      await apiFetch_('https://www.googleapis.com/drive/v3/files/' + fileId + '?fields=id,name,trashed');
-      return true;
+      const data = await apiFetch_(
+        'https://www.googleapis.com/drive/v3/files/' + folderId + '?fields=id,trashed,parents,ownedByMe'
+      );
+      if (data.trashed || data.ownedByMe === false) return false;
+      return (data.parents || []).indexOf('root') >= 0;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function driveVerifyOwnedInFolder_(fileId, folderId) {
+    try {
+      const data = await apiFetch_(
+        'https://www.googleapis.com/drive/v3/files/' + fileId + '?fields=id,trashed,parents,ownedByMe'
+      );
+      if (data.trashed || data.ownedByMe === false) return false;
+      return (data.parents || []).indexOf(folderId) >= 0;
     } catch (e) {
       return false;
     }
@@ -202,7 +223,11 @@ const UserDriveModule = (function () {
 
   async function ensureFolder_() {
     const meta = loadMeta_();
-    if (meta.folderId && await driveVerifyFile_(meta.folderId)) return meta.folderId;
+    if (meta.folderId && await driveVerifyOwnedRootFolder_(meta.folderId)) return meta.folderId;
+    delete meta.folderId;
+    delete meta.vocabBookId;
+    delete meta.logBookId;
+    saveMeta_(meta);
 
     const found = await driveList_(
       "name='" + FOLDER_NAME.replace(/'/g, "\\'") + "' and mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false"
@@ -229,7 +254,9 @@ const UserDriveModule = (function () {
   async function ensureSpreadsheet_(folderId, name, setupFn) {
     const meta = loadMeta_();
     const metaKey = name === VOCAB_BOOK_NAME ? 'vocabBookId' : 'logBookId';
-    if (meta[metaKey] && await driveVerifyFile_(meta[metaKey])) return meta[metaKey];
+    if (meta[metaKey] && await driveVerifyOwnedInFolder_(meta[metaKey], folderId)) return meta[metaKey];
+    delete meta[metaKey];
+    saveMeta_(meta);
 
     const existing = await findSpreadsheetInFolder_(folderId, name);
     if (existing) {
@@ -450,6 +477,7 @@ const UserDriveModule = (function () {
           bookName: VOCAB_BOOK_NAME,
           bookId: bookId,
           bookUrl: sheetUrl_(bookId),
+          source: 'user',
           sheets: sheetInfos
         }]
       }

@@ -1586,11 +1586,7 @@ function renumberVocabSheet_(sheet) {
 
 function fetchVocabCatalogFromDrive_() {
   const vocabularyFolder = getVocabularyFolder();
-  const props = PropertiesService.getScriptProperties();
-  const myBookId = props.getProperty(PROP.MY_VOCAB_BOOK_ID);
-
   const presets = [];
-  const userBooks = [];
 
   const files = vocabularyFolder.getFilesByType(MimeType.GOOGLE_SHEETS);
   while (files.hasNext()) {
@@ -1603,21 +1599,16 @@ function fetchVocabCatalogFromDrive_() {
       return buildVocabSheetInfo_(sheet);
     });
 
-    const bookInfo = {
+    presets.push({
       bookName: bookName,
       bookId: bookId,
       bookUrl: file.getUrl(),
       sheets: sheetInfos
-    };
-
-    if (bookId === myBookId || bookName === MY_VOCAB_BOOK_NAME) {
-      userBooks.push(bookInfo);
-    } else {
-      presets.push(bookInfo);
-    }
+    });
   }
 
-  return { presets: presets, userBooks: userBooks };
+  /** 学習者のマイ単語帳は GAS② では返さない（OAuth / GAS① ユーザードライブのみ） */
+  return { presets: presets, userBooks: [] };
 }
 
 function buildVocabSheetInfo_(sheet) {

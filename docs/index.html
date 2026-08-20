@@ -1382,7 +1382,7 @@ const UserBridge = {
         if (/access_denied|popup_closed|user_cancelled/i.test(msg)) {
           return { status: 'error', message: 'Drive へのアクセスが許可されていません。Google サインインで Drive 権限を許可してください。', code: 'drive_auth_required' };
         }
-        console.warn('UserDriveModule 失敗、GAS UserBridge へフォールバック:', msg);
+        return { status: 'error', message: 'マイドライブへの接続に失敗しました: ' + msg, code: 'drive_api_failed' };
       }
     }
     const res = await parseGasJson_(await fetchWithBackoff_(window.API_URL, {
@@ -3255,11 +3255,17 @@ const VocabSettingsModule = (() => {
     const result = await PresetModule.getVocabCatalog(!!force);
     if (result.status !== 'success') throw new Error(result.message || 'カタログ取得失敗');
     catalog = result.data;
+    catalog.userBooks = [];
+    catalog.presets = catalog.presets || [];
     if (AuthGateService.isValid()) {
+      const bookTypeEl = document.getElementById('vocab-book-type');
+      if (bookTypeEl) bookTypeEl.value = 'user';
       try {
         const userRes = await UserBridge.call('getVocabCatalog', {});
         if (userRes.status === 'success' && userRes.data && userRes.data.userBooks) {
           catalog.userBooks = userRes.data.userBooks;
+        } else if (userRes.status !== 'success') {
+          console.warn('ユーザーカタログ:', userRes.message || userRes);
         }
       } catch (e) { console.warn('ユーザーカタログ:', e.message); }
     }
@@ -5620,6 +5626,7 @@ window.onLoginSuccess = function(user) {
   initModeTabs();
   initVocabModules();
   if (window.VocabRegisterModule) window.VocabRegisterModule.init();
+  try { sessionStorage.removeItem('dd_my_vocab_book_url'); } catch (e) {}
   if (window.UserDriveModule && UserDriveModule.isEnabled()) {
     UserDriveModule.ensureAuthorized().then(function () {
       fetchUserLogs();
