@@ -1816,6 +1816,56 @@ const ItemStateModule = (() => {
 })();
 window.ItemStateModule = ItemStateModule;
 
+function postGoogleFormViaIframe_(actionUrl, fields) {
+  return new Promise(function (resolve) {
+    const iframeName = 'google-form-submit-' + Date.now();
+    const iframe = document.createElement('iframe');
+    iframe.name = iframeName;
+    iframe.style.display = 'none';
+    iframe.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(iframe);
+
+    const form = document.createElement('form');
+    form.action = actionUrl;
+    form.method = 'POST';
+    form.target = iframeName;
+    form.style.display = 'none';
+    form.setAttribute('accept-charset', 'UTF-8');
+
+    Object.keys(fields).forEach(function (name) {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = fields[name] != null ? String(fields[name]) : '';
+      form.appendChild(input);
+    });
+
+    let settled = false;
+    function finish(result) {
+      if (settled) return;
+      settled = true;
+      window.setTimeout(function () {
+        form.remove();
+        iframe.remove();
+      }, 1500);
+      resolve(result);
+    }
+
+    iframe.addEventListener('load', function () {
+      finish({ status: 'success' });
+    });
+    iframe.addEventListener('error', function () {
+      finish({ status: 'error', message: 'iframe submit failed' });
+    });
+
+    document.body.appendChild(form);
+    form.submit();
+    window.setTimeout(function () {
+      finish({ status: 'success', note: 'submitted_without_load_event' });
+    }, 4000);
+  });
+}
+
 async function sendResultToGoogleForm(summary) {
   const cfg = window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.GOOGLE_FORM;
   if (!cfg || !cfg.ACTION_URL) return { skipped: true, reason: 'form_not_configured' };
@@ -1825,10 +1875,10 @@ async function sendResultToGoogleForm(summary) {
   const user = AuthGateService.getUser();
   const userId = (user && user.account) ? user.account : '';
 
-  const body = new URLSearchParams();
+  const fields = { fvv: '1' };
   function setEntry(key, value) {
     const entryId = entries[key];
-    if (entryId) body.set(entryId, value != null ? String(value) : '');
+    if (entryId) fields[entryId] = value != null ? String(value) : '';
   }
 
   setEntry('User_ID', userId);
@@ -1843,18 +1893,7 @@ async function sendResultToGoogleForm(summary) {
   setEntry('Started_At', summary.Started_At);
   setEntry('Ended_At', summary.Ended_At);
 
-  return BackendSyncStatus.track((async () => {
-    try {
-      await fetch(cfg.ACTION_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        body: body
-      });
-      return { status: 'success' };
-    } catch (e) {
-      return { status: 'error', message: e.message || String(e) };
-    }
-  })());
+  return BackendSyncStatus.track(postGoogleFormViaIframe_(cfg.ACTION_URL, fields));
 }
 
 function shouldSendSessionSummaryToForm_() {
