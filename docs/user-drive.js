@@ -49,10 +49,25 @@ const UserDriveModule = (function () {
     return !!getClientId_();
   }
 
-  function metaStorageKey_() {
+  function accountSuffix_() {
     const user = window.AuthGateService && AuthGateService.getUser ? AuthGateService.getUser() : null;
     const account = user && user.account ? String(user.account).toLowerCase() : '';
-    return account ? META_KEY + ':' + account.replace(/[^a-z0-9@._+-]/gi, '_') : META_KEY;
+    return account ? account.replace(/[^a-z0-9@._+-]/gi, '_') : '';
+  }
+
+  function metaStorageKey_() {
+    const suffix = accountSuffix_();
+    return suffix ? META_KEY + ':' + suffix : META_KEY;
+  }
+
+  function tokenStorageKey_() {
+    const suffix = accountSuffix_();
+    return suffix ? TOKEN_KEY + ':' + suffix : TOKEN_KEY;
+  }
+
+  function tokenExpStorageKey_() {
+    const suffix = accountSuffix_();
+    return suffix ? TOKEN_EXP_KEY + ':' + suffix : TOKEN_EXP_KEY;
   }
 
   function loadMeta_() {
@@ -139,8 +154,8 @@ const UserDriveModule = (function () {
           reject(new Error(resp.error_description || resp.error));
           return;
         }
-        localStorage.setItem(TOKEN_KEY, resp.access_token);
-        localStorage.setItem(TOKEN_EXP_KEY, String(Date.now() + (resp.expires_in - 60) * 1000));
+        localStorage.setItem(tokenStorageKey_(), resp.access_token);
+        localStorage.setItem(tokenExpStorageKey_(), String(Date.now() + (resp.expires_in - 60) * 1000));
         resolve(resp.access_token);
       };
       client.requestAccessToken({ prompt: prompt || '' });
@@ -148,8 +163,8 @@ const UserDriveModule = (function () {
   }
 
   async function ensureAuthorized_() {
-    const token = localStorage.getItem(TOKEN_KEY);
-    const exp = parseInt(localStorage.getItem(TOKEN_EXP_KEY) || '0', 10);
+    const token = localStorage.getItem(tokenStorageKey_());
+    const exp = parseInt(localStorage.getItem(tokenExpStorageKey_()) || '0', 10);
     if (token && Date.now() < exp) return token;
     if (authPromise) return authPromise;
     authPromise = requestAccessToken_(token ? '' : 'consent').finally(function () {
@@ -159,8 +174,8 @@ const UserDriveModule = (function () {
   }
 
   function clearAuth_() {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(TOKEN_EXP_KEY);
+    localStorage.removeItem(tokenStorageKey_());
+    localStorage.removeItem(tokenExpStorageKey_());
   }
 
   async function driveList_(query) {

@@ -1376,13 +1376,15 @@ const UserBridge = {
     if (this._useDriveApi && window.UserDriveModule && UserDriveModule.isEnabled()) {
       try {
         await UserDriveModule.ensureAuthorized();
-        return UserDriveModule.dispatch(op, payload || {});
+        const driveRes = await UserDriveModule.dispatch(op, payload || {});
+        if (driveRes && driveRes.status === 'success') return driveRes;
+        console.warn('[UserBridge] Drive API が失敗したため GAS 経由を試します:', op, driveRes);
       } catch (e) {
         const msg = String(e.message || e);
+        console.warn('[UserBridge] Drive API エラー、GAS 経由を試します:', op, msg);
         if (/access_denied|popup_closed|user_cancelled/i.test(msg)) {
-          return { status: 'error', message: 'Drive へのアクセスが許可されていません。Google サインインで Drive 権限を許可してください。', code: 'drive_auth_required' };
+          /* Drive OAuth 未許可でも GAS①（ユーザー権限 iframe）で保存できる */
         }
-        return { status: 'error', message: 'マイドライブへの接続に失敗しました: ' + msg, code: 'drive_api_failed' };
       }
     }
     const res = await parseGasJson_(await fetchWithBackoff_(window.API_URL, {
@@ -1866,6 +1868,17 @@ function postGoogleFormViaIframe_(actionUrl, fields) {
   });
 }
 
+function postGoogleForm_(actionUrl, fields) {
+  const body = new URLSearchParams(fields).toString();
+  if (navigator.sendBeacon) {
+    const blob = new Blob([body], { type: 'application/x-www-form-urlencoded' });
+    if (navigator.sendBeacon(actionUrl, blob)) {
+      return Promise.resolve({ status: 'success', method: 'beacon' });
+    }
+  }
+  return postGoogleFormViaIframe_(actionUrl, fields);
+}
+
 async function sendResultToGoogleForm(summary) {
   const cfg = window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.GOOGLE_FORM;
   if (!cfg || !cfg.ACTION_URL) return { skipped: true, reason: 'form_not_configured' };
@@ -1893,7 +1906,7 @@ async function sendResultToGoogleForm(summary) {
   setEntry('Started_At', summary.Started_At);
   setEntry('Ended_At', summary.Ended_At);
 
-  return BackendSyncStatus.track(postGoogleFormViaIframe_(cfg.ACTION_URL, fields));
+  return BackendSyncStatus.track(postGoogleForm_(cfg.ACTION_URL, fields));
 }
 
 function shouldSendSessionSummaryToForm_() {
@@ -1901,8 +1914,13 @@ function shouldSendSessionSummaryToForm_() {
 }
 
 async function submitSessionSummary_(summary) {
-  if (!shouldSendSessionSummaryToForm_()) return { skipped: true, reason: 'not_preset' };
-  return sendResultToGoogleForm(summary);
+  if (!shouldSendSessionSummaryToForm_()) {
+    console.info('[Form] 送信スキップ: プリセット学習以外');
+    return { skipped: true, reason: 'not_preset' };
+  }
+  const res = await sendResultToGoogleForm(summary);
+  if (res.skipped) console.info('[Form] 送信スキップ:', res.reason);
+  return res;
 }
 
 function normalizeForScoringClient_(s) {
@@ -5368,9 +5386,10 @@ async function buildSessionSummary_(modeOverride, setNameOverride) {
 }
 
 async function saveSessionResultsUnified(modeOverride, setNameOverride) {
-  if (!AuthGateService.isValid()) return { skipped: true };
+  if (!AuthGateService.isValid()) return { skipped: true, reason: 'not_authenticated' };
 
   const summary = await buildSessionSummary_(modeOverride, setNameOverride);
+  const formPromise = submitSessionSummary_(summary);
 
   const logRes = await UserBridge.call('saveSessionLog', {
     setId: summary.Set_ID,
@@ -5382,17 +5401,27 @@ async function saveSessionResultsUnified(modeOverride, setNameOverride) {
     timeTaken: summary.Duration_Sec
   });
 
-  const summaryRes = await submitSessionSummary_(summary);
   const stateRes = await ItemStateModule.syncToServer();
+  const formRes = await formPromise;
 
-  const summaryOk = summaryRes.status === 'success'
-    || summaryRes.skipped === true;
-  const ok = logRes.status === 'success'
-    && summaryOk
+  const driveOk = logRes.status === 'success'
     && (stateRes.status === 'success' || stateRes.skipped);
-  if (ok) sessionPersistedToServer = true;
+  const formOk = formRes.status === 'success' || formRes.skipped === true;
+
+  if (driveOk) sessionPersistedToServer = true;
   BackendSyncStatus.refresh();
-  return ok ? { status: 'success' } : { status: 'error' };
+
+  if (!driveOk) {
+    flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
+  }
+
+  const status = driveOk && formOk ? 'success' : (driveOk || formOk ? 'partial' : 'error');
+  return {
+    status: status,
+    drive: logRes,
+    itemState: stateRes,
+    form: formRes
+  };
 }
 
 async function saveVocabSessionResults() {
@@ -5421,15 +5450,48 @@ document.getElementById('next-btn').addEventListener('click', () => {
   }
 });
 
-function getResultSavedMessage_() {
-  if (currentAppMode === 'vocab') {
-    return AuthGateService.isValid()
-      ? '演習が終了し、SRSデータが保存されました。'
-      : '演習が終了しました。（ローカルSRSのみ更新・ログインすると同期されます）';
+function getResultSavedMessage_(saveResult) {
+  if (!AuthGateService.isValid()) {
+    if (currentAppMode === 'vocab') {
+      return '演習が終了しました。（ローカルSRSのみ更新・ログインすると同期されます）';
+    }
+    return '演習が終了しました。（ログインするとクラウドに同期されます）';
   }
-  return AuthGateService.isValid()
-    ? '演習が終了し、成績が保存されました。'
-    : '演習が終了しました。（ログインするとクラウドに同期されます）';
+
+  if (!saveResult || saveResult.skipped) {
+    return currentAppMode === 'vocab'
+      ? '演習が終了し、SRSデータが保存されました。'
+      : '演習が終了し、成績が保存されました。';
+  }
+
+  const lines = [];
+  const driveOk = saveResult.drive && saveResult.drive.status === 'success';
+  const stateOk = !saveResult.itemState
+    || saveResult.itemState.status === 'success'
+    || saveResult.itemState.skipped;
+  const formRes = saveResult.form;
+  const formSkipped = formRes && formRes.skipped;
+  const formOk = formRes && (formRes.status === 'success' || formSkipped);
+
+  if (driveOk && stateOk) {
+    lines.push('マイドライブ（DigitalDrill学習記録）に保存しました。');
+  } else {
+    lines.push('マイドライブへの保存に失敗しました。');
+    const errMsg = (saveResult.drive && saveResult.drive.message)
+      || (saveResult.itemState && saveResult.itemState.message);
+    if (errMsg) lines.push(errMsg);
+    lines.push('未送信データは次回ログイン時に再送されます。');
+  }
+
+  if (formRes && !formSkipped && formRes.status === 'success') {
+    lines.push('管理者集約フォームへ送信しました。');
+  } else if (formRes && formSkipped && formRes.reason === 'not_preset') {
+    /* マイ単語帳等は送信対象外 */
+  } else if (formRes && !formOk) {
+    lines.push('管理者集約フォームへの送信に失敗した可能性があります。');
+  }
+
+  return lines.join(' ');
 }
 
 function showResultScreen() {
@@ -5463,10 +5525,10 @@ function showResultScreen() {
     setResultDetails('演習が終了しました。（クラウド保存はバックグラウンドで続行中です）');
   }, 20000);
 
-  savePromise.then(function () {
+  savePromise.then(function (saveResult) {
     clearTimeout(uiTimer);
     if (!uiSettled && resultScreen.style.display !== 'none') {
-      setResultDetails(getResultSavedMessage_());
+      setResultDetails(getResultSavedMessage_(saveResult));
     }
   }).catch(function () {
     clearTimeout(uiTimer);
