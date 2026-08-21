@@ -1816,20 +1816,54 @@ const ItemStateModule = (() => {
 })();
 window.ItemStateModule = ItemStateModule;
 
-async function queueSessionSummary_(summary) {
-  if (!AuthGateService.isValid()) return { skipped: true };
+async function sendResultToGoogleForm(summary) {
+  const cfg = window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.GOOGLE_FORM;
+  if (!cfg || !cfg.ACTION_URL) return { skipped: true, reason: 'form_not_configured' };
+  if (!AuthGateService.isValid()) return { skipped: true, reason: 'not_authenticated' };
+
+  const entries = cfg.ENTRIES || {};
+  const user = AuthGateService.getUser();
+  const userId = (user && user.account) ? user.account : '';
+
+  const body = new URLSearchParams();
+  function setEntry(key, value) {
+    const entryId = entries[key];
+    if (entryId) body.set(entryId, value != null ? String(value) : '');
+  }
+
+  setEntry('User_ID', userId);
+  setEntry('Mode', summary.Mode);
+  setEntry('Set_ID', summary.Set_ID);
+  setEntry('Set_Name', summary.Set_Name);
+  setEntry('Attempt_No', summary.Attempt_No);
+  setEntry('Correct', summary.Correct);
+  setEntry('Total', summary.Total);
+  setEntry('Score', summary.Score);
+  setEntry('Duration_Sec', summary.Duration_Sec);
+  setEntry('Started_At', summary.Started_At);
+  setEntry('Ended_At', summary.Ended_At);
+
   return BackendSyncStatus.track((async () => {
-    const res = await fetchWithBackoff_(window.API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'queueSessionSummary',
-        authToken: AuthGateService.getToken(),
-        summary: summary
-      })
-    });
-    return parseGasJson_(res);
+    try {
+      await fetch(cfg.ACTION_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        body: body
+      });
+      return { status: 'success' };
+    } catch (e) {
+      return { status: 'error', message: e.message || String(e) };
+    }
   })());
+}
+
+function shouldSendSessionSummaryToForm_() {
+  return !!currentSessionIsPreset;
+}
+
+async function submitSessionSummary_(summary) {
+  if (!shouldSendSessionSummaryToForm_()) return { skipped: true, reason: 'not_preset' };
+  return sendResultToGoogleForm(summary);
 }
 
 function normalizeForScoringClient_(s) {
@@ -4144,6 +4178,7 @@ const ReadingSessionModule = (() => {
     sessionStartTs = Date.now();
     currentAppMode = 'reading';
     currentReadingSetName = sessionData.setName || ('マイ単語帳 / ' + sheetName);
+    currentSessionIsPreset = false;
     showReadingScreen();
     renderCurrentWord();
     return true;
@@ -4471,6 +4506,8 @@ let currentAppMode = 'grammar';
 let currentVocabSetName = '';
 let currentVocabBookName = '';
 let currentVocabSheetName = '';
+/** 現在セッションが管理者プリセット教材か（Form 集約対象） */
+let currentSessionIsPreset = true;
 
 // UI要素
 const screens = {
@@ -4867,6 +4904,7 @@ elements.startBtn.addEventListener('click', async () => {
         sessionAnswerLog = [];
         sessionPersistedToServer = true;
         sessionStartTime = Date.now();
+        currentSessionIsPreset = true;
         BackendSyncStatus.refresh();
         loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
         screens.settings.style.display = 'none';
@@ -4933,6 +4971,7 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
       sessionAnswerLog = [];
       sessionPersistedToServer = true;
       sessionStartTime = Date.now();
+      currentSessionIsPreset = bookType === 'preset';
       BackendSyncStatus.refresh();
 
       loadQuestionToGame(currentQuestionDataList[0]);
@@ -5304,11 +5343,13 @@ async function saveSessionResultsUnified(modeOverride, setNameOverride) {
     timeTaken: summary.Duration_Sec
   });
 
-  const summaryRes = await queueSessionSummary_(summary);
+  const summaryRes = await submitSessionSummary_(summary);
   const stateRes = await ItemStateModule.syncToServer();
 
+  const summaryOk = summaryRes.status === 'success'
+    || summaryRes.skipped === true;
   const ok = logRes.status === 'success'
-    && summaryRes.status === 'success'
+    && summaryOk
     && (stateRes.status === 'success' || stateRes.skipped);
   if (ok) sessionPersistedToServer = true;
   BackendSyncStatus.refresh();

@@ -6,17 +6,18 @@
 |---|---|---|---|
 | **GitHub Pages** | `docs/index.html` | 静的 | 学習UI（文法・単語・音読・マイページ）・STT |
 | **GAS①** | `dashboard.html` | **アクセスしているユーザー** | 認証ゲート・UserBridge（ユーザーDrive） |
-| **GAS②** | JSON API | **作成者（自分）** | プリセット配布・セッション集約キュー・setup |
+| **GAS②** | JSON API | **作成者（自分）** | プリセット配布・setup・認証 |
 
 同一 GAS プロジェクトから **2つのウェブアプリデプロイ** を作成します。
 
 ```text
 Pages（学習UI）
-  ├─ fetch → GAS②（プリセット読取・queueSessionSummary・queueUserOp）
-  └─ iframe → GAS① UserBridge（ユーザーDrive 読み書き）
+  ├─ fetch → GAS②（プリセット読取・queueUserOp・認証）
+  ├─ no-cors POST → Google フォーム（プリセット学習概要のみ）
+  └─ OAuth / iframe → GAS① UserBridge（ユーザーDrive 読み書き）
 
 GAS① 管理者ダッシュボード（管理者のみ）
-  └─ セッション集約・whitelist 閲覧
+  └─ フォーム回答シート・whitelist 閲覧
 ```
 
 ---
@@ -59,9 +60,27 @@ Settings → Pages → Branch: `main` / Folder: `/docs`
 window.DIGITALDRILL_CONFIG = {
   API_URL: '...GAS②.../exec',
   DASHBOARD_URL: '...GAS①.../exec',
-  STATIC_MANIFEST_URL: 'data/manifest.json'
+  STATIC_MANIFEST_URL: 'data/manifest.json',
+  GOOGLE_FORM: {
+    ACTION_URL: 'https://docs.google.com/forms/d/e/.../formResponse',
+    ENTRIES: {
+      User_ID: 'entry.xxxxx',
+      Mode: 'entry.xxxxx',
+      Set_ID: 'entry.xxxxx',
+      Set_Name: 'entry.xxxxx',
+      Attempt_No: 'entry.xxxxx',
+      Correct: 'entry.xxxxx',
+      Total: 'entry.xxxxx',
+      Score: 'entry.xxxxx',
+      Duration_Sec: 'entry.xxxxx',
+      Started_At: 'entry.xxxxx',
+      Ended_At: 'entry.xxxxx'
+    }
+  }
 };
 ```
+
+`ACTION_URL` が空のときはフォーム送信をスキップします（フォーム未作成でもアプリは動作します）。
 
 ### プリセット取得はハイブリッド（`PresetModule`）
 
@@ -121,16 +140,25 @@ window.DIGITALDRILL_CONFIG = {
 `ItemStateModule` が唯一の読み書き口で、`SrsModule` は出題間隔の計算だけを担当します。
 セッション終了時に未反映（dirty）の Item_ID だけを UserBridge 経由で Drive へ送ります。
 
-### 管理者層（粗粒度）— 本体 SS / シート `セッション集約`
+### 管理者層（粗粒度）— Google フォーム回答先 SS
 
-Session_ID, User_ID, Mode, Set_ID, Set_Name, Attempt_No, Correct, Total, Score, Duration_Sec, Started_At, Ended_At
+Forms が自動付与する「タイムスタンプ」に加え、短答質問（質問タイトル = 列名）で次を送ります。
 
-- 書き込み: Pages → GAS② `queueSessionSummary` → Script Properties に **1セッション1キー**（`ssq_<Session_ID>`）
-  で保存。read-modify-write を避けているため、同時投入されたサマリーが取りこぼされません。
-- 反映: 時間トリガー `flushSessionSummaries_`（5分間隔）。ScriptLock で二重書き込みを防止し、
-  書き込み成功後にキューのキーを削除します。
+User_ID, Mode, Set_ID, Set_Name, Attempt_No, Correct, Total, Score, Duration_Sec, Started_At, Ended_At
 
-**トリガー初回設定**（管理者が GAS エディタで `installSessionSummaryTrigger_()` を実行、または管理者ダッシュボードのボタン）
+- **送信対象**: 管理者プリセットの文法・単語学習のみ（マイ単語帳・音読は送らない）
+- **書き込み**: Pages → Google フォーム `formResponse`（`mode: 'no-cors'`）。GAS の同時実行上限を回避
+- **反映**: フォーム回答先 SS に即時追記（バッチ・トリガー不要）
+- **閲覧**: GAS① 管理者ダッシュボード、または SS を直接開く（制限付き共有）
+
+#### フォーム初回セットアップ（手動）
+
+1. Google フォームで上記列名の**短答**質問を作成（すべて必須推奨）
+2. 回答先を本体 SS（`DigitalDrill`）または GAS が開ける SS に設定
+3. フォームの「ページソース」から `formResponse` URL と各 `entry.xxxxx` を `docs/config.js` の `GOOGLE_FORM` に設定
+4. フォームは「リンクを知っている人が回答可」等。回答先 SS は**制限付き共有**（学習者を編集者にしない）
+5. 確認画面に SS URL を出さない
+6. （任意）Script Property `FORM_RESPONSE_SHEET` に回答シート名を設定。未設定時は `フォームの回答` で始まるシート、または見出し `User_ID` があるシートを自動検出
 
 ---
 
@@ -169,16 +197,16 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 
 | 箇所 | 挙動 |
 |---|---|
-| Pages → GAS②（版チェック・プリセット取得・`queueUserOp`・`queueSessionSummary`） | HTTP 429 / 5xx とネットワークエラーに限り、指数バックオフで最大4回リトライ（約1s / 2s / 4s + ジッター） |
+| Pages → GAS②（版チェック・プリセット取得・`queueUserOp`・認証） | HTTP 429 / 5xx とネットワークエラーに限り、指数バックオフで最大4回リトライ（約1s / 2s / 4s + ジッター） |
+| Pages → Google フォーム（プリセット概要） | `no-cors` POST。ネットワークエラー以外は成功扱い。GAS 同時実行を消費しない |
 | 教材の配布 | 通常は Pages の `manifest.json`（CDN）とローカルキャッシュで完結し、GAS② には版チェックの 1 リクエストしか出さない |
 | 学習状態の Drive 同期 | 送信に失敗した Item_ID は dirty のまま残り、次のセッション終了時に再送 |
-| `flushSessionSummaries_` | ScriptLock 取得に失敗したら何もせず次回トリガーに委ねる |
 
 ---
 
 ## トラブルシューティング
 
 - **UserBridge タイムアウト**: GAS① が「ユーザーとして実行」か確認。サードパーティ Cookie 制限時は再ログイン
-- **セッション集約が空**: `flushSessionSummaries_` または管理者ダッシュボード「手動フラッシュ」
+- **セッション集約が空**: フォーム回答先 SS に行が入っているか、`config.js` の `GOOGLE_FORM` が正しいか確認。プリセット学習（マイ単語帳以外）で終了しているか
 - **教材の更新が反映されない**: サーバー側の版キャッシュ（120秒）が切れるのを待つか「キャッシュ更新」ボタン
 - **初回表示が遅い**: `docs/data/manifest.json` が未生成。`scripts/export-static.ps1` を実行

@@ -14,7 +14,28 @@ window.DIGITALDRILL_CONFIG = {
    * manifest が未生成でも API 経由で動くが、初回表示を速くするため
    * scripts/export-static.ps1 で生成しておくこと。
    */
-  STATIC_MANIFEST_URL: 'data/manifest.json'
+  STATIC_MANIFEST_URL: 'data/manifest.json',
+  /**
+   * プリセット学習の概要集約用 Google フォーム（no-cors POST）。
+   * ACTION_URL が空のときは送信をスキップする。
+   * フォーム作成後、ページソースの entry ID と formResponse URL をここに設定する。
+   */
+  GOOGLE_FORM: {
+    ACTION_URL: 'https://docs.google.com/forms/d/e/1FAIpQLSfI7mmZPNniyB602utDUnie6W79DQaZgWJghOKTz8TZeiwMPA/formResponse',
+    ENTRIES: {
+      User_ID: 'entry.2140028729',
+      Mode: 'entry.1570326402',
+      Set_ID: 'entry.275307888',
+      Set_Name: 'entry.289930202',
+      Attempt_No: 'entry.2072779523',
+      Correct: 'entry.1267466184',
+      Total: 'entry.967050124',
+      Score: 'entry.1646102233',
+      Duration_Sec: 'entry.1713523091',
+      Started_At: 'entry.1357277820',
+      Ended_At: 'entry.1702093208'
+    }
+  }
 };
 
 window.API_URL = window.DIGITALDRILL_CONFIG.API_URL;

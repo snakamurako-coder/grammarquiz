@@ -17,7 +17,9 @@ const PROP = {
   SETUP_COMPLETED: 'SETUP_COMPLETED',
   PAGES_URL: 'PAGES_URL',
   ADMIN_EMAIL: 'ADMIN_EMAIL',
-  WHITELIST_CACHE: 'WHITELIST_CACHE'
+  WHITELIST_CACHE: 'WHITELIST_CACHE',
+  /** フォーム回答シート名（未設定時は自動検出） */
+  FORM_RESPONSE_SHEET: 'FORM_RESPONSE_SHEET'
 };
 
 /** ユーザー権限実行時の UserProperties キー */
@@ -34,8 +36,6 @@ const USER_OP_CACHE_PREFIX = 'uop_';
 /** 教材の版。全ユーザー共通なので CacheService に載せて Drive 走査を抑える */
 const PRESET_VERSION_CACHE_KEY = 'preset_version';
 const PRESET_VERSION_CACHE_TTL = 120;
-/** セッション集約の待ち行列。1件=1プロパティで read-modify-write 競合を避ける */
-const SESSION_SUMMARY_QUEUE_PREFIX = 'ssq_';
 const USER_OP_CACHE_TTL = 600;
 /** 認証トークン有効期間: 1時間半（5400秒） */
 const AUTH_CACHE_TTL = 5400;
@@ -47,21 +47,17 @@ const DEFAULT_DASHBOARD_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbx
 
 const MATERIALS_FOLDER_NAME = 'grammarquizzes';
 const VOCABULARY_FOLDER_NAME = 'vocabulary';
-/** 本体スプレッドシート（whitelist・セッション集約） */
+/** 本体スプレッドシート（whitelist・フォーム回答） */
 const APP_BOOK_NAME = 'DigitalDrill';
 const MY_VOCAB_BOOK_NAME = 'マイ単語帳';
 const UNREGISTERED = '(未登録)';
 const USER_ITEM_STATE_SHEET_NAME = '学習状態';
 const USER_SESSION_LOG_SHEET_NAME = '学習記録';
 const USER_SESSION_LOG_HEADERS = ['タイムスタンプ', '学習セット名', 'モード', '正答率', '解答時間', '詳細'];
-const ADMIN_SESSION_SUMMARY_SHEET = 'セッション集約';
+const FORM_RESPONSE_HEADER_USER_ID = 'User_ID';
 const ITEM_STATE_HEADERS = [
   'Item_ID', 'Kind', 'Set_ID', 'Total_Attempts', 'Total_Wrong',
   'Recent_Bits', 'Last_Seen', 'Step_Index', 'EF', 'Next_Review', 'Avg_Time'
-];
-const SESSION_SUMMARY_HEADERS = [
-  'Session_ID', 'User_ID', 'Mode', 'Set_ID', 'Set_Name',
-  'Attempt_No', 'Correct', 'Total', 'Score', 'Duration_Sec', 'Started_At', 'Ended_At'
 ];
 
 /** 文法データセット11列ヘッダ。1行が形式A〜Hすべての素材になる */
@@ -403,8 +399,6 @@ function doPost(e) {
       return sendResponse({ status: "success", message: "ログアウトしました" });
     } else if (action === "queueUserOp") {
       return handleQueueUserOp_(requestData);
-    } else if (action === "queueSessionSummary") {
-      return handleQueueSessionSummary_(requestData);
     } else {
       return sendResponse({ status: "error", message: "無効なactionです: " + action });
     }
@@ -992,16 +986,6 @@ function ensureAppBookSheets_(ss) {
     whitelist.appendRow(['account', 'name', 'grade', 'class']);
     whitelist.appendRow(['example@example.com', 'サンプル太郎', '1', 'A']);
     whitelist.getRange(1, 1, 1, 4).setFontWeight('bold');
-  }
-
-  let sessionSummary = ss.getSheetByName(ADMIN_SESSION_SUMMARY_SHEET);
-  if (!sessionSummary) {
-    sessionSummary = ss.insertSheet(ADMIN_SESSION_SUMMARY_SHEET);
-  }
-  if (sessionSummary.getLastRow() === 0 || sessionSummary.getRange(1, 1).getValue() === '') {
-    sessionSummary.clear();
-    sessionSummary.appendRow(SESSION_SUMMARY_HEADERS);
-    sessionSummary.getRange(1, 1, 1, SESSION_SUMMARY_HEADERS.length).setFontWeight('bold');
   }
 
   // 作成直後の「シート1」が残っていれば削除
@@ -2346,109 +2330,43 @@ function apiUserStartSession(payloadJson) {
 }
 
 // =========================================================
-// ⑩ 管理者セッション集約（キュー + フラッシュ）
+// ⑩ 管理者セッション集約（Google フォーム回答シート閲覧）
 // =========================================================
 
-function handleQueueSessionSummary_(requestData) {
-  const authCheck = requireAuthToken_(requestData);
-  if (!authCheck.ok) return sendResponse({ status: 'error', message: authCheck.error });
-
-  const summary = requestData.summary;
-  if (!summary) return sendResponse({ status: 'error', message: 'summary が必要です' });
-
-  summary.User_ID = authCheck.auth.email;
-  if (!summary.Session_ID) summary.Session_ID = Utilities.getUuid();
-  if (!summary.Ended_At) {
-    summary.Ended_At = Utilities.formatDate(new Date(), 'JST', 'yyyy/MM/dd HH:mm:ss');
+/** フォーム回答先シートを本体 SS から探す */
+function findFormResponseSheet_(ss) {
+  const configured = PropertiesService.getScriptProperties().getProperty(PROP.FORM_RESPONSE_SHEET);
+  if (configured) {
+    const configuredSheet = ss.getSheetByName(configured);
+    if (configuredSheet) return configuredSheet;
   }
 
-  // 1セッション = 1プロパティ。read-modify-write を避けることで
-  // 同時投入されたサマリーが取りこぼされないようにする。
-  const json = JSON.stringify(summary);
-  if (json.length > 9000) {
-    return sendResponse({ status: 'error', message: 'サマリーデータが大きすぎます（9KB上限）' });
+  const sheets = ss.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    const name = sheets[i].getName();
+    if (name.indexOf('フォームの回答') === 0) return sheets[i];
   }
-  PropertiesService.getScriptProperties()
-    .setProperty(SESSION_SUMMARY_QUEUE_PREFIX + summary.Session_ID, json);
-  return sendResponse({ status: 'success', sessionId: summary.Session_ID });
+
+  for (let i = 0; i < sheets.length; i++) {
+    const sheet = sheets[i];
+    if (sheet.getLastRow() === 0) continue;
+    const lastCol = sheet.getLastColumn();
+    if (lastCol === 0) continue;
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    if (headers.indexOf(FORM_RESPONSE_HEADER_USER_ID) >= 0) return sheet;
+  }
+
+  return null;
 }
 
-function sessionSummaryToRow_(s) {
-  return [
-    s.Session_ID || '',
-    s.User_ID || '',
-    s.Mode || '',
-    s.Set_ID || '',
-    s.Set_Name || '',
-    s.Attempt_No != null ? s.Attempt_No : '',
-    s.Correct != null ? s.Correct : '',
-    s.Total != null ? s.Total : '',
-    s.Score != null ? s.Score : '',
-    s.Duration_Sec != null ? s.Duration_Sec : '',
-    s.Started_At || '',
-    s.Ended_At || ''
-  ];
-}
-
-/**
- * 待ち行列のサマリーをまとめて集約シートへ追記する。
- * 時間主導トリガーと手動実行が重なっても二重書き込みしないようロックを取る。
- */
-function flushSessionSummaries_() {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) return { flushed: 0, skipped: '他のフラッシュ実行中' };
-
-  try {
-    const props = PropertiesService.getScriptProperties();
-    const all = props.getProperties();
-    const keys = Object.keys(all).filter(function (k) {
-      return k.indexOf(SESSION_SUMMARY_QUEUE_PREFIX) === 0;
-    });
-    if (!keys.length) return { flushed: 0 };
-
-    const rows = [];
-    keys.forEach(function (k) {
-      try {
-        rows.push(sessionSummaryToRow_(JSON.parse(all[k])));
-      } catch (e) {
-        // 壊れたエントリは捨てる（下でキーごと削除される）
-      }
-    });
-
-    if (rows.length) {
-      const spreadId = props.getProperty(PROP.SPREADSHEET_ID);
-      if (!spreadId) throw new Error('SPREADSHEET_IDが設定されていません。');
-      const ss = SpreadsheetApp.openById(spreadId);
-      let sheet = ss.getSheetByName(ADMIN_SESSION_SUMMARY_SHEET);
-      if (!sheet) {
-        sheet = ss.insertSheet(ADMIN_SESSION_SUMMARY_SHEET);
-        sheet.appendRow(SESSION_SUMMARY_HEADERS);
-        sheet.getRange(1, 1, 1, SESSION_SUMMARY_HEADERS.length).setFontWeight('bold');
-      }
-      const startRow = sheet.getLastRow() + 1;
-      sheet.getRange(startRow, 1, rows.length, SESSION_SUMMARY_HEADERS.length).setValues(rows);
-      SpreadsheetApp.flush();
-    }
-
-    keys.forEach(function (k) { props.deleteProperty(k); });
-    return { flushed: rows.length };
-  } finally {
-    lock.releaseLock();
+function normalizeFormResponseRow_(headers, row) {
+  const obj = {};
+  for (let j = 0; j < headers.length; j++) {
+    if (headers[j]) obj[headers[j]] = row[j];
   }
-}
-
-function installSessionSummaryTrigger_() {
-  const triggers = ScriptApp.getProjectTriggers();
-  for (let i = 0; i < triggers.length; i++) {
-    if (triggers[i].getHandlerFunction() === 'flushSessionSummaries_') {
-      return { installed: true, message: '既にインストール済み' };
-    }
-  }
-  ScriptApp.newTrigger('flushSessionSummaries_')
-    .timeBased()
-    .everyMinutes(5)
-    .create();
-  return { installed: true, message: '5分間隔トリガーをインストールしました' };
+  if (!obj.Ended_At && obj['タイムスタンプ']) obj.Ended_At = obj['タイムスタンプ'];
+  if (!obj.User_ID && obj[FORM_RESPONSE_HEADER_USER_ID]) obj.User_ID = obj[FORM_RESPONSE_HEADER_USER_ID];
+  return obj;
 }
 
 function apiAdminGetSessionSummaries(limit) {
@@ -2459,7 +2377,7 @@ function apiAdminGetSessionSummaries(limit) {
     }
     const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
     const ss = SpreadsheetApp.openById(spreadId);
-    const sheet = ss.getSheetByName(ADMIN_SESSION_SUMMARY_SHEET);
+    const sheet = findFormResponseSheet_(ss);
     if (!sheet || sheet.getLastRow() <= 1) return { status: 'success', data: [] };
 
     const data = sheet.getDataRange().getValues();
@@ -2467,39 +2385,9 @@ function apiAdminGetSessionSummaries(limit) {
     const max = limit || 100;
     const logs = [];
     for (let i = data.length - 1; i >= 1 && logs.length < max; i--) {
-      const obj = {};
-      for (let j = 0; j < headers.length; j++) {
-        if (headers[j]) obj[headers[j]] = data[i][j];
-      }
-      logs.push(obj);
+      logs.push(normalizeFormResponseRow_(headers, data[i]));
     }
     return { status: 'success', data: logs };
-  } catch (e) {
-    return { status: 'error', message: e.toString() };
-  }
-}
-
-function apiAdminFlushSummaries() {
-  try {
-    const access = checkDashboardAccess_();
-    if (!access.allowed || !isAdminEmail_(access.email)) {
-      return { status: 'error', message: '管理者権限が必要です' };
-    }
-    const result = flushSessionSummaries_();
-    return { status: 'success', message: 'フラッシュ完了: ' + (result.flushed || 0) + '件', data: result };
-  } catch (e) {
-    return { status: 'error', message: e.toString() };
-  }
-}
-
-function apiAdminInstallTrigger() {
-  try {
-    const access = checkDashboardAccess_();
-    if (!access.allowed || !isAdminEmail_(access.email)) {
-      return { status: 'error', message: '管理者権限が必要です' };
-    }
-    const result = installSessionSummaryTrigger_();
-    return { status: 'success', message: result.message, data: result };
   } catch (e) {
     return { status: 'error', message: e.toString() };
   }
