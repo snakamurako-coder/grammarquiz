@@ -68,7 +68,7 @@ const GRAMMAR_HEADERS = [
 ];
 
 /** 文法サンプルカタログの版。変更時は ensureEnvironment が Drive 上のブックを再同期する */
-const SAMPLE_CATALOG_VERSION = '2026-infinitive-only-v1';
+const SAMPLE_CATALOG_VERSION = '2026-grammar-multi-answer-v1';
 
 /** 単語帳22列ヘッダ（管理者配布・ユーザー登録共通） */
 const VOCAB_HEADERS = [
@@ -241,6 +241,87 @@ function normalizeGrammarSentence_(s) {
     .trim();
 }
 
+/** [] の外側の / のみで文バリエーションを分割 */
+function splitGrammarVariants_(text) {
+  const s = (text || '').toString().trim();
+  if (!s) return [''];
+  const parts = [];
+  let current = '';
+  let bracketDepth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '[') {
+      bracketDepth++;
+      current += ch;
+    } else if (ch === ']') {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      current += ch;
+    } else if (ch === '/' && bracketDepth === 0) {
+      parts.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts.length ? parts : [''];
+}
+
+/** word[alt1/alt2] を検出し、語[直前語+候補]の全組み合わせを展開 */
+function expandWordAlternatives_(sentence) {
+  const s = (sentence || '').toString().trim();
+  if (!s) return [''];
+
+  function expandRecursive(str) {
+    const m = str.match(/([^\s\[]+)\[([^\]]+)\]/);
+    if (!m) return [str.replace(/\s+/g, ' ').trim()];
+    const alts = [m[1]].concat(
+      m[2].split('/').map(function (a) { return a.trim(); }).filter(Boolean)
+    );
+    const results = [];
+    alts.forEach(function (alt) {
+      const replaced = str.slice(0, m.index) + alt + str.slice(m.index + m[0].length);
+      expandRecursive(replaced).forEach(function (r) {
+        if (r && results.indexOf(r) === -1) results.push(r);
+      });
+    });
+    return results;
+  }
+
+  return expandRecursive(s);
+}
+
+/** 表示用代表形: 最初の / 文 + [ 前の語のみ残す */
+function displayGrammarSentence_(raw) {
+  const variants = splitGrammarVariants_(raw);
+  const first = variants[0] || '';
+  return first.replace(/([^\s\[]+)\[[^\]]+\]/g, '$1').replace(/\s+/g, ' ').trim();
+}
+
+/** 受理される英文の完全展開リスト */
+function expandAcceptedSentences_(raw) {
+  const variants = splitGrammarVariants_(raw);
+  const all = [];
+  variants.forEach(function (v) {
+    expandWordAlternatives_(v).forEach(function (sent) {
+      const norm = sent.replace(/\s+/g, ' ').trim();
+      if (norm && all.indexOf(norm) === -1) all.push(norm);
+    });
+  });
+  return all.length ? all : [''];
+}
+
+/** 正規化後、受理リストのいずれかと一致すれば true */
+function matchesAcceptedSentences_(user, acceptedSentences) {
+  const normUser = normalizeGrammarSentence_(user);
+  if (!normUser) return false;
+  const list = acceptedSentences || [];
+  for (let i = 0; i < list.length; i++) {
+    if (normalizeGrammarSentence_(list[i]) === normUser) return true;
+  }
+  return false;
+}
+
 function fetchQuestionsFromSheet(params) {
   const subject = params.subject;
   const unit = params.unit;
@@ -288,12 +369,14 @@ function fetchQuestionsFromSheet(params) {
       const sortDummy = cell('並び替えダミー');
       const mcqAnswer = mcq ? mcq.inner : '';
       const mcqDummies = splitGrammarList_(cell('N択ダミー'));
+      const fullSentenceDisplay = displayGrammarSentence_(fullSentence);
+      const acceptedSentences = expandAcceptedSentences_(fullSentence);
 
       const warnings = [];
-      if (sort && normalizeGrammarSentence_(joinGrammarSentence_(sort.prefix, sortTokens.join(' '), sort.suffix)) !== normalizeGrammarSentence_(fullSentence)) {
+      if (sort && !matchesAcceptedSentences_(joinGrammarSentence_(sort.prefix, sortTokens.join(' '), sort.suffix), acceptedSentences)) {
         warnings.push('並び替え文を組み立てても英文全文と一致しません');
       }
-      if (mcq && normalizeGrammarSentence_(joinGrammarSentence_(mcq.prefix, mcqAnswer, mcq.suffix)) !== normalizeGrammarSentence_(fullSentence)) {
+      if (mcq && !matchesAcceptedSentences_(joinGrammarSentence_(mcq.prefix, mcqAnswer, mcq.suffix), acceptedSentences)) {
         warnings.push('N択文を組み立てても英文全文と一致しません');
       }
 
@@ -307,6 +390,8 @@ function fetchQuestionsFromSheet(params) {
         daiUnit: cell('大単元'),
         shoUnit: cell('小単元'),
         fullSentence: fullSentence,
+        fullSentenceDisplay: fullSentenceDisplay,
+        acceptedSentences: acceptedSentences,
         japanese: japanese,
         grammarArea: cell('ターゲット文法領域'),
         explanation: cell('解説'),
@@ -1114,6 +1199,15 @@ function getSampleQuestionCatalog_() {
           'It is important (to,read,many,books).', 'reading',
           'It is important (to read) many books.', 'reading,read,for read,to reading',
           '不定詞', '形式主語 It を立て、真主語の不定詞句を後ろに置く形。')
+      ],
+      '関係詞': [
+        headers,
+        row(1, '関係詞', '関係代名詞',
+          'This is the hospital in which I was born./This is the hospital that[which] I was born in./This is the hospital where I was born.',
+          '私が生まれた病院です。',
+          'This is the hospital (in,which,I,was,born).', 'where',
+          'This is the hospital (in which) I was born.', 'which,where,that I was born,when I was born',
+          '関係詞', 'in which / that ... in / where の3パターンが正答。')
       ]
     }
   };

@@ -2725,6 +2725,87 @@ function joinEnglish(prefix, inner, suffix) {
   return s.replace(/\s+/g, ' ').trim();
 }
 
+/** [] の外側の / のみで文バリエーションを分割 */
+function splitGrammarVariants(text) {
+  const s = (text || '').toString().trim();
+  if (!s) return [''];
+  const parts = [];
+  let current = '';
+  let bracketDepth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '[') {
+      bracketDepth++;
+      current += ch;
+    } else if (ch === ']') {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      current += ch;
+    } else if (ch === '/' && bracketDepth === 0) {
+      parts.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts.length ? parts : [''];
+}
+
+/** word[alt1/alt2] を検出し、語[直前語+候補]の全組み合わせを展開 */
+function expandWordAlternatives(sentence) {
+  const s = (sentence || '').toString().trim();
+  if (!s) return [''];
+
+  function expandRecursive(str) {
+    const m = str.match(/([^\s\[]+)\[([^\]]+)\]/);
+    if (!m) return [str.replace(/\s+/g, ' ').trim()];
+    const alts = [m[1]].concat(
+      m[2].split('/').map(function (a) { return a.trim(); }).filter(Boolean)
+    );
+    const results = [];
+    alts.forEach(function (alt) {
+      const replaced = str.slice(0, m.index) + alt + str.slice(m.index + m[0].length);
+      expandRecursive(replaced).forEach(function (r) {
+        if (r && results.indexOf(r) === -1) results.push(r);
+      });
+    });
+    return results;
+  }
+
+  return expandRecursive(s);
+}
+
+/** 表示用代表形: 最初の / 文 + [ 前の語のみ残す */
+function displayGrammarSentence(raw) {
+  const variants = splitGrammarVariants(raw);
+  const first = variants[0] || '';
+  return first.replace(/([^\s\[]+)\[[^\]]+\]/g, '$1').replace(/\s+/g, ' ').trim();
+}
+
+/** 受理される英文の完全展開リスト */
+function expandAcceptedSentences(raw) {
+  const variants = splitGrammarVariants(raw);
+  const all = [];
+  variants.forEach(function (v) {
+    expandWordAlternatives(v).forEach(function (sent) {
+      const norm = sent.replace(/\s+/g, ' ').trim();
+      if (norm && all.indexOf(norm) === -1) all.push(norm);
+    });
+  });
+  return all.length ? all : [''];
+}
+
+/** 正規化後、受理リストのいずれかと一致すれば true */
+function matchesAcceptedSentences(user, acceptedSentences) {
+  const normUser = normalizeEnglish(user);
+  if (!normUser) return false;
+  const list = acceptedSentences || [];
+  for (let i = 0; i < list.length; i++) {
+    if (normalizeEnglish(list[i]) === normUser) return true;
+  }
+  return false;
+}
+
 function setResultVerdict(el, status, text) {
   if (!el) return;
   el.innerHTML = '';
@@ -2780,6 +2861,8 @@ const GrammarQuizGenerator = (() => {
   }
 
   function baseQuestion(row, format) {
+    const accepted = row.acceptedSentences || expandAcceptedSentences(row.fullSentence);
+    const display = row.fullSentenceDisplay || displayGrammarSentence(row.fullSentence);
     return {
       id: row.rowId + '#' + format,
       rowId: row.rowId,
@@ -2791,6 +2874,8 @@ const GrammarQuizGenerator = (() => {
       explanation: row.explanation,
       japanese: row.japanese,
       fullSentence: row.fullSentence,
+      fullSentenceDisplay: display,
+      acceptedSentences: accepted,
       difficulty: GRAMMAR_FORMAT_MAP[format].difficulty
     };
   }
@@ -2808,7 +2893,7 @@ const GrammarQuizGenerator = (() => {
     const sortInner = row.sortTokens.join(' ');
 
     if (format === 'A') {
-      return withAnswerFrame(q, '', row.fullSentence, '');
+      return withAnswerFrame(q, '', q.fullSentenceDisplay, '');
     }
     if (format === 'B') {
       return withAnswerFrame(q, row.sortPrefix, sortInner, row.sortSuffix);
@@ -3011,14 +3096,14 @@ const TypingModule = (() => {
     };
   }
 
-  // 入力を空所に当てはめた英文が英文全文と一致すれば正解
+  // 入力を空所に当てはめた英文が受理リストのいずれかと一致すれば正解
   function checkAnswer(userAnswer) {
     if (answered) return;
     answered = true;
 
     const assembled = joinEnglish(qData.answerPrefix, userAnswer, qData.answerSuffix);
     const answerMeta = { userAnswer: userAnswer, correctAnswer: qData.expectedInner };
-    if (normalizeEnglish(assembled) === normalizeEnglish(qData.fullSentence)) {
+    if (matchesAcceptedSentences(assembled, qData.acceptedSentences)) {
       setResultVerdict(resultMsg, 'ok', '⭕️ 正解！');
       appendJoinedEnglishHighlighted(resultMsg, qData.answerPrefix, userAnswer, qData.answerSuffix);
       if(window.onQuestionCompleted) window.onQuestionCompleted(true, answerMeta);
@@ -4520,7 +4605,7 @@ const SortingModule = (() => {
     checkSubmitVisibility();
   });
 
-  // 空所に当てはめた英文が英文全文と一致すれば正解（同じ語句のカードが複数あっても判定できる）
+  // 空所に当てはめた英文が受理リストのいずれかと一致すれば正解（同じ語句のカードが複数あっても判定できる）
   submitBtn.addEventListener('click', () => {
     if (!qData || answered) return;
     answered = true;
@@ -4529,7 +4614,7 @@ const SortingModule = (() => {
     const inner = Array.from(answerSlot.children).map(c => c.textContent).join(' ');
     const assembled = joinEnglish(qData.answerPrefix, inner, qData.answerSuffix);
     const answerMeta = { userAnswer: inner, correctAnswer: qData.expectedInner };
-    if (normalizeEnglish(assembled) === normalizeEnglish(qData.fullSentence)) {
+    if (matchesAcceptedSentences(assembled, qData.acceptedSentences)) {
       setResultVerdict(resultMsg, 'ok', '⭕️ 正解！');
       appendJoinedEnglishHighlighted(resultMsg, qData.answerPrefix, inner, qData.answerSuffix);
       if(window.onQuestionCompleted) window.onQuestionCompleted(true, answerMeta);
@@ -5052,6 +5137,8 @@ function normalizeGrammarRow(row) {
   if (!row.warnings) row.warnings = [];
   if (!row.sortTokens) row.sortTokens = [];
   if (!row.mcqDummies) row.mcqDummies = [];
+  if (!row.acceptedSentences) row.acceptedSentences = expandAcceptedSentences(row.fullSentence);
+  if (!row.fullSentenceDisplay) row.fullSentenceDisplay = displayGrammarSentence(row.fullSentence);
   const sortTokens = row.sortTokens;
   const sortDummy = row.sortDummy || '';
   const mcqAnswer = row.mcqAnswer || '';
@@ -5213,7 +5300,8 @@ function getQuestionPrompt_(q) {
 function getTtsEnglish_(q) {
   if (!q) return '';
   if (q.format === 'vocab-enja') return q.word || '';
-  if (q.fullSentence) return q.fullSentence;
+  if (q.fullSentenceDisplay) return q.fullSentenceDisplay;
+  if (q.fullSentence) return displayGrammarSentence(q.fullSentence);
   if (q.correctSentence) return q.correctSentence;
   if (q.presentedSentence) return q.presentedSentence;
   if (q.mcqPrefix || q.mcqSuffix) {
@@ -5228,7 +5316,8 @@ function getDefaultCorrectAnswer_(q) {
   if (q.correctText) return q.correctText;
   if (q.expectedInner) return q.expectedInner;
   if (q.correctSentence) return q.correctSentence;
-  return q.fullSentence || '';
+  if (q.fullSentenceDisplay) return q.fullSentenceDisplay;
+  return displayGrammarSentence(q.fullSentence || '');
 }
 
 function normalizeExplanationField_(value) {
