@@ -1,6 +1,6 @@
 /**
  * ユーザー Drive / Sheets 操作（GCP OAuth + REST API）
- * UserBridge（GAS iframe）の代替経路。
+ * UserBridge から dispatch される唯一の実装。設計契約: docs/USER_DATA_SANCTUARY.md
  */
 const UserDriveModule = (function () {
   const META_KEY = 'dd_user_drive_meta';

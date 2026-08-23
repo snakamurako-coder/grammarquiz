@@ -1,0 +1,31 @@
+---
+description: マイ単語帳・学習記憶（UserBridge/UserDrive）の聖域 — 変更前に必読
+globs: docs/user-drive.js,docs/index.html,docs/config.js
+alwaysApply: false
+---
+
+# ユーザーデータ聖域
+
+詳細契約: `docs/USER_DATA_SANCTUARY.md`
+
+## 現行アーキテクチャ（固定）
+
+- **ログイン**: GAS① → `AuthGateService`（authToken のみ）
+- **ユーザー Drive 操作**: `UserBridge` → `UserDriveModule` → GCP OAuth + Drive/Sheets REST API
+- **GAS 経由のユーザー Drive 操作は禁止**（`queueUserOp` / iframe UserBridge を復活させない）
+
+## 保存先（変更禁止）
+
+マイドライブ直下 `DigitalDrill_MyData/` → `マイ単語帳` / `DigitalDrill学習記録`
+
+## 変更時の必須事項
+
+1. `UserBridge.queueOp` と `dispatch_` は例外を `{ status: 'error', message }` で返す（throw のみにしない）
+2. OAuth トークンはアカウント別キー + `migrateLegacyToken_()` を維持
+3. `ensureAuthorized_()` はサイレント更新失敗時に `consent` 再取得
+4. 書込 op は `USER_BRIDGE_WRITE_OPS` に登録
+5. `VOCAB_HEADERS` / 列契約変更時は `docs/gem_system_prompt.md` も同期
+
+## 触る前に確認
+
+単語登録・学習記憶まわりをリファクタする場合、先に `docs/USER_DATA_SANCTUARY.md` §7–§8 のチェックリストを読むこと。

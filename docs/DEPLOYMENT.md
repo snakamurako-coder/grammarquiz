@@ -5,20 +5,22 @@
 | コンポーネント | 配置 | 実行権限 | 役割 |
 |---|---|---|---|
 | **GitHub Pages** | `docs/index.html` | 静的 | 学習UI（文法・単語・音読・マイページ）・STT |
-| **GAS①** | `dashboard.html` | **アクセスしているユーザー** | 認証ゲート・UserBridge（ユーザーDrive） |
+| **GAS①** | `dashboard.html` | **アクセスしているユーザー** | 認証ゲート（whitelist） |
 | **GAS②** | JSON API | **作成者（自分）** | プリセット配布・setup・認証 |
 
 同一 GAS プロジェクトから **2つのウェブアプリデプロイ** を作成します。
 
 ```text
 Pages（学習UI）
-  ├─ fetch → GAS②（プリセット読取・queueUserOp・認証）
+  ├─ fetch → GAS②（プリセット読取・認証）
   ├─ no-cors POST → Google フォーム（プリセット学習概要のみ）
-  └─ OAuth / iframe → GAS① UserBridge（ユーザーDrive 読み書き）
+  └─ GCP OAuth → Drive/Sheets API（UserDriveModule：マイ単語帳・学習記憶）
 
 GAS① 管理者ダッシュボード（管理者のみ）
   └─ フォーム回答シート・whitelist 閲覧
 ```
+
+> マイ単語帳・学習記憶の設計契約は [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) を参照。
 
 ---
 
@@ -44,7 +46,7 @@ clasp push
 - **アクセス**: Google アカウントを持つ全員
 - exec URL → `docs/config.js` の `DASHBOARD_URL`
 
-学習者は **GitHub Pages** を利用します。GAS① URL は認証（`?action=auth`）と UserBridge 用です。
+学習者は **GitHub Pages** を利用します。GAS① URL は認証（`?action=auth`）用です。
 
 ---
 
@@ -111,14 +113,22 @@ window.DIGITALDRILL_CONFIG = {
 
 ---
 
-## 6. UserBridge（ユーザーDrive 操作）
+## 6. UserBridge / UserDriveModule（ユーザーDrive 操作）
 
-1. Pages が GAS② `queueUserOp`（authToken 必須）→ `opToken`
-2. 隠し iframe で GAS① `?action=userBridge&token=opToken`
-3. GAS① が `Session.getActiveUser()` で本人確認し、ユーザー Drive に読み書き
-4. `postMessage` で Pages に結果返却
+**GAS iframe 経由は廃止。** Pages 上の `UserDriveModule`（`docs/user-drive.js`）が GCP OAuth で Drive/Sheets API を直接呼びます。
+
+```text
+UserBridge.call(op, payload)
+  → UserDriveModule.ensureAuthorized()   // Drive OAuth（ログインとは別）
+  → UserDriveModule.dispatch(op, payload)
+  → マイドライブ/DigitalDrill_MyData/…
+```
 
 対応 op: `getVocabCatalog`, `getVocabWords`, `registerVocabWords`, `getLearningLogs`, `getItemStates`, `upsertItemStates`, `saveSessionLog`, `startSession`, `countSessionAttempts`
+
+書込 op（`registerVocabWords`, `upsertItemStates`, `saveSessionLog`）は失敗時 `SendOutbox` に残り、次回ログイン時に再送されます。
+
+詳細・禁止事項: [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md)
 
 ---
 
@@ -176,9 +186,19 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 
 ## 9. 認証フロー
 
+### アプリログイン（GAS①）
+
 1. Pages「Googleアカウントでログイン」→ GAS① `?action=auth`
 2. whitelist 照合 → `auth` トークン → Pages `?auth=TOKEN`
-3. 以降 API 呼び出しに authToken を付与
+3. `AuthGateService` が localStorage に保持
+
+### Drive OAuth（UserDriveModule）
+
+1. ログイン成功後、`onLoginSuccess` で `UserDriveModule.ensureAuthorized()` を試行
+2. 初回 or 期限切れ時、Google の Drive/Sheets 権限ダイアログを表示
+3. トークンは `dd_google_access_token:<account>` に保存（アカウント別）
+
+**ログイン成功だけでは単語登録できない。** Drive 権限の許可が別途必要。
 
 ---
 
@@ -197,7 +217,7 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 
 | 箇所 | 挙動 |
 |---|---|
-| Pages → GAS②（版チェック・プリセット取得・`queueUserOp`・認証） | HTTP 429 / 5xx とネットワークエラーに限り、指数バックオフで最大4回リトライ（約1s / 2s / 4s + ジッター） |
+| Pages → GAS②（版チェック・プリセット取得・認証） | HTTP 429 / 5xx とネットワークエラーに限り、指数バックオフで最大4回リトライ（約1s / 2s / 4s + ジッター） |
 | Pages → Google フォーム（プリセット概要） | `no-cors` POST。ネットワークエラー以外は成功扱い。GAS 同時実行を消費しない |
 | 教材の配布 | 通常は Pages の `manifest.json`（CDN）とローカルキャッシュで完結し、GAS② には版チェックの 1 リクエストしか出さない |
 | 学習状態の Drive 同期 | 送信に失敗した Item_ID は dirty のまま残り、次のセッション終了時に再送 |
@@ -206,7 +226,7 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 
 ## トラブルシューティング
 
-- **UserBridge タイムアウト**: GAS① が「ユーザーとして実行」か確認。サードパーティ Cookie 制限時は再ログイン
+- **単語登録・学習記憶が保存されない**: [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §9 を参照。Drive OAuth 未許可が最多。`GOOGLE_CLIENT_ID` が Pages に反映されているか確認
 - **セッション集約が空**: フォーム回答先 SS に行が入っているか、`config.js` の `GOOGLE_FORM` が正しいか確認。プリセット学習（マイ単語帳以外）で終了しているか
 - **教材の更新が反映されない**: サーバー側の版キャッシュ（120秒）が切れるのを待つか「キャッシュ更新」ボタン
 - **初回表示が遅い**: `docs/data/manifest.json` が未生成。`scripts/export-static.ps1` を実行
