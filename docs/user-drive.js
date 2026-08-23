@@ -70,6 +70,20 @@ const UserDriveModule = (function () {
     return suffix ? TOKEN_EXP_KEY + ':' + suffix : TOKEN_EXP_KEY;
   }
 
+  /** cceec0b 以前のグローバルキーからアカウント別キーへ一度だけ移行 */
+  function migrateLegacyToken_() {
+    const suffix = accountSuffix_();
+    if (!suffix) return;
+    const key = tokenStorageKey_();
+    const expKey = tokenExpStorageKey_();
+    if (localStorage.getItem(key)) return;
+    const legacyToken = localStorage.getItem(TOKEN_KEY);
+    if (!legacyToken) return;
+    localStorage.setItem(key, legacyToken);
+    const legacyExp = localStorage.getItem(TOKEN_EXP_KEY);
+    if (legacyExp) localStorage.setItem(expKey, legacyExp);
+  }
+
   function loadMeta_() {
     try {
       const raw = localStorage.getItem(metaStorageKey_());
@@ -163,11 +177,20 @@ const UserDriveModule = (function () {
   }
 
   async function ensureAuthorized_() {
+    migrateLegacyToken_();
     const token = localStorage.getItem(tokenStorageKey_());
     const exp = parseInt(localStorage.getItem(tokenExpStorageKey_()) || '0', 10);
     if (token && Date.now() < exp) return token;
     if (authPromise) return authPromise;
-    authPromise = requestAccessToken_(token ? '' : 'consent').finally(function () {
+    authPromise = (async function () {
+      try {
+        return await requestAccessToken_(token ? '' : 'consent');
+      } catch (e) {
+        if (!token) throw e;
+        clearAuth_();
+        return await requestAccessToken_('consent');
+      }
+    })().finally(function () {
       authPromise = null;
     });
     return authPromise;
@@ -708,17 +731,21 @@ const UserDriveModule = (function () {
   }
 
   async function dispatch_(op, payload) {
-    switch (op) {
-      case 'getVocabCatalog': return opGetVocabCatalog_();
-      case 'getVocabWords': return opGetVocabWords_(payload || {});
-      case 'registerVocabWords': return opRegisterVocabWords_(payload || {});
-      case 'getLearningLogs': return opGetLearningLogs_();
-      case 'getItemStates': return opGetItemStates_(payload || {});
-      case 'upsertItemStates': return opUpsertItemStates_(payload || {});
-      case 'saveSessionLog': return opSaveSessionLog_(payload || {});
-      case 'startSession': return opStartSession_(payload || {});
-      case 'countSessionAttempts': return opCountSessionAttempts_(payload || {});
-      default: throw new Error('未対応の op: ' + op);
+    try {
+      switch (op) {
+        case 'getVocabCatalog': return await opGetVocabCatalog_();
+        case 'getVocabWords': return await opGetVocabWords_(payload || {});
+        case 'registerVocabWords': return await opRegisterVocabWords_(payload || {});
+        case 'getLearningLogs': return await opGetLearningLogs_();
+        case 'getItemStates': return await opGetItemStates_(payload || {});
+        case 'upsertItemStates': return await opUpsertItemStates_(payload || {});
+        case 'saveSessionLog': return await opSaveSessionLog_(payload || {});
+        case 'startSession': return await opStartSession_(payload || {});
+        case 'countSessionAttempts': return await opCountSessionAttempts_(payload || {});
+        default: return { status: 'error', message: '未対応の op: ' + op };
+      }
+    } catch (e) {
+      return { status: 'error', message: String(e.message || e) };
     }
   }
 

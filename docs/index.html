@@ -1375,8 +1375,20 @@ const UserBridge = {
     if (!window.UserDriveModule || !UserDriveModule.isEnabled()) {
       return { status: 'error', message: 'Drive API が未設定です（config.js の GOOGLE_CLIENT_ID）' };
     }
-    await UserDriveModule.ensureAuthorized();
-    return UserDriveModule.dispatch(op, payload || {});
+    try {
+      await UserDriveModule.ensureAuthorized();
+      return await UserDriveModule.dispatch(op, payload || {});
+    } catch (e) {
+      const msg = String(e.message || e);
+      if (/access_denied|popup_closed|user_cancelled/i.test(msg)) {
+        return {
+          status: 'error',
+          code: 'drive_auth_required',
+          message: 'Drive へのアクセスが許可されていません。Google サインインで Drive 権限を許可してください。'
+        };
+      }
+      return { status: 'error', code: 'drive_api_failed', message: 'マイドライブへの接続に失敗しました: ' + msg };
+    }
   },
 
   async call(op, payload, opts) {
