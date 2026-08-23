@@ -139,6 +139,26 @@ button.is-busy::after,
 .mode-tab { flex: 1; min-width: 100px; min-height: 44px; padding: 10px 12px; border: 2px solid #cfd8dc; border-radius: 10px; background: #fff; font-weight: bold; cursor: pointer; font-size: 0.9em; }
 .mode-tab.active { background: #e3f2fd; border-color: var(--c-primary); color: var(--c-primary-dark); }
 
+/* 文法：出題数（プルダウン + 指定入力） */
+.grammar-count-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-top: 6px; }
+.grammar-count-controls select { min-height: var(--tap); font-size: 16px; flex: 0 1 auto; min-width: 120px; }
+.grammar-count-specify { display: inline-flex; align-items: center; gap: 6px; margin: 0; white-space: nowrap; font-size: 0.92em; }
+.grammar-count-specify.is-disabled { opacity: 0.55; }
+.number-stepper { display: inline-flex; align-items: center; gap: 4px; }
+.number-stepper.is-disabled { opacity: 0.45; pointer-events: none; }
+.number-stepper input[type="number"] {
+  width: 4.2em; min-height: var(--tap); padding: 8px 6px; text-align: center;
+  border: 1px solid #ccc; border-radius: 8px; font-size: 16px; -moz-appearance: textfield;
+}
+.number-stepper input[type="number"]::-webkit-outer-spin-button,
+.number-stepper input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.stepper-btn {
+  min-width: var(--tap); min-height: var(--tap); padding: 0 10px; border: 1px solid #cfd8dc;
+  border-radius: 8px; background: #fff; font-size: 0.85em; line-height: 1; cursor: pointer;
+  color: var(--c-primary-dark); touch-action: manipulation;
+}
+.stepper-btn:active { background: #e3f2fd; }
+
 /* 単語登録フォーム */
 .vocab-form-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .vocab-form-grid label { font-size: 0.85em; }
@@ -321,6 +341,7 @@ button.is-busy::after,
 .weakness-card .card-title { color: #d32f2f; border-bottom-color: #ffebee; }
 .recent-card .card-title { color: #1976d2; border-bottom-color: #e3f2fd; }
 .progress-card .card-title { color: #388e3c; border-bottom-color: #e8f5e9; }
+.grammar-area-card .card-title { color: #6a1b9a; border-bottom-color: #f3e5f5; }
 
 .dashboard-content { font-size: 0.92em; color: #555; }
 .log-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid #f5f5f5; }
@@ -473,10 +494,15 @@ button.is-busy::after,
           <div class="card-title">🕒 最近の学習履歴 (直近5回)</div>
           <div id="recent-history-list" class="dashboard-content">読込中...</div>
         </div>
-        <!-- セット別進捗 -->
+        <!-- 教材（シート）別進捗 -->
         <div class="dashboard-card progress-card">
-          <div class="card-title">📈 学習セット別の進捗</div>
+          <div class="card-title">📈 教材（シート）別の進捗</div>
           <div id="set-progress-list" class="dashboard-content">読込中...</div>
+        </div>
+        <!-- ターゲット文法領域別理解度 -->
+        <div class="dashboard-card grammar-area-card">
+          <div class="card-title">📚 ターゲット文法領域別の理解度</div>
+          <div id="grammar-area-progress-list" class="dashboard-content">読込中...</div>
         </div>
       </div>
     </div>
@@ -543,10 +569,32 @@ button.is-busy::after,
     <div class="setting-section">
       <div class="section-title">5. 出題モード</div>
       <div class="check-list">
-        <label class="check-item"><input type="radio" name="play-mode" value="normal" checked> 順番通り（選択した全問）</label>
-        <label class="check-item"><input type="radio" name="play-mode" value="random10"> ランダム演習（10問）</label>
-        <label class="check-item"><input type="radio" name="play-mode" value="weakness"> 苦手克服優先（10問）</label>
-        <label class="check-item"><input type="radio" name="play-mode" value="unseen"> 未定着優先（10問）</label>
+        <label class="check-item"><input type="radio" name="play-mode" value="normal" checked> 順番通り</label>
+        <label class="check-item"><input type="radio" name="play-mode" value="random10"> ランダム演習</label>
+        <label class="check-item"><input type="radio" name="play-mode" value="weakness"> 苦手克服優先</label>
+        <label class="check-item"><input type="radio" name="play-mode" value="unseen"> 未定着優先</label>
+      </div>
+      <div class="form-group" style="margin-top:12px;">
+        <label>出題数</label>
+        <div class="grammar-count-controls">
+          <select id="grammar-question-count" aria-label="出題数プリセット">
+            <option value="all">すべて</option>
+            <option value="5">5問</option>
+            <option value="10" selected>10問</option>
+            <option value="15">15問</option>
+            <option value="20">20問</option>
+            <option value="30">30問</option>
+          </select>
+          <label class="grammar-count-specify check-item" for="grammar-question-count-specify">
+            <input type="checkbox" id="grammar-question-count-specify"> 問題数を指定する
+          </label>
+          <div class="number-stepper is-disabled" id="grammar-count-stepper">
+            <button type="button" class="stepper-btn" id="grammar-count-up" aria-label="問題数を1増やす" disabled>△</button>
+            <input type="number" id="grammar-question-count-custom" min="1" max="999" value="10" inputmode="numeric" aria-label="指定する問題数" disabled>
+            <button type="button" class="stepper-btn" id="grammar-count-down" aria-label="問題数を1減らす" disabled>▽</button>
+          </div>
+        </div>
+        <p class="filter-axis-hint" style="margin-top:6px;margin-bottom:0;">「順番通り」かつプリセット「すべて」のときは、絞り込み後の全問が出題されます。「問題数を指定する」にチェックすると右の数値が使われます。</p>
       </div>
     </div>
     <button id="start-btn" class="btn-primary">学習を開始する</button>
@@ -1970,19 +2018,27 @@ const AlgorithmModule = (() => {
     ItemStateModule.recordAttempt(questionId, isCorrect, { kind: 'grammar', setId: meta.setId || '' });
   }
 
-  function buildQuestionSet(allQuestions, mode) {
+  function resolveQuestionLimit_(questionCount, poolLen) {
+    if (questionCount === 'all' || questionCount == null || questionCount === '') return poolLen;
+    const n = parseInt(questionCount, 10);
+    if (!n || n <= 0) return poolLen;
+    return Math.min(n, poolLen);
+  }
+
+  function buildQuestionSet(allQuestions, mode, questionCount) {
     if (!allQuestions || allQuestions.length === 0) return [];
 
     let pool = [...allQuestions];
     const itemStates = ItemStateModule.loadLocal();
+    const limit = resolveQuestionLimit_(questionCount, pool.length);
 
     if (mode === "normal") {
-      return pool;
+      return pool.slice(0, limit);
     }
 
     if (mode === "random10") {
       pool.sort(() => Math.random() - 0.5);
-      return pool.slice(0, 10);
+      return pool.slice(0, limit);
     }
 
     const entry = (q) => {
@@ -2007,7 +2063,7 @@ const AlgorithmModule = (() => {
         }
         return Math.random() - 0.5;
       });
-      return pool.slice(0, 10);
+      return pool.slice(0, limit);
     }
 
     if (mode === "unseen") {
@@ -2022,7 +2078,7 @@ const AlgorithmModule = (() => {
         }
         return ha.lastPlayed - hb.lastPlayed; // 日時が古い順
       });
-      return pool.slice(0, 10);
+      return pool.slice(0, limit);
     }
 
     return pool; 
@@ -4917,8 +4973,95 @@ const GrammarSettingsModule = (() => {
     };
   }
 
+  function getQuestionCount() {
+    const specify = document.getElementById('grammar-question-count-specify');
+    const customInput = document.getElementById('grammar-question-count-custom');
+    if (specify && specify.checked && customInput) {
+      const n = parseInt(customInput.value, 10);
+      return String(Math.max(1, n || 1));
+    }
+    const sel = document.getElementById('grammar-question-count');
+    return sel ? sel.value : '10';
+  }
+
+  function clampGrammarCount_(value) {
+    const n = parseInt(value, 10);
+    if (!n || n < 1) return 1;
+    if (n > 999) return 999;
+    return n;
+  }
+
+  function syncGrammarQuestionCountUi_() {
+    const specify = document.getElementById('grammar-question-count-specify');
+    const select = document.getElementById('grammar-question-count');
+    const stepper = document.getElementById('grammar-count-stepper');
+    const customInput = document.getElementById('grammar-question-count-custom');
+    const upBtn = document.getElementById('grammar-count-up');
+    const downBtn = document.getElementById('grammar-count-down');
+    const specifyLbl = specify ? specify.closest('.grammar-count-specify') : null;
+    if (!specify || !select || !stepper || !customInput) return;
+
+    const useCustom = specify.checked;
+    select.disabled = useCustom;
+    customInput.disabled = !useCustom;
+    if (upBtn) upBtn.disabled = !useCustom;
+    if (downBtn) downBtn.disabled = !useCustom;
+    stepper.classList.toggle('is-disabled', !useCustom);
+    if (specifyLbl) specifyLbl.classList.toggle('is-disabled', false);
+
+    if (useCustom) {
+      customInput.value = String(clampGrammarCount_(customInput.value));
+    } else if (select.value !== 'all') {
+      customInput.value = select.value;
+    }
+  }
+
+  function bindQuestionCountUi_() {
+    const specify = document.getElementById('grammar-question-count-specify');
+    const select = document.getElementById('grammar-question-count');
+    const customInput = document.getElementById('grammar-question-count-custom');
+    const upBtn = document.getElementById('grammar-count-up');
+    const downBtn = document.getElementById('grammar-count-down');
+    if (!specify || !select || !customInput) return;
+
+    specify.addEventListener('change', syncGrammarQuestionCountUi_);
+    select.addEventListener('change', function () {
+      if (!specify.checked && select.value !== 'all') {
+        customInput.value = select.value;
+      }
+    });
+    customInput.addEventListener('change', function () {
+      customInput.value = String(clampGrammarCount_(customInput.value));
+    });
+    customInput.addEventListener('input', function () {
+      if (customInput.value === '') return;
+      const n = parseInt(customInput.value, 10);
+      if (n > 999) customInput.value = '999';
+    });
+    if (upBtn) {
+      upBtn.addEventListener('click', function () {
+        if (!specify.checked) {
+          specify.checked = true;
+          syncGrammarQuestionCountUi_();
+        }
+        customInput.value = String(clampGrammarCount_((parseInt(customInput.value, 10) || 1) + 1));
+      });
+    }
+    if (downBtn) {
+      downBtn.addEventListener('click', function () {
+        if (!specify.checked) {
+          specify.checked = true;
+          syncGrammarQuestionCountUi_();
+        }
+        customInput.value = String(clampGrammarCount_((parseInt(customInput.value, 10) || 1) - 1));
+      });
+    }
+    syncGrammarQuestionCountUi_();
+  }
+
   function init() {
     renderFormatChecks();
+    bindQuestionCountUi_();
     loadCatalog(false).then(function () {
       return refreshDivisions();
     }).catch(function (e) {
@@ -4934,7 +5077,7 @@ const GrammarSettingsModule = (() => {
     refreshDivisions();
   });
 
-  return { init, refreshDivisions, reloadCatalog, prepareForStart, getSelectedUnits, getFilteredRows, getQuizOptions };
+  return { init, refreshDivisions, reloadCatalog, prepareForStart, getSelectedUnits, getFilteredRows, getQuizOptions, getQuestionCount };
 })();
 
 window.GrammarSettingsModule = GrammarSettingsModule;
@@ -4968,13 +5111,14 @@ elements.startBtn.addEventListener('click', async () => {
       await GrammarSettingsModule.prepareForStart();
       const rows = GrammarSettingsModule.getFilteredRows();
       const mode = document.querySelector('input[name="play-mode"]:checked').value;
+      const questionCount = GrammarSettingsModule.getQuestionCount();
 
       const generated = GrammarQuizGenerator.buildQuestions(rows, options);
       if (generated.length === 0) {
         alert("選択した出題形式で生成できる問題がありません。形式の選択か絞り込みを見直してください。");
         return;
       }
-      const questions = AlgorithmModule.buildQuestionSet(generated, mode);
+      const questions = AlgorithmModule.buildQuestionSet(generated, mode, questionCount);
 
       if (questions.length > 0) {
         currentQuestionDataList = questions;
@@ -5421,7 +5565,10 @@ async function saveSessionResultsUnified(modeOverride, setNameOverride) {
     score: summary.Score,
     correctRate: summary.Score,
     durationSec: summary.Duration_Sec,
-    timeTaken: summary.Duration_Sec
+    timeTaken: summary.Duration_Sec,
+    Set_ID: summary.Set_ID,
+    Set_Name: summary.Set_Name,
+    Mode: summary.Mode
   });
   const stateRes = await ItemStateModule.syncToServer();
   submitSessionSummary_(summary).catch(function (e) { console.warn('[Form]', e); });
@@ -5921,7 +6068,9 @@ async function fetchUserLogs() {
     const data = await UserBridge.call('getLearningLogs', {});
     if (data.status === 'success') {
       renderUserLogsList_(data.data);
-      renderMyPage(data.data);
+      renderMyPage(data.data).catch(function (e) {
+        console.error('renderMyPage error:', e);
+      });
     }
   } catch (e) {
     console.error('fetchUserLogs error:', e);
@@ -5951,14 +6100,181 @@ function formatLogDuration_(log) {
   return String(t) + '秒';
 }
 
-function renderMyPage(logs) {
+function parseLogDetail_(log) {
+  try {
+    const raw = log['詳細'];
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return {};
+}
+
+/** 学習記録から教材（シート名）の一覧を抽出 */
+function extractSheetNamesFromLog_(log) {
+  const detail = parseLogDetail_(log);
+  const setId = detail.Set_ID || detail.setId || '';
+  const setName = log['学習セット名'] || detail.Set_Name || detail.setName || '';
+
+  if (setId.indexOf('vocab:') === 0) {
+    const rest = setId.slice(6);
+    const slash = rest.indexOf('/');
+    return [slash >= 0 ? rest.slice(slash + 1) : setName];
+  }
+  if (setId.indexOf('grammar:') === 0) {
+    const rest = setId.slice(8);
+    const slash = rest.indexOf('/');
+    if (slash >= 0) {
+      return rest.slice(slash + 1).split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    }
+  }
+  if (setName.indexOf(' / ') >= 0) {
+    return [setName.split(' / ').pop().trim()];
+  }
+  if (setName.indexOf(' - ') >= 0) {
+    const units = setName.split(' - ')[1];
+    if (units) {
+      return units.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    }
+  }
+  return [setName || '(不明)'];
+}
+
+function renderProgressBarHtml_(label, rate, sublabel) {
+  const barColor = rate >= 80 ? '#4caf50' : rate >= 60 ? '#2196f3' : rate >= 40 ? '#ff9800' : '#f44336';
+  return ''
+    + '<div style="margin-bottom: 12px;">'
+    + '<div style="display:flex; justify-content:space-between; font-size: 0.9em; margin-bottom: 4px; gap:8px;">'
+    + '<strong>' + escapeHtml_(label) + '</strong>'
+    + '<span style="flex-shrink:0;">' + escapeHtml_(sublabel) + '</span>'
+    + '</div>'
+    + '<div class="progress-bar-container">'
+    + '<div class="progress-bar-fill" style="width: ' + rate + '%; background-color: ' + barColor + ';"></div>'
+    + '</div>'
+    + '</div>';
+}
+
+async function buildGrammarAreaStats_() {
+  const states = ItemStateModule.loadLocal();
+  const grammarItems = [];
+  const subjectUnits = {};
+
+  Object.keys(states).forEach(function (itemId) {
+    const st = states[itemId];
+    if (!st) return;
+    if (st.Kind === 'vocab') return;
+    if (st.Kind !== 'grammar' && itemId.indexOf('#') < 0) return;
+    grammarItems.push({ itemId: itemId, st: st });
+    if (st.Set_ID && st.Set_ID.indexOf('grammar:') === 0) {
+      const rest = st.Set_ID.slice(8);
+      const slash = rest.indexOf('/');
+      if (slash < 0) return;
+      const subject = rest.slice(0, slash);
+      const units = rest.slice(slash + 1).split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+      if (!subjectUnits[subject]) subjectUnits[subject] = {};
+      units.forEach(function (u) { subjectUnits[subject][u] = true; });
+    }
+  });
+
+  if (!grammarItems.length) return null;
+
+  if (!Object.keys(subjectUnits).length) {
+    try {
+      const catRes = await PresetModule.getGrammarCatalog(false);
+      const catalog = (catRes && catRes.data) || {};
+      grammarItems.forEach(function (entry) {
+        const unit = entry.itemId.split('#')[0];
+        if (!unit) return;
+        Object.keys(catalog).forEach(function (subject) {
+          if ((catalog[subject] || []).indexOf(unit) >= 0) {
+            if (!subjectUnits[subject]) subjectUnits[subject] = {};
+            subjectUnits[subject][unit] = true;
+          }
+        });
+      });
+    } catch (e) {
+      console.warn('文法カタログ参照:', e.message);
+    }
+  }
+
+  const rowAreaMap = {};
+  const subjects = Object.keys(subjectUnits);
+  for (let si = 0; si < subjects.length; si++) {
+    const subject = subjects[si];
+    const units = Object.keys(subjectUnits[subject]);
+    for (let ui = 0; ui < units.length; ui++) {
+      try {
+        const rows = await fetchGrammarRows(subject, units[ui], false);
+        rows.forEach(function (r) {
+          rowAreaMap[r.rowId] = (r.grammarArea && String(r.grammarArea).trim()) || '(未設定)';
+        });
+      } catch (e) {
+        console.warn('文法領域マップ取得:', subject, units[ui], e.message);
+      }
+    }
+  }
+
+  const areaMap = {};
+  grammarItems.forEach(function (entry) {
+    const st = entry.st;
+    const area = rowAreaMap[entry.itemId] || '(未分類)';
+    if (!areaMap[area]) {
+      areaMap[area] = { attempts: 0, wrong: 0, itemCount: 0, recentAccSum: 0, recentAccN: 0 };
+    }
+    const attempts = parseInt(st.Total_Attempts, 10) || 0;
+    const wrong = parseInt(st.Total_Wrong, 10) || 0;
+    areaMap[area].attempts += attempts;
+    areaMap[area].wrong += wrong;
+    areaMap[area].itemCount++;
+    const bits = parseInt(st.Recent_Bits, 10) || 0;
+    const total = parseInt(st.Total_Attempts, 10) || 0;
+    const recentN = Math.min(5, total);
+    if (bits > 0 && recentN > 0) {
+      let correct = 0;
+      for (let b = 0; b < recentN; b++) {
+        if ((bits >> b) & 1) correct++;
+      }
+      areaMap[area].recentAccSum += Math.round((correct / recentN) * 100);
+      areaMap[area].recentAccN++;
+    }
+  });
+
+  return areaMap;
+}
+
+function renderGrammarAreaProgress_(areaMap) {
+  const el = document.getElementById('grammar-area-progress-list');
+  if (!el) return;
+  if (!areaMap || !Object.keys(areaMap).length) {
+    el.innerHTML = '<p>文法学習の記録がまだありません。文法問題に取り組むと、領域別の理解度が表示されます。</p>';
+    return;
+  }
+  const areas = Object.keys(areaMap).sort(function (a, b) { return a.localeCompare(b, 'ja'); });
+  let html = '';
+  areas.forEach(function (area) {
+    const stat = areaMap[area];
+    const attempts = stat.attempts;
+    const acc = attempts > 0 ? Math.round(((attempts - stat.wrong) / attempts) * 100) : 0;
+    const recent = stat.recentAccN > 0 ? Math.round(stat.recentAccSum / stat.recentAccN) : acc;
+    const displayRate = stat.recentAccN > 0 ? recent : acc;
+    const sub = (attempts > 0 ? '正答率 ' + acc + '%' : '未演習')
+      + ' / 直近 ' + displayRate + '%'
+      + ' / ' + stat.itemCount + '問に取組';
+    html += renderProgressBarHtml_(area, displayRate, sub);
+  });
+  el.innerHTML = html;
+}
+
+async function renderMyPage(logs) {
   const container = document.getElementById('mypage-container');
   if (container) container.style.display = 'block';
-  
+
+  const areaEl = document.getElementById('grammar-area-progress-list');
+  if (areaEl) areaEl.innerHTML = '読込中...';
+
   if (!logs || logs.length === 0) {
     document.getElementById('recent-history-list').innerHTML = "<p>まだ学習記録がありません。</p>";
     document.getElementById('set-progress-list').innerHTML = "<p>まだ学習記録がありません。</p>";
     document.getElementById('weakness-list').innerHTML = "<p>まだ学習記録がありません。</p>";
+    renderGrammarAreaProgress_(null);
     return;
   }
 
@@ -5983,44 +6299,34 @@ function renderMyPage(logs) {
   });
   document.getElementById('recent-history-list').innerHTML = recentHtml;
 
-  // 2. セット別進捗 & 弱点分析
-  const setMap = {};
-  logs.forEach(log => {
-    const setName = log['学習セット名'];
-    const rate = parseInt(log['正答率']) || 0;
-    if (!setMap[setName]) {
-      setMap[setName] = { playCount: 0, maxRate: 0, recentRate: rate };
-    }
-    setMap[setName].playCount++;
-    if (rate > setMap[setName].maxRate) setMap[setName].maxRate = rate;
-    setMap[setName].recentRate = rate; // keep last
+  // 2. 教材（シート名）別進捗 & 弱点分析
+  const sheetMap = {};
+  logs.forEach(function (log) {
+    const rate = parseInt(log['正答率'], 10) || 0;
+    extractSheetNamesFromLog_(log).forEach(function (sheetName) {
+      if (!sheetMap[sheetName]) {
+        sheetMap[sheetName] = { playCount: 0, maxRate: 0, recentRate: rate };
+      }
+      sheetMap[sheetName].playCount++;
+      if (rate > sheetMap[sheetName].maxRate) sheetMap[sheetName].maxRate = rate;
+      sheetMap[sheetName].recentRate = rate;
+    });
   });
 
   let progressHtml = '';
   const weaknessList = [];
-  
-  for (const setName in setMap) {
-    const stat = setMap[setName];
+  const sheetNames = Object.keys(sheetMap).sort(function (a, b) { return a.localeCompare(b, 'ja'); });
+
+  sheetNames.forEach(function (sheetName) {
+    const stat = sheetMap[sheetName];
     const rate = stat.maxRate;
-    const barColor = rate >= 80 ? '#4caf50' : rate >= 60 ? '#2196f3' : rate >= 40 ? '#ff9800' : '#f44336';
-    
-    progressHtml += `
-      <div style="margin-bottom: 12px;">
-        <div style="display:flex; justify-content:space-between; font-size: 0.9em; margin-bottom: 4px;">
-          <strong>${setName}</strong>
-          <span>最高 ${rate}% (計${stat.playCount}回)</span>
-        </div>
-        <div class="progress-bar-container">
-          <div class="progress-bar-fill" style="width: ${rate}%; background-color: ${barColor};"></div>
-        </div>
-      </div>
-    `;
+    progressHtml += renderProgressBarHtml_(sheetName, rate, '最高 ' + rate + '% (計' + stat.playCount + '回)');
 
     if (stat.recentRate < 60) {
-      weaknessList.push({ name: setName, rate: stat.recentRate });
+      weaknessList.push({ name: sheetName, rate: stat.recentRate });
     }
-  }
-  document.getElementById('set-progress-list').innerHTML = progressHtml;
+  });
+  document.getElementById('set-progress-list').innerHTML = progressHtml || '<p>シート別の記録がありません。</p>';
 
   let weaknessHtml = '';
   if (weaknessList.length > 0) {
@@ -6039,6 +6345,17 @@ function renderMyPage(logs) {
     weaknessHtml = "<p>現在、目立った弱点はありません。すばらしい！</p>";
   }
   document.getElementById('weakness-list').innerHTML = weaknessHtml;
+
+  try {
+    if (AuthGateService.isValid()) {
+      await ItemStateModule.syncFromServer('');
+    }
+    const areaMap = await buildGrammarAreaStats_();
+    renderGrammarAreaProgress_(areaMap);
+  } catch (e) {
+    console.warn('文法領域別理解度:', e.message);
+    renderGrammarAreaProgress_(null);
+  }
 }
 
 // ログアウト機能
