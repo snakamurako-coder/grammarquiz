@@ -5750,21 +5750,23 @@ window.onLoginSuccess = function(user) {
   
   GrammarSettingsModule.init();
   initModeTabs();
-  initVocabModules();
   if (window.VocabRegisterModule) window.VocabRegisterModule.init();
   try { sessionStorage.removeItem('dd_my_vocab_book_url'); } catch (e) {}
   if (window.UserDriveModule && UserDriveModule.isEnabled()) {
-    UserDriveModule.ensureAuthorized().then(function () {
+    UserDriveModule.ensureUserDataEnvironment().then(function () {
+      initVocabModules();
       fetchUserLogs();
       ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
       flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
     }).catch(function (e) {
-      console.warn('Drive 認可:', e.message || e);
+      console.warn('Drive 環境の準備:', e.message || e);
+      initVocabModules();
       if (typeof showToast_ === 'function') {
         showToast_('マイ単語帳・学習記録を使うには Google の Drive 権限が必要です。再ログイン時に許可してください。');
       }
     });
   } else {
+    initVocabModules();
     fetchUserLogs();
     ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
     flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });

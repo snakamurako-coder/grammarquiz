@@ -23,7 +23,8 @@ alwaysApply: false
 1. `UserBridge.queueOp` と `dispatch_` は例外を `{ status: 'error', message }` で返す（throw のみにしない）
 2. OAuth トークンはアカウント別キー + `migrateLegacyToken_()` を維持
 3. `ensureAuthorized_()` はサイレント更新失敗時に `consent` 再取得
-4. 書込 op は `USER_BRIDGE_WRITE_OPS` に登録
+4. ログイン後は `ensureUserDataEnvironment()` でフォルダ・両 SS を先行作成
+5. 書込 op は `USER_BRIDGE_WRITE_OPS` に登録
 5. `VOCAB_HEADERS` / 列契約変更時は `docs/gem_system_prompt.md` も同期
 
 ## 触る前に確認

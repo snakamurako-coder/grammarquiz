@@ -145,6 +145,23 @@ const UserDriveModule = (function () {
     return res.json();
   }
 
+  function waitForOAuth2_(attempts) {
+    attempts = attempts || 0;
+    return new Promise(function (resolve, reject) {
+      if (window.google && google.accounts && google.accounts.oauth2) {
+        resolve(true);
+        return;
+      }
+      if (attempts >= 50) {
+        reject(new Error('Google OAuth ライブラリが読み込まれていません'));
+        return;
+      }
+      setTimeout(function () {
+        waitForOAuth2_(attempts + 1).then(resolve, reject);
+      }, 100);
+    });
+  }
+
   function initTokenClient_() {
     if (tokenClient) return tokenClient;
     if (!window.google || !google.accounts || !google.accounts.oauth2) return null;
@@ -157,22 +174,24 @@ const UserDriveModule = (function () {
   }
 
   function requestAccessToken_(prompt) {
-    return new Promise(function (resolve, reject) {
-      const client = initTokenClient_();
-      if (!client) {
-        reject(new Error('Google OAuth ライブラリが読み込まれていません'));
-        return;
-      }
-      client.callback = function (resp) {
-        if (resp.error) {
-          reject(new Error(resp.error_description || resp.error));
+    return waitForOAuth2_().then(function () {
+      return new Promise(function (resolve, reject) {
+        const client = initTokenClient_();
+        if (!client) {
+          reject(new Error('Google OAuth ライブラリが初期化できません'));
           return;
         }
-        localStorage.setItem(tokenStorageKey_(), resp.access_token);
-        localStorage.setItem(tokenExpStorageKey_(), String(Date.now() + (resp.expires_in - 60) * 1000));
-        resolve(resp.access_token);
-      };
-      client.requestAccessToken({ prompt: prompt || '' });
+        client.callback = function (resp) {
+          if (resp.error) {
+            reject(new Error(resp.error_description || resp.error));
+            return;
+          }
+          localStorage.setItem(tokenStorageKey_(), resp.access_token);
+          localStorage.setItem(tokenExpStorageKey_(), String(Date.now() + (resp.expires_in - 60) * 1000));
+          resolve(resp.access_token);
+        };
+        client.requestAccessToken({ prompt: prompt || '' });
+      });
     });
   }
 
@@ -237,11 +256,10 @@ const UserDriveModule = (function () {
 
   async function driveVerifyOwnedRootFolder_(folderId) {
     try {
-      const data = await apiFetch_(
-        'https://www.googleapis.com/drive/v3/files/' + folderId + '?fields=id,trashed,parents,ownedByMe'
+      const files = await driveList_(
+        "id='" + String(folderId).replace(/'/g, "\\'") + "' and mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false"
       );
-      if (data.trashed || data.ownedByMe === false) return false;
-      return (data.parents || []).indexOf('root') >= 0;
+      return files.length > 0;
     } catch (e) {
       return false;
     }
@@ -249,11 +267,10 @@ const UserDriveModule = (function () {
 
   async function driveVerifyOwnedInFolder_(fileId, folderId) {
     try {
-      const data = await apiFetch_(
-        'https://www.googleapis.com/drive/v3/files/' + fileId + '?fields=id,trashed,parents,ownedByMe'
+      const files = await driveList_(
+        "id='" + String(fileId).replace(/'/g, "\\'") + "' and '" + String(folderId).replace(/'/g, "\\'") + "' in parents and trashed=false"
       );
-      if (data.trashed || data.ownedByMe === false) return false;
-      return (data.parents || []).indexOf(folderId) >= 0;
+      return files.length > 0;
     } catch (e) {
       return false;
     }
@@ -300,6 +317,7 @@ const UserDriveModule = (function () {
     if (existing) {
       meta[metaKey] = existing.id;
       saveMeta_(meta);
+      if (setupFn) await setupFn(existing.id);
       return existing.id;
     }
 
@@ -344,18 +362,32 @@ const UserDriveModule = (function () {
 
   async function setupVocabBook_(bookId) {
     const ss = await sheetsGet_(bookId);
-    let sheet = ss.sheets && ss.sheets[0];
-    if (!sheet) return;
-    const title = sheet.properties.title;
-    if (title === 'シート1' || title === 'Sheet1') {
-      await sheetsBatchUpdate_(bookId, [{
-        updateSheetProperties: {
-          properties: { sheetId: sheet.properties.sheetId, title: 'デフォルト' },
-          fields: 'title'
-        }
-      }]);
+    let sheets = ss.sheets || [];
+    if (!sheets.length) {
+      await sheetsBatchUpdate_(bookId, [{ addSheet: { properties: { title: 'デフォルト' } } }]);
+      await sheetsValuesUpdate_(bookId, 'デフォルト!A1:V1', [VOCAB_HEADERS]);
+      return;
     }
-    await sheetsValuesUpdate_(bookId, 'デフォルト!A1:V1', [VOCAB_HEADERS]);
+    let targetSheet = sheets.find(function (s) { return s.properties.title === 'デフォルト'; });
+    if (!targetSheet) {
+      const first = sheets[0].properties;
+      if (first.title === 'シート1' || first.title === 'Sheet1') {
+        await sheetsBatchUpdate_(bookId, [{
+          updateSheetProperties: {
+            properties: { sheetId: first.sheetId, title: 'デフォルト' },
+            fields: 'title'
+          }
+        }]);
+        targetSheet = { properties: { title: 'デフォルト' } };
+      } else {
+        targetSheet = { properties: { title: first.title } };
+      }
+    }
+    const sheetTitle = targetSheet.properties.title;
+    const header = await sheetsValuesGet_(bookId, sheetTitle + '!A1:V1');
+    if (!header.length || header[0][0] !== '通し番号') {
+      await sheetsValuesUpdate_(bookId, sheetTitle + '!A1:V1', [VOCAB_HEADERS]);
+    }
   }
 
   async function setupLogBook_(bookId) {
@@ -371,9 +403,14 @@ const UserDriveModule = (function () {
             fields: 'title'
           }
         }]);
+      } else if (first.title !== ITEM_STATE_SHEET) {
+        await sheetsBatchUpdate_(bookId, [{ addSheet: { properties: { title: SESSION_LOG_SHEET } } }]);
       }
     }
-    await sheetsValuesUpdate_(bookId, SESSION_LOG_SHEET + '!A1:F1', [SESSION_LOG_HEADERS]);
+    const header = await sheetsValuesGet_(bookId, SESSION_LOG_SHEET + '!A1:F1');
+    if (!header.length || !header[0].length) {
+      await sheetsValuesUpdate_(bookId, SESSION_LOG_SHEET + '!A1:F1', [SESSION_LOG_HEADERS]);
+    }
     await ensureItemStateSheet_(bookId);
   }
 
@@ -397,6 +434,13 @@ const UserDriveModule = (function () {
   async function getLogBookId_() {
     const folderId = await ensureFolder_();
     return ensureSpreadsheet_(folderId, LOG_BOOK_NAME, setupLogBook_);
+  }
+
+  /** ログイン後: フォルダ・マイ単語帳・学習記録ブックをなければ作成 */
+  async function ensureUserDataEnvironment_() {
+    await ensureAuthorized_();
+    await getVocabBookId_();
+    await getLogBookId_();
   }
 
   function buildSheetInfo_(sheetName, values) {
@@ -752,6 +796,7 @@ const UserDriveModule = (function () {
   return {
     isEnabled: isEnabled_,
     ensureAuthorized: ensureAuthorized_,
+    ensureUserDataEnvironment: ensureUserDataEnvironment_,
     clearAuth: clearAuth_,
     dispatch: dispatch_
   };

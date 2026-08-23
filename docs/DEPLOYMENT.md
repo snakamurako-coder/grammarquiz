@@ -194,11 +194,12 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 
 ### Drive OAuth（UserDriveModule）
 
-1. ログイン成功後、`onLoginSuccess` で `UserDriveModule.ensureAuthorized()` を試行
-2. 初回 or 期限切れ時、Google の Drive/Sheets 権限ダイアログを表示
-3. トークンは `dd_google_access_token:<account>` に保存（アカウント別）
+1. ログイン成功後、`onLoginSuccess` で `UserDriveModule.ensureUserDataEnvironment()` を実行
+2. **フォルダ `DigitalDrill_MyData`・`マイ単語帳`・`DigitalDrill学習記録` がなければ自動作成**
+3. 初回 or 期限切れ時、Google の Drive/Sheets 権限ダイアログを表示
+4. トークンは `dd_google_access_token:<account>` に保存（アカウント別）
 
-**ログイン成功だけでは単語登録できない。** Drive 権限の許可が別途必要。
+**ログイン成功だけでは単語登録できない。** Drive 権限の許可が別途必要。許可後は上記3点がマイドライブ直下に作られる。
 
 ---
 

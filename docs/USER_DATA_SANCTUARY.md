@@ -38,7 +38,7 @@
 | **アプリログイン** | `digitaldrill_auth_token` 等 | ホワイトリスト・UI 表示 | GAS① 認証 |
 | **Drive OAuth** | `dd_google_access_token:<account>` 等 | マイドライブ読み書き | GIS `initTokenClient` |
 
-ログイン成功 ≠ Drive 権限済み。`onLoginSuccess` で `UserDriveModule.ensureAuthorized()` を呼び、失敗時はトーストで Drive 許可を促す。
+ログイン成功 ≠ Drive 権限済み。`onLoginSuccess` で `UserDriveModule.ensureUserDataEnvironment()` を呼び、Drive 許可後にフォルダ・マイ単語帳・学習記録を自動作成する。失敗時はトーストで Drive 許可を促す。
 
 ---
 
@@ -60,6 +60,17 @@
 - GAS「ユーザーとして実行」経由の保存先フォールバックは**復活させない**（フォルダ不一致でデータが見えなくなる）
 
 メタデータ（folderId / vocabBookId / logBookId）は `dd_user_drive_meta:<account>` に JSON 保存。
+
+### 自動作成（ensureUserDataEnvironment）
+
+`getVocabBookId_` / `getLogBookId_` / `ensureFolder_` が **初回アクセス時に作成**する。  
+ログイン直後は `ensureUserDataEnvironment()` が両ブックまで先行作成する（`onLoginSuccess`）。
+
+| 処理 | 関数 |
+|---|---|
+| フォルダ作成 | `ensureFolder_()` |
+| マイ単語帳 SS 作成 + デフォルトシート | `ensureSpreadsheet_(…, VOCAB_BOOK_NAME, setupVocabBook_)` |
+| 学習記録 SS 作成 + シート初期化 | `ensureSpreadsheet_(…, LOG_BOOK_NAME, setupLogBook_)` |
 
 ---
 
@@ -149,6 +160,8 @@ VocabRegisterModule.submitCard_
 | `UserBridge.queueOp` の try/catch 削除 | OAuth 拒否が未処理例外に |
 | `dispatch_` が throw のみ（status 返却なし） | UI が「登録失敗」の詳細を失う |
 | 保存先をマイドライブ以外に変更 | 既存ユーザーのデータが見えなくなる |
+| `onLoginSuccess` で `ensureUserDataEnvironment` をスキップ | 初回登録前にフォルダ/ブックが存在しない |
+| `driveVerifyOwnedRootFolder_` で `parents` に `'root'` 文字列のみ判定 | 検証が常に失敗し meta が毎回消える |
 | `code.gs` にユーザー Drive 操作を再実装 | 聖域の二重化 |
 
 ---
@@ -198,4 +211,4 @@ VocabRegisterModule.submitCard_
 
 | 日付 | 内容 |
 |---|---|
-| 2026-08-23 | 初版（Drive API 一本化後の聖域化。トークン移行・GAS フォールバック削除事故を反映） |
+| 2026-08-23 | ensureUserDataEnvironment・フォルダ検証修正・setupVocabBook 堅牢化 |
