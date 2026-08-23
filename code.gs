@@ -22,21 +22,10 @@ const PROP = {
   FORM_RESPONSE_SHEET: 'FORM_RESPONSE_SHEET'
 };
 
-/** ユーザー権限実行時の UserProperties キー */
-const USER_PROP = {
-  MY_DATA_FOLDER_ID: 'MY_DATA_FOLDER_ID',
-  MY_VOCAB_BOOK_ID: 'MY_VOCAB_BOOK_ID',
-  MY_LOG_BOOK_ID: 'MY_LOG_BOOK_ID'
-};
-
-const USER_DATA_FOLDER_NAME = 'DigitalDrill_MyData';
-const USER_LOG_BOOK_NAME = 'DigitalDrill学習記録';
 const AUTH_CACHE_PREFIX = 'auth_';
-const USER_OP_CACHE_PREFIX = 'uop_';
 /** 教材の版。全ユーザー共通なので CacheService に載せて Drive 走査を抑える */
 const PRESET_VERSION_CACHE_KEY = 'preset_version';
 const PRESET_VERSION_CACHE_TTL = 120;
-const USER_OP_CACHE_TTL = 600;
 /** 認証トークン有効期間: 1時間半（5400秒） */
 const AUTH_CACHE_TTL = 5400;
 const DEFAULT_PAGES_URL = 'https://snakamurako-coder.github.io/grammarquiz/';
@@ -51,14 +40,7 @@ const VOCABULARY_FOLDER_NAME = 'vocabulary';
 const APP_BOOK_NAME = 'DigitalDrill';
 const MY_VOCAB_BOOK_NAME = 'マイ単語帳';
 const UNREGISTERED = '(未登録)';
-const USER_ITEM_STATE_SHEET_NAME = '学習状態';
-const USER_SESSION_LOG_SHEET_NAME = '学習記録';
-const USER_SESSION_LOG_HEADERS = ['タイムスタンプ', '学習セット名', 'モード', '正答率', '解答時間', '詳細'];
 const FORM_RESPONSE_HEADER_USER_ID = 'User_ID';
-const ITEM_STATE_HEADERS = [
-  'Item_ID', 'Kind', 'Set_ID', 'Total_Attempts', 'Total_Wrong',
-  'Recent_Bits', 'Last_Seen', 'Step_Index', 'EF', 'Next_Review', 'Avg_Time'
-];
 
 /** 文法データセット11列ヘッダ。1行が形式A〜Hすべての素材になる */
 const GRAMMAR_HEADERS = [
@@ -91,10 +73,6 @@ function doOptions(e) {
 
 function doGet(e) {
   const action = e && e.parameter ? e.parameter.action : null;
-
-  if (action === 'userBridge') {
-    return handleUserBridge_(e);
-  }
 
   // 認証系は ensureEnvironment を通さない（GAS① ユーザー権限で Drive 初期化が失敗し得る）
   if (action === 'auth') {
@@ -291,13 +269,6 @@ function expandWordAlternatives_(sentence) {
   return expandRecursive(s);
 }
 
-/** 表示用代表形: 最初の / 文 + [ 前の語のみ残す */
-function displayGrammarSentence_(raw) {
-  const variants = splitGrammarVariants_(raw);
-  const first = variants[0] || '';
-  return first.replace(/([^\s\[]+)\[[^\]]+\]/g, '$1').replace(/\s+/g, ' ').trim();
-}
-
 /** 受理される英文の完全展開リスト */
 function expandAcceptedSentences_(raw) {
   const variants = splitGrammarVariants_(raw);
@@ -369,7 +340,6 @@ function fetchQuestionsFromSheet(params) {
       const sortDummy = cell('並び替えダミー');
       const mcqAnswer = mcq ? mcq.inner : '';
       const mcqDummies = splitGrammarList_(cell('N択ダミー'));
-      const fullSentenceDisplay = displayGrammarSentence_(fullSentence);
       const acceptedSentences = expandAcceptedSentences_(fullSentence);
 
       const warnings = [];
@@ -390,8 +360,6 @@ function fetchQuestionsFromSheet(params) {
         daiUnit: cell('大単元'),
         shoUnit: cell('小単元'),
         fullSentence: fullSentence,
-        fullSentenceDisplay: fullSentenceDisplay,
-        acceptedSentences: acceptedSentences,
         japanese: japanese,
         grammarArea: cell('ターゲット文法領域'),
         explanation: cell('解説'),
@@ -482,8 +450,6 @@ function doPost(e) {
     if (action === "logout") {
       if (requestData.authToken) invalidateAuthToken_(requestData.authToken);
       return sendResponse({ status: "success", message: "ログアウトしました" });
-    } else if (action === "queueUserOp") {
-      return handleQueueUserOp_(requestData);
     } else {
       return sendResponse({ status: "error", message: "無効なactionです: " + action });
     }
@@ -1416,20 +1382,6 @@ function spreadsheetEditUrl_(ss, sheet) {
   return url;
 }
 
-function isFileInFolder_(fileId, folder) {
-  if (!fileId || !folder) return false;
-  try {
-    const parents = DriveApp.getFileById(fileId).getParents();
-    const targetId = folder.getId();
-    while (parents.hasNext()) {
-      if (parents.next().getId() === targetId) return true;
-    }
-  } catch (e) {
-    return false;
-  }
-  return false;
-}
-
 function ensureSampleVocabBooks_(vocabularyFolder, force, created, reused) {
   const catalog = getSampleVocabCatalog_();
   const bookIds = {};
@@ -1785,7 +1737,7 @@ function registerVocabWords_(sheetName, rows, ssOpt) {
 }
 
 // =========================================================
-// ⑨ ユーザー権限環境（GAS①・UserProperties + ユーザーDrive）
+// ⑨ 認証ヘルパー
 // =========================================================
 
 function getPagesUrl_() {
@@ -1795,632 +1747,6 @@ function getPagesUrl_() {
 
 function generateSessionToken_() {
   return Utilities.getUuid().replace(/-/g, '');
-}
-
-/**
- * アプリ本体（grammarquizzes / vocabulary / DigitalDrill）と同じ親フォルダを返す。
- * ScriptProperties → スクリプト親 → マイドライブ直下の順。
- */
-function resolveAppParentFolder_() {
-  const props = PropertiesService.getScriptProperties();
-  const parentId = props.getProperty(PROP.PARENT_FOLDER_ID);
-  if (parentId) {
-    try {
-      return DriveApp.getFolderById(parentId);
-    } catch (e) {
-      // fall through
-    }
-  }
-  try {
-    return getScriptParentFolder_();
-  } catch (e) {
-    return DriveApp.getRootFolder();
-  }
-}
-
-/**
- * DigitalDrill_MyData をアプリ親フォルダ内に1つだけ確保する。
- * 既存フォルダ（名前一致）があれば再利用し、重複生成しない。
- */
-function ensureUserDataFolder_() {
-  const props = PropertiesService.getUserProperties();
-  let folder = null;
-  const folderId = props.getProperty(USER_PROP.MY_DATA_FOLDER_ID);
-
-  if (folderId) {
-    try {
-      folder = DriveApp.getFolderById(folderId);
-    } catch (e) {
-      folder = null;
-    }
-  }
-
-  const parent = resolveAppParentFolder_();
-
-  if (!folder) {
-    folder = findChildFolderByName_(parent, USER_DATA_FOLDER_NAME) || parent.createFolder(USER_DATA_FOLDER_NAME);
-  }
-
-  props.setProperty(USER_PROP.MY_DATA_FOLDER_ID, folder.getId());
-  return folder;
-}
-
-function ensureUserEnvironment_() {
-  const lock = LockService.getUserLock();
-  lock.waitLock(30000);
-  try {
-    const props = PropertiesService.getUserProperties();
-    const folder = ensureUserDataFolder_();
-    const vocabBook = getOrCreateUserVocabBook_(folder);
-    props.setProperty(USER_PROP.MY_VOCAB_BOOK_ID, vocabBook.getId());
-
-    const logBook = getOrCreateUserLogBook_(folder, props);
-    props.setProperty(USER_PROP.MY_LOG_BOOK_ID, logBook.getId());
-
-    return {
-      folderId: folder.getId(),
-      vocabBookId: vocabBook.getId(),
-      logBookId: logBook.getId()
-    };
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function getOrCreateUserLogBook_(folder, userProps) {
-  let bookId = userProps.getProperty(USER_PROP.MY_LOG_BOOK_ID);
-  if (bookId) {
-    try {
-      return SpreadsheetApp.openById(bookId);
-    } catch (e) {
-      // fall through
-    }
-  }
-
-  const existing = findChildSpreadsheetByName_(folder, USER_LOG_BOOK_NAME);
-  if (existing) return SpreadsheetApp.open(existing);
-
-  const ss = createSpreadsheetInFolder_(USER_LOG_BOOK_NAME, folder);
-  const sheet = ss.getSheets()[0];
-  sheet.setName(USER_SESSION_LOG_SHEET_NAME);
-  sheet.appendRow(USER_SESSION_LOG_HEADERS);
-  sheet.getRange(1, 1, 1, USER_SESSION_LOG_HEADERS.length).setFontWeight('bold');
-  sheet.setFrozenRows(1);
-  return ss;
-}
-
-function getOrCreateUserVocabBook_(userFolder) {
-  const props = PropertiesService.getUserProperties();
-  const bookId = props.getProperty(USER_PROP.MY_VOCAB_BOOK_ID);
-  if (bookId && isFileInFolder_(bookId, userFolder)) {
-    try {
-      const ss = SpreadsheetApp.openById(bookId);
-      ensureMyVocabDefaultSheet_(ss);
-      return ss;
-    } catch (e) {
-      // fall through and recreate in the user folder
-    }
-  }
-
-  const existingFile = findChildSpreadsheetByName_(userFolder, MY_VOCAB_BOOK_NAME);
-  let ss;
-  const createdNew = !existingFile;
-  if (existingFile) {
-    ss = SpreadsheetApp.open(existingFile);
-  } else {
-    ss = createSpreadsheetInFolder_(MY_VOCAB_BOOK_NAME, userFolder);
-  }
-  ensureMyVocabDefaultSheet_(ss);
-  if (createdNew) ensureMyVocabSampleSheet_(ss);
-  props.setProperty(USER_PROP.MY_VOCAB_BOOK_ID, ss.getId());
-  return ss;
-}
-
-function getUserVocabBook_() {
-  const folder = ensureUserDataFolder_();
-  return getOrCreateUserVocabBook_(folder);
-}
-
-function getUserLogBook_() {
-  ensureUserEnvironment_();
-  const bookId = PropertiesService.getUserProperties().getProperty(USER_PROP.MY_LOG_BOOK_ID);
-  return SpreadsheetApp.openById(bookId);
-}
-
-function fetchUserVocabCatalog_() {
-  const ss = getUserVocabBook_();
-  const sheetInfos = ss.getSheets().map(function (sheet) {
-    return buildVocabSheetInfo_(sheet);
-  });
-  return {
-    presets: [],
-    userBooks: [{
-      bookName: MY_VOCAB_BOOK_NAME,
-      bookId: ss.getId(),
-      bookUrl: spreadsheetEditUrl_(ss),
-      sheets: sheetInfos
-    }]
-  };
-}
-
-function fetchUserVocabWordsFromSheet_(params) {
-  const sheetName = params.sheetName;
-  if (!sheetName) throw new Error('sheetName は必須です。');
-
-  const ss = getUserVocabBook_();
-  return fetchVocabWordsFromSpreadsheet_(ss, sheetName, params.filters || {}, !!params.includeBookPool);
-}
-
-function fetchVocabWordsFromSpreadsheet_(ss, sheetName, filters, includeBookPool) {
-  const sheet = ss.getSheetByName(sheetName);
-  if (!sheet) throw new Error('シートが見つかりません: ' + sheetName);
-
-  const data = sheet.getDataRange().getValues();
-  if (data.length <= 1) return { words: [], pool: [], bookPool: [] };
-
-  const headers = data[0];
-  const daiFilter = filters.dai || [];
-  const chuFilter = filters.chu || [];
-  const shoFilter = filters.sho || [];
-  const words = [];
-  const pool = [];
-
-  for (let r = 1; r < data.length; r++) {
-    const rowObj = rowToVocabObject_(headers, data[r]);
-    const word = normalizeVocabField_(rowObj['英単語・熟語の表現']);
-    if (word === UNREGISTERED) continue;
-    rowObj._rowIndex = r + 1;
-    pool.push(rowObj);
-
-    const dai = normalizeVocabField_(rowObj['大区分']);
-    const chu = normalizeVocabField_(rowObj['中区分']);
-    const sho = normalizeVocabField_(rowObj['小区分']);
-    if (daiFilter.length > 0 && daiFilter.indexOf(dai) === -1) continue;
-    if (chuFilter.length > 0 && chuFilter.indexOf(chu) === -1) continue;
-    if (shoFilter.length > 0 && shoFilter.indexOf(sho) === -1) continue;
-    words.push(rowObj);
-  }
-
-  let bookPool = pool;
-  if (includeBookPool) {
-    bookPool = [];
-    ss.getSheets().forEach(function (s) {
-      const sData = s.getDataRange().getValues();
-      if (sData.length <= 1) return;
-      const sHeaders = sData[0];
-      for (let r = 1; r < sData.length; r++) {
-        const rowObj = rowToVocabObject_(sHeaders, sData[r]);
-        const word = normalizeVocabField_(rowObj['英単語・熟語の表現']);
-        if (word === UNREGISTERED) continue;
-        rowObj._sheetName = s.getName();
-        bookPool.push(rowObj);
-      }
-    });
-  }
-
-  return { words: words, pool: pool, bookPool: bookPool };
-}
-
-function registerUserVocabWords_(sheetName, rows) {
-  const ss = getUserVocabBook_();
-  return registerVocabWords_(sheetName, rows, ss);
-}
-
-function fetchUserLearningLogs_() {
-  const ss = getUserLogBook_();
-  const sheet = ss.getSheetByName(USER_SESSION_LOG_SHEET_NAME);
-  if (!sheet || sheet.getLastRow() <= 1) return [];
-
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const logs = [];
-  for (let i = data.length - 1; i >= 1 && logs.length < 20; i--) {
-    const obj = {};
-    for (let j = 0; j < headers.length; j++) {
-      if (headers[j]) obj[headers[j]] = data[i][j];
-    }
-    logs.push(obj);
-  }
-  return logs;
-}
-
-/** 単語1件を一意に識別する Item_ID（ブック名|シート名|通し番号） */
-function buildWordId_(bookName, sheetName, serialNo) {
-  return String(bookName || UNREGISTERED) + '|' + String(sheetName || UNREGISTERED) + '|' + String(serialNo || UNREGISTERED);
-}
-
-/** 空値を UNREGISTERED に寄せてシート上の型ブレを防ぐ */
-function itemNormField_(value) {
-  if (value === null || value === undefined || value === '') return UNREGISTERED;
-  return String(value);
-}
-
-function buildSessionPayload_(params) {
-  const mode = params.mode || 'reading';
-  const sheetName = params.sheetName;
-  if (!sheetName) throw new Error('sheetName は必須です');
-
-  const filters = params.filters || {};
-  const wordData = fetchUserVocabWordsFromSheet_({
-    sheetName: sheetName,
-    filters: filters,
-    includeBookPool: true
-  });
-
-  if (!wordData.words || wordData.words.length === 0) {
-    throw new Error('出題できる単語がありません');
-  }
-
-  const bookName = MY_VOCAB_BOOK_NAME;
-  const srsStates = fetchUserItemStatesForWords_(bookName, sheetName, wordData.words);
-
-  return {
-    mode: mode,
-    setName: MY_VOCAB_BOOK_NAME + ' / ' + sheetName,
-    bookName: bookName,
-    sheetName: sheetName,
-    filters: filters,
-    words: wordData.words,
-    pool: wordData.pool,
-    bookPool: wordData.bookPool,
-    srsStates: srsStates,
-    options: params.options || {},
-    createdAt: new Date().toISOString(),
-    userEmail: Session.getActiveUser().getEmail() || ''
-  };
-}
-
-// =========================================================
-// ⑦ HtmlService クライアント用 API（google.script.run）
-// =========================================================
-
-// --- GAS① ユーザー権限 API（UserBridge から dispatchUserOp_ 経由で呼ばれる） ---
-
-function apiUserGetVocabCatalog() {
-  try {
-    const data = fetchUserVocabCatalog_();
-    return { status: 'success', data: data };
-  } catch (e) {
-    return { status: 'error', message: e.toString() };
-  }
-}
-
-function apiUserGetVocabWords(sheetName, filtersJson) {
-  try {
-    const filters = filtersJson ? JSON.parse(filtersJson) : {};
-    const data = fetchUserVocabWordsFromSheet_({
-      sheetName: sheetName,
-      filters: filters,
-      includeBookPool: true
-    });
-    return { status: 'success', data: data };
-  } catch (e) {
-    return { status: 'error', message: e.toString() };
-  }
-}
-
-function apiUserRegisterVocabWords(sheetName, rowsJson) {
-  try {
-    const rows = rowsJson ? JSON.parse(rowsJson) : [];
-    const data = registerUserVocabWords_(sheetName, rows);
-    return { status: 'success', data: data };
-  } catch (e) {
-    return { status: 'error', message: e.toString() };
-  }
-}
-
-function apiUserGetLearningLogs() {
-  try {
-    const data = fetchUserLearningLogs_();
-    return { status: 'success', data: data };
-  } catch (e) {
-    return { status: 'error', message: e.toString() };
-  }
-}
-
-// =========================================================
-// ④ UserBridge（GAS② キュー → GAS① iframe 実行）
-// =========================================================
-
-function handleQueueUserOp_(requestData) {
-  const authCheck = requireAuthToken_(requestData);
-  if (!authCheck.ok) return sendResponse({ status: 'error', message: authCheck.error });
-
-  const op = requestData.op;
-  if (!op) return sendResponse({ status: 'error', message: 'op が必要です' });
-
-  const payload = requestData.payload || {};
-  const opToken = generateSessionToken_();
-  const cachePayload = {
-    op: op,
-    payload: payload,
-    email: authCheck.auth.email
-  };
-  const json = JSON.stringify(cachePayload);
-  if (json.length > 95000) {
-    return sendResponse({ status: 'error', message: '操作データが大きすぎます' });
-  }
-  CacheService.getScriptCache().put(USER_OP_CACHE_PREFIX + opToken, json, USER_OP_CACHE_TTL);
-  return sendResponse({ status: 'success', opToken: opToken });
-}
-
-function handleUserBridge_(e) {
-  const opToken = e && e.parameter ? e.parameter.token : null;
-  if (!opToken) {
-    return renderUserBridgeHtml_(false, 'opToken が必要です', null);
-  }
-
-  try {
-    const access = checkDashboardAccess_();
-    if (!access.allowed) {
-      return renderUserBridgeHtml_(false, 'アクセスが許可されていません', null);
-    }
-
-    const raw = CacheService.getScriptCache().get(USER_OP_CACHE_PREFIX + opToken);
-    if (!raw) {
-      return renderUserBridgeHtml_(false, '操作トークンが無効または期限切れです', null);
-    }
-
-    const cached = JSON.parse(raw);
-    const activeEmail = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
-    const expectedEmail = String(cached.email || '').trim().toLowerCase();
-    if (expectedEmail && activeEmail && expectedEmail !== activeEmail) {
-      return renderUserBridgeHtml_(false, 'ログインユーザーが一致しません', null);
-    }
-
-    const result = dispatchUserOp_(cached.op, cached.payload);
-    CacheService.getScriptCache().remove(USER_OP_CACHE_PREFIX + opToken);
-    return renderUserBridgeHtml_(result.status === 'success', result.message || '', result);
-  } catch (error) {
-    return renderUserBridgeHtml_(false, error.toString(), null);
-  }
-}
-
-function renderUserBridgeHtml_(success, message, result) {
-  const payload = JSON.stringify({
-    type: 'userBridgeComplete',
-    success: success,
-    message: message,
-    result: result || null
-  });
-  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>UserBridge</title></head><body>'
-    + '<p>' + (success ? '操作完了' : '操作失敗') + '</p>'
-    + '<script>try{window.parent.postMessage(' + payload + ',"*");}catch(e){}</script>'
-    + '</body></html>';
-  return HtmlService.createHtmlOutput(html)
-    .setTitle('UserBridge')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
-
-function dispatchUserOp_(op, payload) {
-  payload = payload || {};
-  switch (op) {
-    case 'getVocabCatalog':
-      return apiUserGetVocabCatalog();
-    case 'getVocabWords':
-      return apiUserGetVocabWords(payload.sheetName, payload.filtersJson || '{}');
-    case 'registerVocabWords':
-      return apiUserRegisterVocabWords(payload.sheetName, JSON.stringify(payload.rows || []));
-    case 'getLearningLogs':
-      return apiUserGetLearningLogs();
-    case 'getItemStates':
-      return apiUserGetItemStates(payload.setId || '');
-    case 'upsertItemStates':
-      return apiUserUpsertItemStates(payload.rows || []);
-    case 'saveSessionLog':
-      return apiUserSaveSessionLog(payload);
-    case 'startSession':
-      return apiUserStartSession(JSON.stringify(payload));
-    case 'countSessionAttempts':
-      return apiUserCountSessionAttempts(payload.setId || '');
-    default:
-      return { status: 'error', message: '未対応の op: ' + op };
-  }
-}
-
-// =========================================================
-// ⑤ 学習状態シート（ユーザーDrive・細粒度）
-// =========================================================
-
-function ensureUserItemStateSheet_() {
-  const ss = getUserLogBook_();
-  let sheet = ss.getSheetByName(USER_ITEM_STATE_SHEET_NAME);
-  if (!sheet) {
-    sheet = ss.insertSheet(USER_ITEM_STATE_SHEET_NAME);
-  }
-  if (sheet.getLastRow() === 0 || sheet.getRange(1, 1).getValue() === '') {
-    sheet.clear();
-    sheet.appendRow(ITEM_STATE_HEADERS);
-    sheet.getRange(1, 1, 1, ITEM_STATE_HEADERS.length).setFontWeight('bold');
-    sheet.setFrozenRows(1);
-  }
-  return sheet;
-}
-
-function fetchUserItemStates_(setIdFilter) {
-  const sheet = ensureUserItemStateSheet_();
-  const data = sheet.getDataRange().getValues();
-  if (data.length <= 1) return {};
-
-  const headers = data[0];
-  const idx = {};
-  ITEM_STATE_HEADERS.forEach(function (h) {
-    idx[h] = headers.indexOf(h);
-  });
-
-  const states = {};
-  for (let r = 1; r < data.length; r++) {
-    const itemId = itemNormField_(data[r][idx['Item_ID']]);
-    if (itemId === UNREGISTERED) continue;
-    const setId = itemNormField_(data[r][idx['Set_ID']]);
-    if (setIdFilter && setId !== setIdFilter && itemId.indexOf(setIdFilter) !== 0) continue;
-    states[itemId] = {
-      Item_ID: itemId,
-      Kind: itemNormField_(data[r][idx['Kind']]),
-      Set_ID: setId,
-      Total_Attempts: parseInt(data[r][idx['Total_Attempts']], 10) || 0,
-      Total_Wrong: parseInt(data[r][idx['Total_Wrong']], 10) || 0,
-      Recent_Bits: parseInt(data[r][idx['Recent_Bits']], 10) || 0,
-      Last_Seen: parseInt(data[r][idx['Last_Seen']], 10) || 0,
-      Step_Index: parseInt(data[r][idx['Step_Index']], 10) || 0,
-      EF: parseFloat(data[r][idx['EF']]) || 2.5,
-      Next_Review: parseInt(data[r][idx['Next_Review']], 10) || 0,
-      Avg_Time: parseInt(data[r][idx['Avg_Time']], 10) || 0
-    };
-  }
-  return states;
-}
-
-function itemStateRowToValues_(row) {
-  return ITEM_STATE_HEADERS.map(function (header) {
-    return itemNormField_(row[header]);
-  });
-}
-
-function upsertUserItemStateRows_(rows) {
-  if (!rows || rows.length === 0) return { updated: 0, inserted: 0 };
-
-  const sheet = ensureUserItemStateSheet_();
-  const data = sheet.getDataRange().getValues();
-  const headers = data.length > 0 ? data[0] : ITEM_STATE_HEADERS;
-  const itemIdCol = headers.indexOf('Item_ID');
-
-  const rowMap = {};
-  for (let r = 1; r < data.length; r++) {
-    const itemId = itemNormField_(data[r][itemIdCol]);
-    if (itemId !== UNREGISTERED) rowMap[itemId] = r + 1;
-  }
-
-  let updated = 0;
-  let inserted = 0;
-  const newRows = [];
-
-  rows.forEach(function (row) {
-    const itemId = itemNormField_(row.Item_ID);
-    if (itemId === UNREGISTERED) return;
-    const normalized = {
-      Item_ID: itemId,
-      Kind: row.Kind || (itemId.indexOf('|') >= 0 ? 'vocab' : 'grammar'),
-      Set_ID: row.Set_ID || '',
-      Total_Attempts: row.Total_Attempts != null ? row.Total_Attempts : 0,
-      Total_Wrong: row.Total_Wrong != null ? row.Total_Wrong : 0,
-      Recent_Bits: row.Recent_Bits != null ? row.Recent_Bits : 0,
-      Last_Seen: row.Last_Seen != null ? row.Last_Seen : 0,
-      Step_Index: row.Step_Index != null ? row.Step_Index : 0,
-      EF: row.EF != null ? row.EF : 2.5,
-      Next_Review: row.Next_Review != null ? row.Next_Review : 0,
-      Avg_Time: row.Avg_Time != null ? row.Avg_Time : 0
-    };
-    const values = itemStateRowToValues_(normalized);
-    const existingRow = rowMap[itemId];
-    if (existingRow) {
-      sheet.getRange(existingRow, 1, 1, ITEM_STATE_HEADERS.length).setValues([values]);
-      updated++;
-    } else {
-      newRows.push(values);
-      inserted++;
-    }
-  });
-
-  if (newRows.length > 0) {
-    const startRow = sheet.getLastRow() + 1;
-    sheet.getRange(startRow, 1, newRows.length, ITEM_STATE_HEADERS.length).setValues(newRows);
-  }
-
-  return { updated: updated, inserted: inserted };
-}
-
-/** セッション対象の単語だけに絞った学習状態を返す（buildSessionPayload_ 用） */
-function fetchUserItemStatesForWords_(bookName, sheetName, words) {
-  const allStates = fetchUserItemStates_('');
-  const result = {};
-  (words || []).forEach(function (wordObj) {
-    const wordId = buildWordId_(bookName, sheetName, wordObj['通し番号']);
-    if (allStates[wordId]) {
-      result[wordId] = allStates[wordId];
-    }
-  });
-  return result;
-}
-
-function countUserSessionAttempts_(setId) {
-  const ss = getUserLogBook_();
-  const sheet = ss.getSheetByName(USER_SESSION_LOG_SHEET_NAME);
-  if (!sheet || sheet.getLastRow() <= 1) return 0;
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const setIdx = headers.indexOf('学習セット名');
-  if (setIdx === -1) return 0;
-  let count = 0;
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][setIdx] || '') === String(setId || '')) count++;
-  }
-  return count;
-}
-
-function saveUserSessionLogEntry_(entry) {
-  const ss = getUserLogBook_();
-  let sheet = ss.getSheetByName(USER_SESSION_LOG_SHEET_NAME);
-  if (!sheet) {
-    sheet = ss.insertSheet(USER_SESSION_LOG_SHEET_NAME);
-    sheet.appendRow(USER_SESSION_LOG_HEADERS);
-    sheet.getRange(1, 1, 1, USER_SESSION_LOG_HEADERS.length).setFontWeight('bold');
-    sheet.setFrozenRows(1);
-  }
-  const timeStr = Utilities.formatDate(new Date(), 'JST', 'yyyy/MM/dd HH:mm:ss');
-  sheet.appendRow([
-    timeStr,
-    entry.setName || entry.setId || '',
-    entry.mode || '',
-    entry.score != null ? entry.score : (entry.correctRate || ''),
-    entry.durationSec != null ? entry.durationSec : (entry.timeTaken || ''),
-    JSON.stringify(entry)
-  ]);
-}
-
-function apiUserGetItemStates(setId) {
-  try {
-    const data = fetchUserItemStates_(setId || '');
-    return { status: 'success', data: data };
-  } catch (e) {
-    return { status: 'error', message: e.toString() };
-  }
-}
-
-function apiUserUpsertItemStates(rows) {
-  try {
-    const data = upsertUserItemStateRows_(rows);
-    return { status: 'success', data: data };
-  } catch (e) {
-    return { status: 'error', message: e.toString() };
-  }
-}
-
-function apiUserSaveSessionLog(entry) {
-  try {
-    saveUserSessionLogEntry_(entry || {});
-    return { status: 'success', message: '学習記録を保存しました' };
-  } catch (e) {
-    return { status: 'error', message: e.toString() };
-  }
-}
-
-function apiUserCountSessionAttempts(setId) {
-  try {
-    const count = countUserSessionAttempts_(setId);
-    return { status: 'success', data: { count: count, attemptNo: count + 1 } };
-  } catch (e) {
-    return { status: 'error', message: e.toString() };
-  }
-}
-
-function apiUserStartSession(payloadJson) {
-  try {
-    const params = payloadJson ? JSON.parse(payloadJson) : {};
-    return { status: 'success', data: buildSessionPayload_(params) };
-  } catch (e) {
-    return { status: 'error', message: e.toString() };
-  }
 }
 
 // =========================================================

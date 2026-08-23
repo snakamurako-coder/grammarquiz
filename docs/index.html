@@ -1364,77 +1364,19 @@ const USER_BRIDGE_WRITE_OPS = {
   registerVocabWords: true
 };
 
-/** UserBridge: 優先 UserDriveModule（GCP OAuth + Drive/Sheets API）、フォールバック GAS iframe */
+/** UserBridge: ユーザー操作は UserDriveModule（Drive/Sheets API）経由のみ */
 const UserBridge = {
   _chain: Promise.resolve(),
-  _useDriveApi: true,
 
   async queueOp(op, payload) {
     if (!AuthGateService.isValid()) {
       return { status: 'error', message: 'ログインが必要です' };
     }
-    if (this._useDriveApi && window.UserDriveModule && UserDriveModule.isEnabled()) {
-      try {
-        await UserDriveModule.ensureAuthorized();
-        const driveRes = await UserDriveModule.dispatch(op, payload || {});
-        if (driveRes && driveRes.status === 'success') return driveRes;
-        console.warn('[UserBridge] Drive API が失敗したため GAS 経由を試します:', op, driveRes);
-      } catch (e) {
-        const msg = String(e.message || e);
-        console.warn('[UserBridge] Drive API エラー、GAS 経由を試します:', op, msg);
-        if (/access_denied|popup_closed|user_cancelled/i.test(msg)) {
-          /* Drive OAuth 未許可でも GAS①（ユーザー権限 iframe）で保存できる */
-        }
-      }
+    if (!window.UserDriveModule || !UserDriveModule.isEnabled()) {
+      return { status: 'error', message: 'Drive API が未設定です（config.js の GOOGLE_CLIENT_ID）' };
     }
-    const res = await parseGasJson_(await fetchWithBackoff_(window.API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'queueUserOp',
-        authToken: AuthGateService.getToken(),
-        op: op,
-        payload: payload || {}
-      })
-    }));
-    if (res.status !== 'success' || !res.opToken) {
-      return res;
-    }
-    return this.executeViaIframe_(res.opToken, USER_BRIDGE_WRITE_OPS[op] ? 90000 : 60000);
-  },
-
-  executeViaIframe_(opToken, timeoutMs) {
-    if (!opToken || !window.DASHBOARD_URL) {
-      return Promise.resolve({ status: 'error', message: 'DASHBOARD_URL または opToken がありません' });
-    }
-    var iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.src = window.DASHBOARD_URL + '?action=userBridge&token=' + encodeURIComponent(opToken);
-    return new Promise(function (resolve) {
-      var settled = false;
-      function finish(result) {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        window.removeEventListener('message', onMessage);
-        if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-        resolve(result);
-      }
-      var timeout = setTimeout(function () {
-        finish({ status: 'error', message: 'UserBridge がタイムアウトしました' });
-      }, timeoutMs || 90000);
-      function onMessage(event) {
-        if (!event.data || event.data.type !== 'userBridgeComplete') return;
-        var result = event.data.result;
-        if (event.data.success && result) {
-          finish(result);
-        } else {
-          finish({ status: 'error', message: event.data.message || 'UserBridge 失敗' });
-        }
-      }
-      window.addEventListener('message', onMessage);
-      document.body.appendChild(iframe);
-    });
+    await UserDriveModule.ensureAuthorized();
+    return UserDriveModule.dispatch(op, payload || {});
   },
 
   async call(op, payload, opts) {
@@ -1868,17 +1810,6 @@ function postGoogleFormViaIframe_(actionUrl, fields) {
   });
 }
 
-function postGoogleForm_(actionUrl, fields) {
-  const body = new URLSearchParams(fields).toString();
-  if (navigator.sendBeacon) {
-    const blob = new Blob([body], { type: 'application/x-www-form-urlencoded' });
-    if (navigator.sendBeacon(actionUrl, blob)) {
-      return Promise.resolve({ status: 'success', method: 'beacon' });
-    }
-  }
-  return postGoogleFormViaIframe_(actionUrl, fields);
-}
-
 async function sendResultToGoogleForm(summary) {
   const cfg = window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.GOOGLE_FORM;
   if (!cfg || !cfg.ACTION_URL) return { skipped: true, reason: 'form_not_configured' };
@@ -1906,7 +1837,7 @@ async function sendResultToGoogleForm(summary) {
   setEntry('Started_At', summary.Started_At);
   setEntry('Ended_At', summary.Ended_At);
 
-  return BackendSyncStatus.track(postGoogleForm_(cfg.ACTION_URL, fields));
+  return BackendSyncStatus.track(postGoogleFormViaIframe_(cfg.ACTION_URL, fields));
 }
 
 function shouldSendSessionSummaryToForm_() {
@@ -1915,12 +1846,9 @@ function shouldSendSessionSummaryToForm_() {
 
 async function submitSessionSummary_(summary) {
   if (!shouldSendSessionSummaryToForm_()) {
-    console.info('[Form] 送信スキップ: プリセット学習以外');
     return { skipped: true, reason: 'not_preset' };
   }
-  const res = await sendResultToGoogleForm(summary);
-  if (res.skipped) console.info('[Form] 送信スキップ:', res.reason);
-  return res;
+  return sendResultToGoogleForm(summary);
 }
 
 function normalizeForScoringClient_(s) {
@@ -2861,8 +2789,6 @@ const GrammarQuizGenerator = (() => {
   }
 
   function baseQuestion(row, format) {
-    const accepted = row.acceptedSentences || expandAcceptedSentences(row.fullSentence);
-    const display = row.fullSentenceDisplay || displayGrammarSentence(row.fullSentence);
     return {
       id: row.rowId + '#' + format,
       rowId: row.rowId,
@@ -2874,8 +2800,8 @@ const GrammarQuizGenerator = (() => {
       explanation: row.explanation,
       japanese: row.japanese,
       fullSentence: row.fullSentence,
-      fullSentenceDisplay: display,
-      acceptedSentences: accepted,
+      fullSentenceDisplay: row.fullSentenceDisplay,
+      acceptedSentences: row.acceptedSentences,
       difficulty: GRAMMAR_FORMAT_MAP[format].difficulty
     };
   }
@@ -5137,8 +5063,8 @@ function normalizeGrammarRow(row) {
   if (!row.warnings) row.warnings = [];
   if (!row.sortTokens) row.sortTokens = [];
   if (!row.mcqDummies) row.mcqDummies = [];
-  if (!row.acceptedSentences) row.acceptedSentences = expandAcceptedSentences(row.fullSentence);
-  if (!row.fullSentenceDisplay) row.fullSentenceDisplay = displayGrammarSentence(row.fullSentence);
+  row.acceptedSentences = expandAcceptedSentences(row.fullSentence);
+  row.fullSentenceDisplay = displayGrammarSentence(row.fullSentence);
   const sortTokens = row.sortTokens;
   const sortDummy = row.sortDummy || '';
   const mcqAnswer = row.mcqAnswer || '';
@@ -5301,7 +5227,6 @@ function getTtsEnglish_(q) {
   if (!q) return '';
   if (q.format === 'vocab-enja') return q.word || '';
   if (q.fullSentenceDisplay) return q.fullSentenceDisplay;
-  if (q.fullSentence) return displayGrammarSentence(q.fullSentence);
   if (q.correctSentence) return q.correctSentence;
   if (q.presentedSentence) return q.presentedSentence;
   if (q.mcqPrefix || q.mcqSuffix) {
@@ -5316,8 +5241,7 @@ function getDefaultCorrectAnswer_(q) {
   if (q.correctText) return q.correctText;
   if (q.expectedInner) return q.expectedInner;
   if (q.correctSentence) return q.correctSentence;
-  if (q.fullSentenceDisplay) return q.fullSentenceDisplay;
-  return displayGrammarSentence(q.fullSentence || '');
+  return q.fullSentenceDisplay || '';
 }
 
 function normalizeExplanationField_(value) {
@@ -5478,8 +5402,6 @@ async function saveSessionResultsUnified(modeOverride, setNameOverride) {
   if (!AuthGateService.isValid()) return { skipped: true, reason: 'not_authenticated' };
 
   const summary = await buildSessionSummary_(modeOverride, setNameOverride);
-  const formPromise = submitSessionSummary_(summary);
-
   const logRes = await UserBridge.call('saveSessionLog', {
     setId: summary.Set_ID,
     setName: summary.Set_Name,
@@ -5489,28 +5411,17 @@ async function saveSessionResultsUnified(modeOverride, setNameOverride) {
     durationSec: summary.Duration_Sec,
     timeTaken: summary.Duration_Sec
   });
-
   const stateRes = await ItemStateModule.syncToServer();
-  const formRes = await formPromise;
+  submitSessionSummary_(summary).catch(function (e) { console.warn('[Form]', e); });
 
-  const driveOk = logRes.status === 'success'
+  const ok = logRes.status === 'success'
     && (stateRes.status === 'success' || stateRes.skipped);
-  const formOk = formRes.status === 'success' || formRes.skipped === true;
-
-  if (driveOk) sessionPersistedToServer = true;
+  if (ok) sessionPersistedToServer = true;
   BackendSyncStatus.refresh();
-
-  if (!driveOk) {
+  if (!ok) {
     flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
   }
-
-  const status = driveOk && formOk ? 'success' : (driveOk || formOk ? 'partial' : 'error');
-  return {
-    status: status,
-    drive: logRes,
-    itemState: stateRes,
-    form: formRes
-  };
+  return { status: ok ? 'success' : 'error', drive: logRes, itemState: stateRes };
 }
 
 async function saveVocabSessionResults() {
@@ -5541,46 +5452,18 @@ document.getElementById('next-btn').addEventListener('click', () => {
 
 function getResultSavedMessage_(saveResult) {
   if (!AuthGateService.isValid()) {
-    if (currentAppMode === 'vocab') {
-      return '演習が終了しました。（ローカルSRSのみ更新・ログインすると同期されます）';
-    }
-    return '演習が終了しました。（ログインするとクラウドに同期されます）';
-  }
-
-  if (!saveResult || saveResult.skipped) {
     return currentAppMode === 'vocab'
-      ? '演習が終了し、SRSデータが保存されました。'
-      : '演習が終了し、成績が保存されました。';
+      ? '演習が終了しました。（ローカルSRSのみ更新・ログインすると同期されます）'
+      : '演習が終了しました。（ログインするとクラウドに同期されます）';
   }
-
-  const lines = [];
-  const driveOk = saveResult.drive && saveResult.drive.status === 'success';
-  const stateOk = !saveResult.itemState
-    || saveResult.itemState.status === 'success'
-    || saveResult.itemState.skipped;
-  const formRes = saveResult.form;
-  const formSkipped = formRes && formRes.skipped;
-  const formOk = formRes && (formRes.status === 'success' || formSkipped);
-
-  if (driveOk && stateOk) {
-    lines.push('マイドライブ（DigitalDrill学習記録）に保存しました。');
-  } else {
-    lines.push('マイドライブへの保存に失敗しました。');
-    const errMsg = (saveResult.drive && saveResult.drive.message)
-      || (saveResult.itemState && saveResult.itemState.message);
-    if (errMsg) lines.push(errMsg);
-    lines.push('未送信データは次回ログイン時に再送されます。');
+  if (!saveResult || saveResult.skipped || saveResult.status === 'success') {
+    return 'マイドライブ（DigitalDrill学習記録）に保存しました。';
   }
-
-  if (formRes && !formSkipped && formRes.status === 'success') {
-    lines.push('管理者集約フォームへ送信しました。');
-  } else if (formRes && formSkipped && formRes.reason === 'not_preset') {
-    /* マイ単語帳等は送信対象外 */
-  } else if (formRes && !formOk) {
-    lines.push('管理者集約フォームへの送信に失敗した可能性があります。');
-  }
-
-  return lines.join(' ');
+  const errMsg = (saveResult.drive && saveResult.drive.message)
+    || (saveResult.itemState && saveResult.itemState.message);
+  return 'マイドライブへの保存に失敗しました。'
+    + (errMsg ? ' ' + errMsg : '')
+    + ' 未送信データは次回ログイン時に再送されます。';
 }
 
 function showResultScreen() {
