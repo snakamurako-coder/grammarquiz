@@ -84,7 +84,19 @@ const UserDriveModule = (function () {
     if (legacyExp) localStorage.setItem(expKey, legacyExp);
   }
 
+  /** アカウント別 meta キー導入前の dd_user_drive_meta を移行 */
+  function migrateLegacyMeta_() {
+    const suffix = accountSuffix_();
+    if (!suffix) return;
+    const key = metaStorageKey_();
+    if (localStorage.getItem(key)) return;
+    const legacy = localStorage.getItem(META_KEY);
+    if (!legacy) return;
+    localStorage.setItem(key, legacy);
+  }
+
   function loadMeta_() {
+    migrateLegacyMeta_();
     try {
       const raw = localStorage.getItem(metaStorageKey_());
       return raw ? JSON.parse(raw) : {};
@@ -254,6 +266,17 @@ const UserDriveModule = (function () {
     });
   }
 
+  async function driveVerifyFolder_(folderId) {
+    try {
+      const files = await driveList_(
+        "id='" + String(folderId).replace(/'/g, "\\'") + "' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+      );
+      return files.length > 0;
+    } catch (e) {
+      return false;
+    }
+  }
+
   async function driveVerifyOwnedRootFolder_(folderId) {
     try {
       const files = await driveList_(
@@ -263,6 +286,18 @@ const UserDriveModule = (function () {
     } catch (e) {
       return false;
     }
+  }
+
+  async function findMyDataFolder_() {
+    const qName = FOLDER_NAME.replace(/'/g, "\\'");
+    let found = await driveList_(
+      "name='" + qName + "' and mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false"
+    );
+    if (found.length) return found[0];
+    found = await driveList_(
+      "name='" + qName + "' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    );
+    return found.length ? found[0] : null;
   }
 
   async function driveVerifyOwnedInFolder_(fileId, folderId) {
@@ -278,20 +313,19 @@ const UserDriveModule = (function () {
 
   async function ensureFolder_() {
     const meta = loadMeta_();
-    if (meta.folderId && await driveVerifyOwnedRootFolder_(meta.folderId)) return meta.folderId;
+    if (meta.folderId && await driveVerifyFolder_(meta.folderId)) return meta.folderId;
+
+    const found = await findMyDataFolder_();
+    if (found) {
+      meta.folderId = found.id;
+      saveMeta_(meta);
+      return meta.folderId;
+    }
+
     delete meta.folderId;
     delete meta.vocabBookId;
     delete meta.logBookId;
     saveMeta_(meta);
-
-    const found = await driveList_(
-      "name='" + FOLDER_NAME.replace(/'/g, "\\'") + "' and mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false"
-    );
-    if (found.length) {
-      meta.folderId = found[0].id;
-      saveMeta_(meta);
-      return meta.folderId;
-    }
 
     const created = await driveCreateFolder_(FOLDER_NAME, null);
     meta.folderId = created.id;
@@ -436,11 +470,24 @@ const UserDriveModule = (function () {
     return ensureSpreadsheet_(folderId, LOG_BOOK_NAME, setupLogBook_);
   }
 
+  async function ensureLogBookReady_(bookId) {
+    const ss = await sheetsGet_(bookId);
+    const hasSheet = (ss.sheets || []).some(function (s) {
+      return s.properties.title === SESSION_LOG_SHEET;
+    });
+    if (!hasSheet) await setupLogBook_(bookId);
+  }
+
   /** ログイン後: フォルダ・マイ単語帳・学習記録ブックをなければ作成 */
   async function ensureUserDataEnvironment_() {
     await ensureAuthorized_();
     await getVocabBookId_();
     await getLogBookId_();
+  }
+
+  async function retryAuthorization_() {
+    clearAuth_();
+    return ensureAuthorized_();
   }
 
   function buildSheetInfo_(sheetName, values) {
@@ -696,6 +743,7 @@ const UserDriveModule = (function () {
 
   async function opGetLearningLogs_() {
     const bookId = await getLogBookId_();
+    await ensureLogBookReady_(bookId);
     const values = await sheetsValuesGet_(bookId, SESSION_LOG_SHEET + '!A:F');
     if (values.length <= 1) return { status: 'success', data: [] };
     const headers = values[0];
@@ -726,6 +774,7 @@ const UserDriveModule = (function () {
   async function opCountSessionAttempts_(payload) {
     const setId = payload.setId || '';
     const bookId = await getLogBookId_();
+    await ensureLogBookReady_(bookId);
     const values = await sheetsValuesGet_(bookId, SESSION_LOG_SHEET + '!A:F');
     if (values.length <= 1) return { status: 'success', data: { count: 0, attemptNo: 1 } };
     const headers = values[0];
@@ -797,6 +846,7 @@ const UserDriveModule = (function () {
     isEnabled: isEnabled_,
     ensureAuthorized: ensureAuthorized_,
     ensureUserDataEnvironment: ensureUserDataEnvironment_,
+    retryAuthorization: retryAuthorization_,
     clearAuth: clearAuth_,
     dispatch: dispatch_
   };

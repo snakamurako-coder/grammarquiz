@@ -1462,6 +1462,45 @@ const UserBridge = {
 };
 window.UserBridge = UserBridge;
 
+function formatUserBridgeError_(res) {
+  if (!res) return '不明なエラー';
+  if (res.code === 'drive_auth_required') {
+    return 'Drive へのアクセスが許可されていません。ログアウト後に再ログインし、Drive 権限を許可してください。';
+  }
+  return res.message || 'マイドライブへの接続に失敗しました';
+}
+
+function renderUserLogsError_(message) {
+  const html = '<p style="color:#c62828;">' + escapeHtml_(message) + '</p>';
+  const ids = ['user-logs-list', 'recent-history-list', 'set-progress-list', 'weakness-list'];
+  ids.forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  });
+  renderGrammarAreaProgress_(null);
+}
+
+async function retryDriveAccess_() {
+  if (!window.UserDriveModule || !UserDriveModule.retryAuthorization) {
+    showToast_('Drive API が未設定です');
+    return false;
+  }
+  try {
+    await UserDriveModule.retryAuthorization();
+    await UserDriveModule.ensureUserDataEnvironment();
+    await initVocabModules();
+    await fetchUserLogs();
+    ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
+    flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
+    showToast_('Drive へのアクセスを再取得しました');
+    return true;
+  } catch (e) {
+    showToast_('Drive 権限の取得に失敗しました: ' + (e.message || e));
+    return false;
+  }
+}
+window.retryDriveAccess_ = retryDriveAccess_;
+
 async function flushSendOutbox_() {
   if (!AuthGateService.isValid()) return;
   const items = SendOutbox.list();
@@ -5818,11 +5857,20 @@ async function loadManagePanel_() {
     return;
   }
   try {
+    const el = document.getElementById('user-set-list');
+    const manageBtn = document.getElementById('manage-open-book-btn');
     const result = await UserBridge.call('getVocabCatalog', {});
-    if (result.status !== 'success') throw new Error(result.message);
+    if (result.status !== 'success') {
+      const msg = formatUserBridgeError_(result);
+      if (el) {
+        el.innerHTML = '<p style="color:#c62828;">' + escapeHtml_(msg) + '</p>'
+          + '<p style="margin-top:8px;"><button type="button" class="btn-secondary" onclick="retryDriveAccess_()">Drive 権限を再取得</button></p>';
+      }
+      if (manageBtn) manageBtn.style.display = 'none';
+      return;
+    }
     const books = (result.data && result.data.userBooks) || [];
     const select = document.getElementById('reading-sheet-select');
-    const el = document.getElementById('user-set-list');
     if (books.length === 0) {
       el.innerHTML = '<p>マイ単語帳がありません。初回アクセス時に自動作成されます。</p>';
       const hideBtn = document.getElementById('manage-open-book-btn');
@@ -5831,7 +5879,6 @@ async function loadManagePanel_() {
     }
     const book = books[0];
     const bookUrl = book.bookUrl || (book.bookId ? 'https://docs.google.com/spreadsheets/d/' + book.bookId + '/edit' : '');
-    const manageBtn = document.getElementById('manage-open-book-btn');
     if (manageBtn) {
       if (bookUrl) {
         manageBtn.href = bookUrl;
@@ -5908,6 +5955,7 @@ window.onLoginSuccess = function(user) {
     }).catch(function (e) {
       console.warn('Drive 環境の準備:', e.message || e);
       initVocabModules();
+      fetchUserLogs();
       if (typeof showToast_ === 'function') {
         showToast_('マイ単語帳・学習記録を使うには Google の Drive 権限が必要です。再ログイン時に許可してください。');
       }
@@ -6066,14 +6114,17 @@ async function fetchUserLogs() {
   if (!AuthGateService.isValid()) return;
   try {
     const data = await UserBridge.call('getLearningLogs', {});
-    if (data.status === 'success') {
-      renderUserLogsList_(data.data);
-      renderMyPage(data.data).catch(function (e) {
-        console.error('renderMyPage error:', e);
-      });
+    if (data.status !== 'success') {
+      renderUserLogsError_(formatUserBridgeError_(data));
+      return;
     }
+    renderUserLogsList_(data.data);
+    renderMyPage(data.data).catch(function (e) {
+      console.error('renderMyPage error:', e);
+    });
   } catch (e) {
     console.error('fetchUserLogs error:', e);
+    renderUserLogsError_('学習記録の取得に失敗しました: ' + (e.message || e));
   }
 }
 
