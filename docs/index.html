@@ -1859,84 +1859,40 @@ const ItemStateModule = (() => {
 })();
 window.ItemStateModule = ItemStateModule;
 
-function postGoogleFormViaIframe_(actionUrl, fields) {
-  return new Promise(function (resolve) {
-    const iframeName = 'google-form-submit-' + Date.now();
-    const iframe = document.createElement('iframe');
-    iframe.name = iframeName;
-    iframe.style.display = 'none';
-    iframe.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(iframe);
-
-    const form = document.createElement('form');
-    form.action = actionUrl;
-    form.method = 'POST';
-    form.target = iframeName;
-    form.style.display = 'none';
-    form.setAttribute('accept-charset', 'UTF-8');
-
-    Object.keys(fields).forEach(function (name) {
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = name;
-      input.value = fields[name] != null ? String(fields[name]) : '';
-      form.appendChild(input);
-    });
-
-    let settled = false;
-    function finish(result) {
-      if (settled) return;
-      settled = true;
-      window.setTimeout(function () {
-        form.remove();
-        iframe.remove();
-      }, 1500);
-      resolve(result);
-    }
-
-    iframe.addEventListener('load', function () {
-      finish({ status: 'success' });
-    });
-    iframe.addEventListener('error', function () {
-      finish({ status: 'error', message: 'iframe submit failed' });
-    });
-
-    document.body.appendChild(form);
-    form.submit();
-    window.setTimeout(function () {
-      finish({ status: 'success', note: 'submitted_without_load_event' });
-    }, 4000);
-  });
-}
-
 async function sendResultToGoogleForm(summary) {
   const cfg = window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.GOOGLE_FORM;
   if (!cfg || !cfg.ACTION_URL) return { skipped: true, reason: 'form_not_configured' };
   if (!AuthGateService.isValid()) return { skipped: true, reason: 'not_authenticated' };
+  if (!window.API_URL) return { skipped: true, reason: 'no_api_url' };
 
-  const entries = cfg.ENTRIES || {};
-  const user = AuthGateService.getUser();
-  const userId = (user && user.account) ? user.account : '';
+  const trackPromise = fetchWithBackoff_(window.API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      action: 'submitFormSummary',
+      authToken: AuthGateService.getToken(),
+      summary: {
+        Mode: summary.Mode,
+        Set_ID: summary.Set_ID,
+        Set_Name: summary.Set_Name,
+        Attempt_No: summary.Attempt_No,
+        Correct: summary.Correct,
+        Total: summary.Total,
+        Score: summary.Score,
+        Duration_Sec: summary.Duration_Sec,
+        Started_At: summary.Started_At,
+        Ended_At: summary.Ended_At
+      }
+    })
+  }, 2).then(async function (res) {
+    const data = await parseGasJson_(res);
+    if (data.status === 'success') return { status: 'success' };
+    return { status: 'error', message: data.message || 'フォーム送信失敗' };
+  }).catch(function (e) {
+    return { status: 'error', message: String(e.message || e) };
+  });
 
-  const fields = { fvv: '1' };
-  function setEntry(key, value) {
-    const entryId = entries[key];
-    if (entryId) fields[entryId] = value != null ? String(value) : '';
-  }
-
-  setEntry('User_ID', userId);
-  setEntry('Mode', summary.Mode);
-  setEntry('Set_ID', summary.Set_ID);
-  setEntry('Set_Name', summary.Set_Name);
-  setEntry('Attempt_No', summary.Attempt_No);
-  setEntry('Correct', summary.Correct);
-  setEntry('Total', summary.Total);
-  setEntry('Score', summary.Score);
-  setEntry('Duration_Sec', summary.Duration_Sec);
-  setEntry('Started_At', summary.Started_At);
-  setEntry('Ended_At', summary.Ended_At);
-
-  return BackendSyncStatus.track(postGoogleFormViaIframe_(cfg.ACTION_URL, fields));
+  return BackendSyncStatus.track(trackPromise);
 }
 
 function shouldSendSessionSummaryToForm_() {

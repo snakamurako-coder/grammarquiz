@@ -19,7 +19,9 @@ const PROP = {
   ADMIN_EMAIL: 'ADMIN_EMAIL',
   WHITELIST_CACHE: 'WHITELIST_CACHE',
   /** フォーム回答シート名（未設定時は自動検出） */
-  FORM_RESPONSE_SHEET: 'FORM_RESPONSE_SHEET'
+  FORM_RESPONSE_SHEET: 'FORM_RESPONSE_SHEET',
+  /** Google フォーム formResponse URL（未設定時は既定値） */
+  GOOGLE_FORM_ACTION_URL: 'GOOGLE_FORM_ACTION_URL'
 };
 
 const AUTH_CACHE_PREFIX = 'auth_';
@@ -41,6 +43,23 @@ const APP_BOOK_NAME = 'DigitalDrill';
 const MY_VOCAB_BOOK_NAME = 'マイ単語帳';
 const UNREGISTERED = '(未登録)';
 const FORM_RESPONSE_HEADER_USER_ID = 'User_ID';
+
+/** config.js の GOOGLE_FORM と同期（集約フォーム） */
+const DEFAULT_GOOGLE_FORM_ACTION_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSfI7mmZPNniyB602utDUnie6W79DQaZgWJghOKTz8TZeiwMPA/formResponse';
+const GOOGLE_FORM_ENTRIES = {
+  User_ID: 'entry.2140028729',
+  Mode: 'entry.1570326402',
+  Set_ID: 'entry.275307888',
+  Set_Name: 'entry.289930202',
+  Attempt_No: 'entry.2072779523',
+  Correct: 'entry.1267466184',
+  Total: 'entry.967050124',
+  Score: 'entry.1646102233',
+  Duration_Sec: 'entry.1713523091',
+  Started_At: 'entry.1357277820',
+  Ended_At: 'entry.1702093208'
+};
+const GOOGLE_FORM_CTX_CACHE_KEY = 'google_form_ctx_v1';
 
 /** 文法データセット11列ヘッダ。1行が形式A〜Hすべての素材になる */
 const GRAMMAR_HEADERS = [
@@ -450,6 +469,9 @@ function doPost(e) {
     if (action === "logout") {
       if (requestData.authToken) invalidateAuthToken_(requestData.authToken);
       return sendResponse({ status: "success", message: "ログアウトしました" });
+    } else if (action === "submitFormSummary") {
+      syncWhitelistCacheIfStale_();
+      return sendResponse(apiSubmitFormSummary_(requestData));
     } else {
       return sendResponse({ status: "error", message: "無効なactionです: " + action });
     }
@@ -1747,6 +1769,106 @@ function getPagesUrl_() {
 
 function generateSessionToken_() {
   return Utilities.getUuid().replace(/-/g, '');
+}
+
+// =========================================================
+// ⑨-b Google フォーム集約（GAS② 経由で fbzx 付き POST）
+// =========================================================
+
+function getGoogleFormActionUrl_() {
+  return PropertiesService.getScriptProperties().getProperty(PROP.GOOGLE_FORM_ACTION_URL)
+    || DEFAULT_GOOGLE_FORM_ACTION_URL;
+}
+
+function formViewUrlFromAction_(actionUrl) {
+  return String(actionUrl || '').replace(/\/formResponse\/?$/, '/viewform');
+}
+
+function parseGoogleFormContextFromHtml_(html) {
+  let fbzx = '';
+  const m1 = String(html || '').match(/name="fbzx"\s+value="([^"]+)"/);
+  if (m1) fbzx = m1[1];
+  if (!fbzx) {
+    const m2 = String(html || '').match(/"fbzx","([^"]+)"/);
+    if (m2) fbzx = m2[1];
+  }
+  if (!fbzx) throw new Error('Googleフォームの fbzx を取得できませんでした');
+  return {
+    fbzx: fbzx,
+    partialResponse: '[null,null,"' + fbzx + '"]',
+    pageHistory: '0'
+  };
+}
+
+function fetchGoogleFormContext_(forceRefresh) {
+  const cache = CacheService.getScriptCache();
+  if (!forceRefresh) {
+    const cached = cache.get(GOOGLE_FORM_CTX_CACHE_KEY);
+    if (cached) {
+      try { return JSON.parse(cached); } catch (e) { /* ignore */ }
+    }
+  }
+  const viewUrl = formViewUrlFromAction_(getGoogleFormActionUrl_());
+  const res = UrlFetchApp.fetch(viewUrl, {
+    muteHttpExceptions: true,
+    followRedirects: true
+  });
+  if (res.getResponseCode() >= 400) {
+    throw new Error('Googleフォーム viewform の取得に失敗しました HTTP ' + res.getResponseCode());
+  }
+  const ctx = parseGoogleFormContextFromHtml_(res.getContentText());
+  cache.put(GOOGLE_FORM_CTX_CACHE_KEY, JSON.stringify(ctx), 300);
+  return ctx;
+}
+
+function submitGoogleFormSummary_(summary, userId) {
+  const actionUrl = getGoogleFormActionUrl_();
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const ctx = fetchGoogleFormContext_(attempt > 0);
+      const payload = {
+        fvv: '1',
+        pageHistory: ctx.pageHistory || '0',
+        fbzx: ctx.fbzx,
+        partialResponse: ctx.partialResponse
+      };
+      Object.keys(GOOGLE_FORM_ENTRIES).forEach(function (key) {
+        const entryId = GOOGLE_FORM_ENTRIES[key];
+        const value = key === 'User_ID' ? userId : summary[key];
+        payload[entryId] = value != null ? String(value) : '';
+      });
+      const res = UrlFetchApp.fetch(actionUrl, {
+        method: 'post',
+        payload: payload,
+        muteHttpExceptions: true,
+        followRedirects: false
+      });
+      const code = res.getResponseCode();
+      if (code >= 200 && code < 400) return { status: 'success' };
+      lastError = new Error('Googleフォーム送信失敗 HTTP ' + code);
+    } catch (e) {
+      lastError = e;
+    }
+    CacheService.getScriptCache().remove(GOOGLE_FORM_CTX_CACHE_KEY);
+  }
+  throw lastError || new Error('Googleフォーム送信に失敗しました');
+}
+
+function apiSubmitFormSummary_(requestData) {
+  const authReq = requireAuthToken_(requestData);
+  if (!authReq.ok) return { status: 'error', message: authReq.error };
+  const summary = requestData.summary || {};
+  const auth = authReq.auth;
+  const userId = (auth.user && auth.user.account) ? auth.user.account : (auth.email || '');
+  if (!getGoogleFormActionUrl_()) {
+    return { status: 'error', message: 'GOOGLE_FORM_ACTION_URL が未設定です' };
+  }
+  try {
+    return submitGoogleFormSummary_(summary, userId);
+  } catch (e) {
+    return { status: 'error', message: String(e.message || e) };
+  }
 }
 
 // =========================================================

@@ -16,7 +16,8 @@ window.DIGITALDRILL_CONFIG = {
    */
   STATIC_MANIFEST_URL: 'data/manifest.json',
   /**
-   * プリセット学習の概要集約用 Google フォーム（no-cors POST）。
+   * プリセット学習の概要集約用 Google フォーム。
+   * 送信は GAS② の submitFormSummary 経由（fbzx トークン付き POST）。
    * ACTION_URL が空のときは送信をスキップする。
    * フォーム作成後、ページソースの entry ID と formResponse URL をここに設定する。
    */

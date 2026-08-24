@@ -157,7 +157,7 @@ Forms が自動付与する「タイムスタンプ」に加え、短答質問�
 User_ID, Mode, Set_ID, Set_Name, Attempt_No, Correct, Total, Score, Duration_Sec, Started_At, Ended_At
 
 - **送信対象**: 管理者プリセットの文法・単語学習のみ（マイ単語帳・音読は送らない）
-- **書き込み**: Pages → Google フォーム `formResponse`（`mode: 'no-cors'`）。GAS の同時実行上限を回避
+- **書き込み**: Pages → GAS② `submitFormSummary` → Google フォーム `formResponse`（fbzx トークン付き）。GAS 同時実行上限を回避しつつ確実に到達
 - **反映**: フォーム回答先 SS に即時追記（バッチ・トリガー不要）
 - **閲覧**: GAS① 管理者ダッシュボード、または SS を直接開く（制限付き共有）
 
@@ -228,6 +228,6 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 ## トラブルシューティング
 
 - **単語登録・学習記憶が保存されない**: [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §9 を参照。Drive OAuth 未許可が最多。`GOOGLE_CLIENT_ID` が Pages に反映されているか確認
-- **セッション集約が空**: フォーム回答先 SS に行が入っているか、`config.js` の `GOOGLE_FORM` が正しいか確認。プリセット学習（マイ単語帳以外）で終了しているか
+- **セッション集約が空**: フォーム回答先 SS に行が入っているか、`config.js` の `GOOGLE_FORM` が正しいか確認。**GAS② を再デプロイ**（`submitFormSummary` 必須）。プリセット学習（マイ単語帳以外）で終了しているか
 - **教材の更新が反映されない**: サーバー側の版キャッシュ（120秒）が切れるのを待つか「キャッシュ更新」ボタン
 - **初回表示が遅い**: `docs/data/manifest.json` が未生成。`scripts/export-static.ps1` を実行
