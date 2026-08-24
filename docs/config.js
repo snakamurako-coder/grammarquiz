@@ -18,6 +18,7 @@ window.DIGITALDRILL_CONFIG = {
   /**
    * プリセット学習の概要集約用 Google フォーム。
    * 送信は GAS② の submitFormSummary 経由（fbzx トークン付き POST）。
+   * 設計契約: docs/FORM_AGGREGATION_SANCTUARY.md
    * ACTION_URL が空のときは送信をスキップする。
    * フォーム作成後、ページソースの entry ID と formResponse URL をここに設定する。
    */

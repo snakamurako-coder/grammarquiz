@@ -1860,6 +1860,7 @@ const ItemStateModule = (() => {
 window.ItemStateModule = ItemStateModule;
 
 async function sendResultToGoogleForm(summary) {
+  // 設計契約: docs/FORM_AGGREGATION_SANCTUARY.md（GAS② submitFormSummary 経由のみ）
   const cfg = window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.GOOGLE_FORM;
   if (!cfg || !cfg.ACTION_URL) return { skipped: true, reason: 'form_not_configured' };
   if (!AuthGateService.isValid()) return { skipped: true, reason: 'not_authenticated' };

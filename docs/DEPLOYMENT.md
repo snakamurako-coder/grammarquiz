@@ -128,7 +128,7 @@ UserBridge.call(op, payload)
 
 書込 op（`registerVocabWords`, `upsertItemStates`, `saveSessionLog`）は失敗時 `SendOutbox` に残り、次回ログイン時に再送されます。
 
-詳細・禁止事項: [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md)
+詳細・禁止事項: [FORM_AGGREGATION_SANCTUARY.md](FORM_AGGREGATION_SANCTUARY.md)
 
 ---
 
@@ -161,11 +161,13 @@ User_ID, Mode, Set_ID, Set_Name, Attempt_No, Correct, Total, Score, Duration_Sec
 - **反映**: フォーム回答先 SS に即時追記（バッチ・トリガー不要）
 - **閲覧**: GAS① 管理者ダッシュボード、または SS を直接開く（制限付き共有）
 
+> 変更時の注意・禁止事項: [FORM_AGGREGATION_SANCTUARY.md](FORM_AGGREGATION_SANCTUARY.md)
+
 #### フォーム初回セットアップ（手動）
 
 1. Google フォームで上記列名の**短答**質問を作成（すべて必須推奨）
 2. 回答先を本体 SS（`DigitalDrill`）または GAS が開ける SS に設定
-3. フォームの「ページソース」から `formResponse` URL と各 `entry.xxxxx` を `docs/config.js` の `GOOGLE_FORM` に設定
+3. フォームの「ページソース」から `formResponse` URL と各 `entry.xxxxx` を `docs/config.js` の `GOOGLE_FORM` **および `code.gs` の `GOOGLE_FORM_ENTRIES`** に設定（二箇所同期必須）
 4. フォームは「リンクを知っている人が回答可」等。回答先 SS は**制限付き共有**（学習者を編集者にしない）
 5. 確認画面に SS URL を出さない
 6. （任意）Script Property `FORM_RESPONSE_SHEET` に回答シート名を設定。未設定時は `フォームの回答` で始まるシート、または見出し `User_ID` があるシートを自動検出

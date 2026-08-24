@@ -1773,6 +1773,7 @@ function generateSessionToken_() {
 
 // =========================================================
 // ⑨-b Google フォーム集約（GAS② 経由で fbzx 付き POST）
+// 設計契約: docs/FORM_AGGREGATION_SANCTUARY.md
 // =========================================================
 
 function getGoogleFormActionUrl_() {

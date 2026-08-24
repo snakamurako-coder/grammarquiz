@@ -1,0 +1,31 @@
+---
+description: Google Form 集約（submitFormSummary）の聖域 — 変更前に必読
+globs: code.gs,docs/index.html,docs/config.js
+alwaysApply: false
+---
+
+# フォーム集約聖域
+
+詳細契約: `docs/FORM_AGGREGATION_SANCTUARY.md`
+
+## 現行経路（固定）
+
+Pages → GAS② `submitFormSummary` → viewform で fbzx 取得 → formResponse POST → 集計 SS
+
+**ブラウザから formResponse へ直接 POST 禁止**（fbzx 欠落で SS に載らない）
+
+## 送信対象
+
+- 管理者プリセットの文法・単語のみ（`currentSessionIsPreset === true`）
+- マイ単語帳・音読は送らない
+
+## 変更時の必須事項
+
+1. `GOOGLE_FORM_ENTRIES`（code.gs）と `config.js` ENTRIES を**同時更新**
+2. GAS② 変更後は **`clasp deploy -i`（GAS②）** — push だけでは不効
+3. `submitSessionSummary_` を `saveSessionResultsUnified` から切り離さない
+4. Drive 保存成否と Form 送信を連動させない（別経路）
+
+## 触る前に確認
+
+Form 集約をリファクタする場合、先に `docs/FORM_AGGREGATION_SANCTUARY.md` §7–§9 を読むこと。
