@@ -637,19 +637,8 @@ button.is-busy::after,
       </div>
       <div class="setting-section">
         <div class="section-title">3. 出題形式を選択</div>
-        <label class="check-item" style="margin-bottom:10px;">
-          <input type="checkbox" id="vocab-homework-mode"> 宿題モード（形式最大4・語の重複なし）
-        </label>
+        <p id="vocab-homework-banner" class="filter-axis-hint" style="display:none;margin:0 0 10px;padding:8px 10px;background:#fff8e1;border-radius:8px;color:#6d4c00;"></p>
         <div class="check-list" id="vocab-format-check-list"></div>
-        <div class="form-group" id="vocab-homework-count-wrap" style="display:none;margin-top:10px;">
-          <label>宿題：各形式の出題数</label>
-          <select id="vocab-homework-per-section">
-            <option value="3">3問/形式</option>
-            <option value="5" selected>5問/形式</option>
-            <option value="8">8問/形式</option>
-            <option value="10">10問/形式</option>
-          </select>
-        </div>
       </div>
       <div class="setting-section">
         <div class="section-title">4. 出題設定</div>
@@ -1520,10 +1509,7 @@ async function retryDriveAccess_() {
   try {
     await UserDriveModule.retryAuthorization();
     await UserDriveModule.ensureUserDataEnvironment();
-    await initVocabModules();
-    await fetchUserLogs();
-    ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
-    flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
+    await refreshUserDataAfterLogin_();
     showToast_('Drive へのアクセスを再取得しました');
     return true;
   } catch (e) {
@@ -1716,11 +1702,25 @@ const PresetModule = (() => {
     } catch (e) { return false; }
   }
 
-  function getVocabCatalog(force) {
-    return resolve_('vocab_catalog',
-      function (m) { return m.vocabCatalog || null; },
+  function isUsableVocabCatalog_(data) {
+    return !!(data && Array.isArray(data.presets) && data.presets.length > 0);
+  }
+
+  async function getVocabCatalog(force) {
+    const result = await resolve_('vocab_catalog',
+      function (m) {
+        const c = m.vocabCatalog || null;
+        return isUsableVocabCatalog_(c) ? c : null;
+      },
       function () { return gasRun('apiGetVocabCatalog'); },
       force);
+    if (!force && result.status === 'success' && !isUsableVocabCatalog_(result.data)) {
+      return resolve_('vocab_catalog',
+        function () { return null; },
+        function () { return gasRun('apiGetVocabCatalog'); },
+        true);
+    }
+    return result;
   }
 
   function getGrammarCatalog(force) {
@@ -3689,9 +3689,92 @@ function vocabAllocWordsUnique(need, primary, fallbacks, usedKeys) {
   return out;
 }
 
+/** 管理者課題用の起動設定（URL → sessionStorage。ユーザーが UI で切り替えない） */
+const VocabLaunchConfig = (() => {
+  const STORAGE_KEY = 'dd_vocab_launch_config';
+  const PARAM_KEYS = ['homework', 'mode', 'homeworkPerSection', 'formats', 'book', 'sheet', 'bookType'];
+
+  function parseFromUrl_(params) {
+    const homework = params.get('homework') === '1' || params.get('mode') === 'homework';
+    const formats = params.get('formats');
+    const book = params.get('book');
+    const sheet = params.get('sheet');
+    const bookType = params.get('bookType');
+    if (!homework && !formats && !book && !sheet && !bookType) return null;
+    const cfg = { homeworkMode: homework };
+    const per = parseInt(params.get('homeworkPerSection') || '5', 10);
+    if (per > 0) cfg.homeworkPerSection = per;
+    if (formats) {
+      cfg.formats = formats.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    }
+    if (book) cfg.bookName = book;
+    if (sheet) cfg.sheetName = sheet;
+    if (bookType === 'preset' || bookType === 'user') cfg.bookType = bookType;
+    return cfg;
+  }
+
+  function captureFromUrl_(params) {
+    const cfg = parseFromUrl_(params);
+    if (!cfg) return false;
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(cfg)); } catch (e) {}
+    PARAM_KEYS.forEach(function (k) { params.delete(k); });
+    var qs = params.toString();
+    var newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+    window.history.replaceState({}, '', newUrl);
+    return true;
+  }
+
+  function get() {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  function isHomeworkMode() {
+    const cfg = get();
+    return !!(cfg && cfg.homeworkMode);
+  }
+
+  return { captureFromUrl_, get, isHomeworkMode };
+})();
+window.VocabLaunchConfig = VocabLaunchConfig;
+
 // vocabSettings.js
 const VocabSettingsModule = (() => {
   let catalog = { presets: [], userBooks: [] };
+
+  function applyLaunchConfigSelections_() {
+    const launch = VocabLaunchConfig.get();
+    if (!launch) return;
+    if (launch.bookType) {
+      const typeEl = document.getElementById('vocab-book-type');
+      if (typeEl) typeEl.value = launch.bookType;
+      refreshBookSelect();
+    }
+    if (launch.bookName) {
+      const bookEl = document.getElementById('vocab-book-select');
+      if (bookEl) {
+        const hasOpt = Array.from(bookEl.options).some(function (o) { return o.value === launch.bookName; });
+        if (hasOpt) bookEl.value = launch.bookName;
+      }
+      refreshSheetSelect();
+    }
+    if (launch.sheetName) {
+      const sheetEl = document.getElementById('vocab-sheet-select');
+      if (sheetEl) {
+        const hasOpt = Array.from(sheetEl.options).some(function (o) { return o.value === launch.sheetName; });
+        if (hasOpt) sheetEl.value = launch.sheetName;
+      }
+      refreshDivisionFilters();
+    }
+    if (launch.formats && launch.formats.length) {
+      document.querySelectorAll('#vocab-format-check-list input').forEach(function (inp) {
+        inp.checked = launch.formats.indexOf(inp.value) >= 0;
+      });
+    }
+    syncHomeworkUi_();
+  }
 
   async function loadCatalog(force) {
     const result = await PresetModule.getVocabCatalog(!!force);
@@ -3700,8 +3783,6 @@ const VocabSettingsModule = (() => {
     catalog.userBooks = [];
     catalog.presets = catalog.presets || [];
     if (AuthGateService.isValid()) {
-      const bookTypeEl = document.getElementById('vocab-book-type');
-      if (bookTypeEl) bookTypeEl.value = 'user';
       try {
         const userRes = await UserBridge.call('getVocabCatalog', {});
         if (userRes.status === 'success' && userRes.data && userRes.data.userBooks) {
@@ -3712,6 +3793,7 @@ const VocabSettingsModule = (() => {
       } catch (e) { console.warn('ユーザーカタログ:', e.message); }
     }
     refreshBookSelect();
+    applyLaunchConfigSelections_();
     if (window.VocabRegisterModule && window.VocabRegisterModule.refreshBookShortcut) {
       window.VocabRegisterModule.refreshBookShortcut();
     }
@@ -3789,8 +3871,10 @@ const VocabSettingsModule = (() => {
     const dummyMethod = document.getElementById('vocab-dummy-method').value;
     let choiceCount = parseInt(document.getElementById('vocab-choice-count').value, 10);
     if (dummyMethod === 'diffPos' && choiceCount > 4) choiceCount = 4;
-    const formats = Array.from(document.querySelectorAll('#vocab-format-check-list input:checked')).map(function (el) { return el.value; });
-    const homeworkMode = !!document.getElementById('vocab-homework-mode').checked;
+    const launch = VocabLaunchConfig.get();
+    let formats = Array.from(document.querySelectorAll('#vocab-format-check-list input:checked')).map(function (el) { return el.value; });
+    if (launch && launch.formats && launch.formats.length) formats = launch.formats.slice();
+    const homeworkMode = VocabLaunchConfig.isHomeworkMode();
     return {
       bookName: document.getElementById('vocab-book-select').value,
       sheetName: document.getElementById('vocab-sheet-select').value,
@@ -3801,7 +3885,7 @@ const VocabSettingsModule = (() => {
       },
       formats: formats.length ? formats : ['vocab-enja'],
       homeworkMode: homeworkMode,
-      homeworkPerSection: parseInt(document.getElementById('vocab-homework-per-section').value, 10) || 5,
+      homeworkPerSection: (launch && launch.homeworkPerSection) || 5,
       questionCount: document.getElementById('vocab-question-count').value,
       choiceCount: choiceCount,
       includeUnknown: document.getElementById('vocab-include-unknown').checked,
@@ -3827,16 +3911,25 @@ const VocabSettingsModule = (() => {
   }
 
   function syncHomeworkUi_() {
-    const homework = !!document.getElementById('vocab-homework-mode').checked;
-    const wrap = document.getElementById('vocab-homework-count-wrap');
-    if (wrap) wrap.style.display = homework ? 'block' : 'none';
+    const homework = VocabLaunchConfig.isHomeworkMode();
+    const banner = document.getElementById('vocab-homework-banner');
     const countSelect = document.getElementById('vocab-question-count');
+    const launch = VocabLaunchConfig.get();
+    if (banner) {
+      if (homework) {
+        const per = (launch && launch.homeworkPerSection) || 5;
+        banner.style.display = 'block';
+        banner.textContent = '宿題・小テストモード（管理者指定）：形式は最大4種類・各' + per + '問・語の重複なし';
+      } else {
+        banner.style.display = 'none';
+        banner.textContent = '';
+      }
+    }
     if (countSelect) countSelect.disabled = homework;
   }
 
   function onFormatCheckboxChange_() {
-    const homework = !!document.getElementById('vocab-homework-mode').checked;
-    if (!homework) return;
+    if (!VocabLaunchConfig.isHomeworkMode()) return;
     const checked = document.querySelectorAll('#vocab-format-check-list input:checked');
     if (checked.length > 4) {
       checked[checked.length - 1].checked = false;
@@ -3848,15 +3941,21 @@ const VocabSettingsModule = (() => {
     if (init._done) return;
     init._done = true;
     renderFormatCheckboxes();
-    document.getElementById('vocab-book-type').addEventListener('change', refreshBookSelect);
-    document.getElementById('vocab-book-select').addEventListener('change', refreshSheetSelect);
-    document.getElementById('vocab-sheet-select').addEventListener('change', refreshDivisionFilters);
-    document.getElementById('vocab-dummy-method').addEventListener('change', function () {
-      document.getElementById('vocab-affix-options').style.display =
-        this.value === 'sameAffix' ? 'block' : 'none';
-    });
-    document.getElementById('vocab-homework-mode').addEventListener('change', syncHomeworkUi_);
-    document.getElementById('vocab-format-check-list').addEventListener('change', onFormatCheckboxChange_);
+    const bookTypeEl = document.getElementById('vocab-book-type');
+    const bookSelectEl = document.getElementById('vocab-book-select');
+    const sheetSelectEl = document.getElementById('vocab-sheet-select');
+    const dummyMethodEl = document.getElementById('vocab-dummy-method');
+    const formatListEl = document.getElementById('vocab-format-check-list');
+    if (bookTypeEl) bookTypeEl.addEventListener('change', refreshBookSelect);
+    if (bookSelectEl) bookSelectEl.addEventListener('change', refreshSheetSelect);
+    if (sheetSelectEl) sheetSelectEl.addEventListener('change', refreshDivisionFilters);
+    if (dummyMethodEl) {
+      dummyMethodEl.addEventListener('change', function () {
+        const affix = document.getElementById('vocab-affix-options');
+        if (affix) affix.style.display = this.value === 'sameAffix' ? 'block' : 'none';
+      });
+    }
+    if (formatListEl) formatListEl.addEventListener('change', onFormatCheckboxChange_);
     syncHomeworkUi_();
   }
 
@@ -6294,6 +6393,8 @@ function enterAppAsGuest() {
 }
 
 function initModeTabs() {
+  if (initModeTabs._done) return;
+  initModeTabs._done = true;
   const tabs = document.querySelectorAll('.mode-tab:not(.manage-sub-tab)');
   const grammarPanel = document.getElementById('grammar-settings-panel');
   const vocabPanel = document.getElementById('vocab-settings-panel');
@@ -6444,13 +6545,24 @@ async function loadManagePanel_() {
 
 async function initVocabModules() {
   if (window.VocabSettingsModule) {
-    window.VocabSettingsModule.init();
+    try {
+      window.VocabSettingsModule.init();
+    } catch (e) {
+      console.warn('単語設定UI初期化:', e.message);
+    }
     try {
       await window.VocabSettingsModule.loadCatalog(false);
     } catch (e) {
       console.warn('単語カタログ読込:', e.message);
     }
   }
+}
+
+async function refreshUserDataAfterLogin_() {
+  await initVocabModules();
+  await fetchUserLogs();
+  ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
+  await flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
 }
 
 window.onLoginSuccess = function(user) {
@@ -6488,23 +6600,20 @@ window.onLoginSuccess = function(user) {
   try { sessionStorage.removeItem('dd_my_vocab_book_url'); } catch (e) {}
   if (window.UserDriveModule && UserDriveModule.isEnabled()) {
     UserDriveModule.ensureUserDataEnvironment().then(function () {
-      initVocabModules();
-      fetchUserLogs();
-      ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
-      flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
+      return refreshUserDataAfterLogin_();
     }).catch(function (e) {
       console.warn('Drive 環境の準備:', e.message || e);
-      initVocabModules();
-      fetchUserLogs();
+      refreshUserDataAfterLogin_().catch(function (err) {
+        console.warn('ログイン後データ読込:', err.message || err);
+      });
       if (typeof showToast_ === 'function') {
         showToast_('マイ単語帳・学習記録を使うには Google の Drive 権限が必要です。再ログイン時に許可してください。');
       }
     });
   } else {
-    initVocabModules();
-    fetchUserLogs();
-    ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
-    flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
+    refreshUserDataAfterLogin_().catch(function (e) {
+      console.warn('ログイン後データ読込:', e.message || e);
+    });
   }
   PresetModule.revalidate();
   BackendSyncStatus.refresh();
@@ -6969,6 +7078,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const params = new URLSearchParams(window.location.search);
   captureAuthFromUrl_(params);
+  VocabLaunchConfig.captureFromUrl_(params);
 
   const restored = await tryRestoreAuthSession_();
   if (!restored) {
