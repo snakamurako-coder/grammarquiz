@@ -80,6 +80,20 @@ const VOCAB_HEADERS = [
   '英文による定義', 'チャンク', 'チャンク訳', '例文', '例文訳'
 ];
 
+/** 既存ブックの番号付き見出しなどを正の列名へ寄せる */
+const VOCAB_HEADER_ALIASES = {
+  '意味①名詞': '意味＠名詞',
+  '意味②動詞': '意味＠動詞',
+  '意味③形容詞': '意味＠形容詞',
+  '意味④副詞': '意味＠副詞',
+  '意味⑤前置詞': '意味＠前置詞',
+  '意味⑥接続詞': '意味＠接続詞',
+  '意味⑦その他品詞': '意味＠その他品詞',
+  '意味⑦その他助動詞': '意味＠その他品詞',
+  '意味⑧熟語・慣用表現': '意味＠熟語・慣用表現',
+  '意味⑧句動詞・熟語表現': '意味＠熟語・慣用表現'
+};
+
 // レスポンスを返す共通関数
 const sendResponse = (responseObject) => {
   return ContentService.createTextOutput(JSON.stringify(responseObject))
@@ -1574,12 +1588,66 @@ function isMyVocabBook_(bookName) {
   return bookName === MY_VOCAB_BOOK_NAME;
 }
 
+function canonicalizeVocabHeader_(header) {
+  const raw = header === null || header === undefined ? '' : header.toString().trim();
+  if (!raw) return '';
+  if (VOCAB_HEADER_ALIASES[raw]) return VOCAB_HEADER_ALIASES[raw];
+  if (raw.indexOf('意味@') === 0) return '意味＠' + raw.slice('意味@'.length);
+  return raw;
+}
+
 function rowToVocabObject_(headers, row) {
   const obj = {};
   for (let i = 0; i < headers.length; i++) {
-    if (headers[i]) obj[headers[i]] = row[i] !== undefined && row[i] !== null ? row[i] : '';
+    const key = canonicalizeVocabHeader_(headers[i]);
+    if (!key) continue;
+    const value = row[i] !== undefined && row[i] !== null ? row[i] : '';
+    if (obj[key] === undefined || obj[key] === '') obj[key] = value;
   }
   return obj;
+}
+
+function parseVocabSheetValues_(data, filters) {
+  if (!data || data.length <= 1) return { words: [], pool: [] };
+  const headers = data[0];
+  const daiFilter = (filters && filters.dai) || [];
+  const chuFilter = (filters && filters.chu) || [];
+  const shoFilter = (filters && filters.sho) || [];
+  const words = [];
+  const pool = [];
+  for (let r = 1; r < data.length; r++) {
+    const rowObj = rowToVocabObject_(headers, data[r]);
+    rowObj._rowIndex = r + 1;
+    const word = normalizeVocabField_(rowObj['英単語・熟語の表現']);
+    if (word === UNREGISTERED) continue;
+    pool.push(rowObj);
+    const dai = normalizeVocabField_(rowObj['大区分']);
+    const chu = normalizeVocabField_(rowObj['中区分']);
+    const sho = normalizeVocabField_(rowObj['小区分']);
+    if (daiFilter.length && daiFilter.indexOf(dai) === -1) continue;
+    if (chuFilter.length && chuFilter.indexOf(chu) === -1) continue;
+    if (shoFilter.length && shoFilter.indexOf(sho) === -1) continue;
+    words.push(rowObj);
+  }
+  return { words: words, pool: pool };
+}
+
+function fetchVocabWordsFromSpreadsheet_(ss, sheetName, filters, includeBookPool) {
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error('シートが見つかりません: ' + sheetName);
+  const parsed = parseVocabSheetValues_(sheet.getDataRange().getValues(), filters || {});
+  let bookPool = parsed.pool;
+  if (includeBookPool) {
+    bookPool = [];
+    ss.getSheets().forEach(function (sh) {
+      const part = parseVocabSheetValues_(sh.getDataRange().getValues(), {});
+      part.pool.forEach(function (rowObj) {
+        rowObj._sheetName = sh.getName();
+        bookPool.push(rowObj);
+      });
+    });
+  }
+  return { words: parsed.words, pool: parsed.pool, bookPool: bookPool };
 }
 
 function normalizeVocabField_(value) {

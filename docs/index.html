@@ -3349,7 +3349,48 @@ function vocabShuffle(arr) {
   return a;
 }
 
+const VOCAB_HEADER_ALIASES = {
+  '意味①名詞': '意味＠名詞',
+  '意味②動詞': '意味＠動詞',
+  '意味③形容詞': '意味＠形容詞',
+  '意味④副詞': '意味＠副詞',
+  '意味⑤前置詞': '意味＠前置詞',
+  '意味⑥接続詞': '意味＠接続詞',
+  '意味⑦その他品詞': '意味＠その他品詞',
+  '意味⑦その他助動詞': '意味＠その他品詞',
+  '意味⑧熟語・慣用表現': '意味＠熟語・慣用表現',
+  '意味⑧句動詞・熟語表現': '意味＠熟語・慣用表現'
+};
+
+function vocabCanonicalizeHeader(header) {
+  const raw = header === null || header === undefined ? '' : String(header).trim();
+  if (!raw) return '';
+  if (VOCAB_HEADER_ALIASES[raw]) return VOCAB_HEADER_ALIASES[raw];
+  if (raw.indexOf('意味@') === 0) return '意味＠' + raw.slice('意味@'.length);
+  return raw;
+}
+
+function vocabCanonicalizeWordObj(wordObj) {
+  if (!wordObj || wordObj._vocabCanonicalized) return wordObj;
+  Object.keys(VOCAB_HEADER_ALIASES).forEach(function (alias) {
+    const canon = VOCAB_HEADER_ALIASES[alias];
+    if (vocabHasMeaning(wordObj[alias]) && !vocabHasMeaning(wordObj[canon])) {
+      wordObj[canon] = wordObj[alias];
+    }
+  });
+  Object.keys(wordObj).forEach(function (key) {
+    if (key.indexOf('意味@') !== 0) return;
+    const canon = '意味＠' + key.slice('意味@'.length);
+    if (vocabHasMeaning(wordObj[key]) && !vocabHasMeaning(wordObj[canon])) {
+      wordObj[canon] = wordObj[key];
+    }
+  });
+  wordObj._vocabCanonicalized = true;
+  return wordObj;
+}
+
 function vocabGetMeanings(wordObj) {
+  vocabCanonicalizeWordObj(wordObj);
   const list = [];
   VOCAB_MEANING_KEYS.forEach(function (key) {
     if (vocabHasMeaning(wordObj[key])) {
@@ -3566,10 +3607,11 @@ const VocabQuizGenerator = (() => {
 
     return selectedWords.map(function (wordObj, idx) {
       const meanings = vocabGetMeanings(wordObj);
+      if (!meanings.length) return null;
       const targetMeaning = meanings[Math.floor(Math.random() * meanings.length)];
       const forceNone = options.includeNone && Math.random() < noneRate;
       return buildSingleQuestion(wordObj, targetMeaning, pool, bookPool, options, forceNone, idx);
-    });
+    }).filter(Boolean);
   }
 
   function buildSingleQuestion(wordObj, targetMeaning, pool, bookPool, options, forceNone, idx) {

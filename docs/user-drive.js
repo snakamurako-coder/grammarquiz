@@ -115,10 +115,34 @@ const UserDriveModule = (function () {
     return s === '' ? UNREGISTERED : s;
   }
 
+  const VOCAB_HEADER_ALIASES = {
+    '意味①名詞': '意味＠名詞',
+    '意味②動詞': '意味＠動詞',
+    '意味③形容詞': '意味＠形容詞',
+    '意味④副詞': '意味＠副詞',
+    '意味⑤前置詞': '意味＠前置詞',
+    '意味⑥接続詞': '意味＠接続詞',
+    '意味⑦その他品詞': '意味＠その他品詞',
+    '意味⑦その他助動詞': '意味＠その他品詞',
+    '意味⑧熟語・慣用表現': '意味＠熟語・慣用表現',
+    '意味⑧句動詞・熟語表現': '意味＠熟語・慣用表現'
+  };
+
+  function canonicalizeVocabHeader_(header) {
+    const raw = header === null || header === undefined ? '' : String(header).trim();
+    if (!raw) return '';
+    if (VOCAB_HEADER_ALIASES[raw]) return VOCAB_HEADER_ALIASES[raw];
+    if (raw.indexOf('意味@') === 0) return '意味＠' + raw.slice('意味@'.length);
+    return raw;
+  }
+
   function rowToObj_(headers, row) {
     const obj = {};
     headers.forEach(function (h, i) {
-      if (h) obj[h] = row[i] !== undefined && row[i] !== null ? row[i] : '';
+      const key = canonicalizeVocabHeader_(h);
+      if (!key) return;
+      const value = row[i] !== undefined && row[i] !== null ? row[i] : '';
+      if (obj[key] === undefined || obj[key] === '') obj[key] = value;
     });
     return obj;
   }
