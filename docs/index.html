@@ -204,6 +204,7 @@ button.is-busy::after,
 .vocab-preview-table { width: 100%; border-collapse: collapse; font-size: 0.75em; margin-top: 10px; }
 .vocab-preview-table th, .vocab-preview-table td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; word-break: break-word; }
 .vocab-preview-table th { background: #f5f5f5; }
+.vocab-pool-legend { background:#f5f5f5; border:1px solid #ddd; border-radius:8px; padding:10px 12px; font-size:0.9em; line-height:1.6; }
 .vocab-word-display { font-size: clamp(1.4em, 5vw, 1.8em); font-weight: bold; color: #1565c0; margin-bottom: 8px; }
 .vocab-pos-hint { font-size: 0.9em; color: #666; margin-bottom: 12px; }
 .division-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 180px; overflow-y: auto; }
@@ -635,7 +636,23 @@ button.is-busy::after,
         </div>
       </div>
       <div class="setting-section">
-        <div class="section-title">3. 出題設定</div>
+        <div class="section-title">3. 出題形式を選択</div>
+        <label class="check-item" style="margin-bottom:10px;">
+          <input type="checkbox" id="vocab-homework-mode"> 宿題モード（形式最大4・語の重複なし）
+        </label>
+        <div class="check-list" id="vocab-format-check-list"></div>
+        <div class="form-group" id="vocab-homework-count-wrap" style="display:none;margin-top:10px;">
+          <label>宿題：各形式の出題数</label>
+          <select id="vocab-homework-per-section">
+            <option value="3">3問/形式</option>
+            <option value="5" selected>5問/形式</option>
+            <option value="8">8問/形式</option>
+            <option value="10">10問/形式</option>
+          </select>
+        </div>
+      </div>
+      <div class="setting-section">
+        <div class="section-title">4. 出題設定</div>
         <div class="form-group">
           <label>出題数</label>
           <select id="vocab-question-count">
@@ -661,7 +678,7 @@ button.is-busy::after,
         </div>
       </div>
       <div class="setting-section">
-        <div class="section-title">4. ダミー選出オプション</div>
+        <div class="section-title">5. ダミー選出オプション</div>
         <div class="form-group">
           <label>選出範囲（不足時は上位範囲へ自動拡張）</label>
           <select id="vocab-dummy-scope">
@@ -838,12 +855,27 @@ button.is-busy::after,
 
     <!-- 4択問題用 UI -->
     <div id="choice-ui" style="display:none;">
+      <div id="vocab-pool-legend" class="vocab-pool-legend" style="display:none;"></div>
       <div class="en-with-tts sentence-tts-row">
         <div id="choice-sentence-container" class="sentence-container fixed-text" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 0;"></div>
         <button type="button" class="tts-btn" data-tts-target="choice-sentence-container" aria-label="英文を読み上げ">📢</button>
       </div>
       <div id="choice-feedback-slot" class="answer-feedback-slot"></div>
       <div id="choice-buttons-container" class="choices-grid"></div>
+    </div>
+
+    <!-- 単語：和文記述 UI（W4/W5/W6） -->
+    <div id="vocab-ja-ui" style="display:none;">
+      <div class="en-with-tts sentence-tts-row" id="vocab-ja-prompt-row">
+        <div id="vocab-ja-prompt" class="vocab-word-display" style="font-size:clamp(1.1em,4vw,1.4em);"></div>
+        <button type="button" class="tts-btn" id="vocab-ja-tts-btn" data-tts-target="vocab-ja-prompt" aria-label="英文を読み上げ">📢</button>
+      </div>
+      <div id="vocab-ja-feedback-slot" class="answer-feedback-slot"></div>
+      <div class="form-group">
+        <label id="vocab-ja-input-label">和訳を入力</label>
+        <textarea id="vocab-ja-input" rows="3" placeholder="日本語で入力（IME可）" style="width:100%;padding:12px;font-size:16px;border-radius:8px;border:1px solid #ccc;"></textarea>
+      </div>
+      <button id="vocab-ja-submit-btn" class="btn-primary" style="margin-top:8px;">これで回答する</button>
     </div>
 
     <!-- 単語学習 N択 UI -->
@@ -2976,6 +3008,17 @@ const ChoiceModule = (() => {
     buttonsContainer.innerHTML = '';
     resultMsg.textContent = '';
 
+    const poolLegend = document.getElementById('vocab-pool-legend');
+    if (poolLegend) {
+      if (qData.poolLegend) {
+        poolLegend.style.display = 'block';
+        poolLegend.textContent = '語群: ' + qData.poolLegend;
+      } else {
+        poolLegend.style.display = 'none';
+        poolLegend.textContent = '';
+      }
+    }
+
     container.textContent = joinEnglish(qData.mcqPrefix, BLANK_MARK, qData.mcqSuffix);
 
     qData.choices.forEach((choice) => {
@@ -3454,6 +3497,198 @@ function vocabScopeChain(scope) {
   return idx >= 0 ? order.slice(idx) : order;
 }
 
+const VOCAB_CIRCLED_NUMS = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳㉑㉒㉓㉔㉕㉖㉗㉘㉙㉚㉛㉜㉝㉞㉟㊱㊲㊳㊴㊵㊶㊷㊸㊹㊺㊻㊼㊽㊾㊿';
+function vocabChoiceSymbol(i) {
+  if (i < 50) return VOCAB_CIRCLED_NUMS.charAt(i);
+  return '{' + (i + 1) + '}';
+}
+
+const VOCAB_FORMATS = [
+  { key: 'W1', label: 'W1 日→英（語）', instruction: '次の日本語に対応する英単語・熟語を英語で書きなさい。' },
+  { key: 'W2', label: 'W2 日→英（句・穴）', instruction: '和訳を参考に、空所に入る英語を書きなさい。' },
+  { key: 'W3', label: 'W3 日→英（例文・穴）', instruction: '和訳を参考に、空所に入る英語を書きなさい。' },
+  { key: 'vocab-enja', label: 'W4 英→日（選択）', instruction: '英単語の意味として正しいものを選びなさい。' },
+  { key: 'W4', label: 'W4 英→日（記述）', instruction: '次の英単語の意味を日本語で書きなさい。' },
+  { key: 'W5', label: 'W5 英→日（句）', instruction: '次の英語の句の意味を日本語で書きなさい。' },
+  { key: 'W6', label: 'W6 英→日（例文）', instruction: '次の英語の例文の意味を日本語で書きなさい。' },
+  { key: 'C1', label: 'C1 四択（句・穴）', instruction: '和訳を参考に、空所に入る英語を選びなさい。' },
+  { key: 'C2', label: 'C2 四択（例文・穴）', instruction: '和訳を参考に、空所に入る英語を選びなさい。' },
+  { key: 'PPH', label: 'PPH 語群（句）', instruction: '語群から選び、空所に入る語を選びなさい。' },
+  { key: 'PEX', label: 'PEX 語群（例文）', instruction: '語群から選び、空所に入る語を選びなさい。' }
+];
+const VOCAB_FORMAT_MAP = {};
+VOCAB_FORMATS.forEach(function (f) { VOCAB_FORMAT_MAP[f.key] = f; });
+const VOCAB_FORMAT_KEYS = VOCAB_FORMATS.map(function (f) { return f.key; });
+const VOCAB_FORMAT_PRIMARY = {
+  W1: 'WD', W4: 'WD', 'vocab-enja': 'WD',
+  W2: 'PH', W5: 'PH', C1: 'PH', PPH: 'PH',
+  W3: 'EX', W6: 'EX', C2: 'EX', PEX: 'EX'
+};
+const VOCAB_SOURCE_FALLBACK = { EX: 'PH', PH: 'WD', WD: 'EX' };
+const VOCAB_TYPING_FORMATS = { W1: true, W2: true, W3: true };
+const VOCAB_JA_FORMATS = { W4: true, W5: true, W6: true };
+const VOCAB_CHOICE_FORMATS = { C1: true, C2: true, PPH: true, PEX: true };
+
+function isVocabFormat(format) {
+  return !!VOCAB_FORMAT_MAP[format];
+}
+
+function vocabWordKey(wordObj) {
+  return vocabNorm(wordObj['英単語・熟語の表現']).toLowerCase();
+}
+
+function vocabParseBracket(text) {
+  const s = vocabNorm(text);
+  if (s === VOCAB_UNREGISTERED) return null;
+  const m = String(s).match(/^([\s\S]*?)[\(（]([^\)）]+)[\)）]([\s\S]*)$/);
+  if (!m) return null;
+  return { prefix: m[1].trim(), inner: m[2].trim(), suffix: m[3].trim() };
+}
+
+function vocabBracketToCloze(parsed) {
+  if (!parsed) return null;
+  return {
+    prefix: parsed.prefix,
+    suffix: parsed.suffix,
+    answer: parsed.inner,
+    display: joinEnglish(parsed.prefix, BLANK_MARK, parsed.suffix)
+  };
+}
+
+function vocabGetChunkMaterial(wordObj) {
+  vocabCanonicalizeWordObj(wordObj);
+  const enParsed = vocabParseBracket(wordObj['チャンク']);
+  const jaParsed = vocabParseBracket(wordObj['チャンク訳']);
+  return {
+    enCloze: vocabBracketToCloze(enParsed),
+    enFull: vocabNorm(wordObj['チャンク']),
+    jaFull: vocabNorm(wordObj['チャンク訳']),
+    jaHint: jaParsed ? jaParsed.inner : vocabNorm(wordObj['チャンク訳'])
+  };
+}
+
+function vocabGetExampleMaterial(wordObj) {
+  vocabCanonicalizeWordObj(wordObj);
+  const enParsed = vocabParseBracket(wordObj['例文']);
+  const jaParsed = vocabParseBracket(wordObj['例文訳']);
+  return {
+    enCloze: vocabBracketToCloze(enParsed),
+    enFull: vocabNorm(wordObj['例文']),
+    jaFull: vocabNorm(wordObj['例文訳']),
+    jaHint: jaParsed ? jaParsed.inner : vocabNorm(wordObj['例文訳'])
+  };
+}
+
+function vocabFormatAvailable(wordObj, formatKey) {
+  vocabCanonicalizeWordObj(wordObj);
+  const word = vocabNorm(wordObj['英単語・熟語の表現']);
+  const meanings = vocabGetMeanings(wordObj);
+  const chunk = vocabGetChunkMaterial(wordObj);
+  const ex = vocabGetExampleMaterial(wordObj);
+  switch (formatKey) {
+    case 'W1': return word !== VOCAB_UNREGISTERED && meanings.length > 0;
+    case 'W2': case 'C1': case 'PPH':
+      return !!(chunk.enCloze && chunk.jaHint && chunk.jaHint !== VOCAB_UNREGISTERED);
+    case 'W3': case 'C2': case 'PEX':
+      return !!(ex.enCloze && ex.jaHint && ex.jaHint !== VOCAB_UNREGISTERED);
+    case 'W4': case 'vocab-enja':
+      return word !== VOCAB_UNREGISTERED && meanings.length > 0;
+    case 'W5':
+      return chunk.enFull !== VOCAB_UNREGISTERED && chunk.jaFull !== VOCAB_UNREGISTERED;
+    case 'W6':
+      return ex.enFull !== VOCAB_UNREGISTERED && ex.jaFull !== VOCAB_UNREGISTERED;
+    default: return false;
+  }
+}
+
+function vocabBuildSourcePools(words) {
+  return {
+    WD: words.filter(function (w) { return vocabFormatAvailable(w, 'W1'); }),
+    PH: words.filter(function (w) { return vocabFormatAvailable(w, 'W2'); }),
+    EX: words.filter(function (w) { return vocabFormatAvailable(w, 'W3'); })
+  };
+}
+
+function vocabPickPrimaryMeaning(wordObj) {
+  const meanings = vocabGetMeanings(wordObj);
+  if (!meanings.length) return null;
+  return meanings[Math.floor(Math.random() * meanings.length)];
+}
+
+function vocabBuildWordId(options, wordObj) {
+  return window.SrsModule
+    ? window.SrsModule.buildWordId(options.bookName || '', options.sheetName || '', wordObj['通し番号'])
+    : String(options.bookName || '') + '|' + String(options.sheetName || '') + '|' + String(wordObj['通し番号'] || '');
+}
+
+function vocabNormalizeJapaneseAnswer(text) {
+  return String(text || '').trim().replace(/\s+/g, '');
+}
+
+function vocabJapaneseMatch(user, expected) {
+  const u = vocabNormalizeJapaneseAnswer(user);
+  const e = vocabNormalizeJapaneseAnswer(expected);
+  if (!u || !e) return false;
+  if (u === e) return true;
+  return u.indexOf(e) >= 0 || e.indexOf(u) >= 0;
+}
+
+function vocabPickEnglishWordDummies(wordObj, pool, bookPool, count) {
+  const used = {};
+  used[vocabWordKey(wordObj)] = true;
+  const result = [];
+  const source = vocabShuffle(bookPool || pool || []);
+  for (let i = 0; i < source.length && result.length < count; i++) {
+    const cand = source[i];
+    const w = vocabNorm(cand['英単語・熟語の表現']);
+    if (w === VOCAB_UNREGISTERED) continue;
+    const key = w.toLowerCase();
+    if (used[key]) continue;
+    if (vocabIsSynonymRelated(wordObj, cand)) continue;
+    used[key] = true;
+    result.push(w);
+  }
+  while (result.length < count) result.push('');
+  return result.slice(0, count);
+}
+
+function vocabDedupePoolWords(rows) {
+  const seen = {};
+  const out = [];
+  rows.forEach(function (r) {
+    const w = vocabNorm(r['英単語・熟語の表現']);
+    const key = w.toLowerCase();
+    if (w === VOCAB_UNREGISTERED || seen[key]) return;
+    seen[key] = true;
+    out.push(r);
+  });
+  out.sort(function (a, b) {
+    return vocabNorm(a['英単語・熟語の表現']).toLowerCase().localeCompare(vocabNorm(b['英単語・熟語の表現']).toLowerCase());
+  });
+  return out;
+}
+
+function vocabAllocWordsUnique(need, primary, fallbacks, usedKeys) {
+  if (need <= 0) return [];
+  const out = [];
+  const tryAdd = function (r) {
+    const k = vocabWordKey(r);
+    if (!k || k === VOCAB_UNREGISTERED.toLowerCase()) return false;
+    if (usedKeys.has(k)) return false;
+    usedKeys.add(k);
+    out.push(r);
+    return true;
+  };
+  const chunks = [vocabShuffle(primary || [])];
+  (fallbacks || []).forEach(function (fb) { chunks.push(vocabShuffle(fb || [])); });
+  for (let c = 0; c < chunks.length && out.length < need; c++) {
+    for (let i = 0; i < chunks[c].length && out.length < need; i++) {
+      tryAdd(chunks[c][i]);
+    }
+  }
+  return out;
+}
+
 // vocabSettings.js
 const VocabSettingsModule = (() => {
   let catalog = { presets: [], userBooks: [] };
@@ -3554,6 +3789,8 @@ const VocabSettingsModule = (() => {
     const dummyMethod = document.getElementById('vocab-dummy-method').value;
     let choiceCount = parseInt(document.getElementById('vocab-choice-count').value, 10);
     if (dummyMethod === 'diffPos' && choiceCount > 4) choiceCount = 4;
+    const formats = Array.from(document.querySelectorAll('#vocab-format-check-list input:checked')).map(function (el) { return el.value; });
+    const homeworkMode = !!document.getElementById('vocab-homework-mode').checked;
     return {
       bookName: document.getElementById('vocab-book-select').value,
       sheetName: document.getElementById('vocab-sheet-select').value,
@@ -3562,20 +3799,55 @@ const VocabSettingsModule = (() => {
         chu: getSelectedDivisions('chu'),
         sho: getSelectedDivisions('sho')
       },
+      formats: formats.length ? formats : ['vocab-enja'],
+      homeworkMode: homeworkMode,
+      homeworkPerSection: parseInt(document.getElementById('vocab-homework-per-section').value, 10) || 5,
       questionCount: document.getElementById('vocab-question-count').value,
       choiceCount: choiceCount,
       includeUnknown: document.getElementById('vocab-include-unknown').checked,
       includeNone: document.getElementById('vocab-include-none').checked,
       dummyScope: document.getElementById('vocab-dummy-scope').value,
-      dummyMethod: document.getElementById('vocab-dummy-method').value,
+      dummyMethod: dummyMethod,
       affixType: document.querySelector('input[name="vocab-affix-type"]:checked').value,
       affixLen: parseInt(document.getElementById('vocab-affix-len').value, 10)
     };
   }
 
+  function renderFormatCheckboxes() {
+    const container = document.getElementById('vocab-format-check-list');
+    if (!container) return;
+    container.innerHTML = '';
+    VOCAB_FORMATS.forEach(function (f) {
+      const lbl = document.createElement('label');
+      lbl.className = 'check-item';
+      const checked = f.key === 'vocab-enja' ? ' checked' : '';
+      lbl.innerHTML = '<input type="checkbox" value="' + f.key + '"' + checked + '> ' + f.label;
+      container.appendChild(lbl);
+    });
+  }
+
+  function syncHomeworkUi_() {
+    const homework = !!document.getElementById('vocab-homework-mode').checked;
+    const wrap = document.getElementById('vocab-homework-count-wrap');
+    if (wrap) wrap.style.display = homework ? 'block' : 'none';
+    const countSelect = document.getElementById('vocab-question-count');
+    if (countSelect) countSelect.disabled = homework;
+  }
+
+  function onFormatCheckboxChange_() {
+    const homework = !!document.getElementById('vocab-homework-mode').checked;
+    if (!homework) return;
+    const checked = document.querySelectorAll('#vocab-format-check-list input:checked');
+    if (checked.length > 4) {
+      checked[checked.length - 1].checked = false;
+      alert('宿題モードでは形式は最大4つまで選べます。');
+    }
+  }
+
   function init() {
     if (init._done) return;
     init._done = true;
+    renderFormatCheckboxes();
     document.getElementById('vocab-book-type').addEventListener('change', refreshBookSelect);
     document.getElementById('vocab-book-select').addEventListener('change', refreshSheetSelect);
     document.getElementById('vocab-sheet-select').addEventListener('change', refreshDivisionFilters);
@@ -3583,6 +3855,9 @@ const VocabSettingsModule = (() => {
       document.getElementById('vocab-affix-options').style.display =
         this.value === 'sameAffix' ? 'block' : 'none';
     });
+    document.getElementById('vocab-homework-mode').addEventListener('change', syncHomeworkUi_);
+    document.getElementById('vocab-format-check-list').addEventListener('change', onFormatCheckboxChange_);
+    syncHomeworkUi_();
   }
 
   function getUserBooks() {
@@ -3597,58 +3872,218 @@ window.VocabSettingsModule = VocabSettingsModule;
 // vocabQuizGenerator.js
 const VocabQuizGenerator = (() => {
   function buildQuestions(words, pool, bookPool, options) {
+    const formats = (options.formats && options.formats.length) ? options.formats.slice() : ['vocab-enja'];
+    if (options.homeworkMode) {
+      return buildHomeworkQuestions(words, pool, bookPool, options, formats.slice(0, 4));
+    }
+    return buildNormalQuestions(words, pool, bookPool, options, formats);
+  }
+
+  function buildHomeworkQuestions(words, pool, bookPool, options, formats) {
+    if (!formats.length) throw new Error('出題形式を1つ以上選択してください。');
+    const perSection = options.homeworkPerSection || 5;
+    const sourcePools = vocabBuildSourcePools(words);
+    const usedKeys = new Set();
+    const questions = [];
+    let qIdx = 0;
+
+    formats.forEach(function (formatKey) {
+      const primary = VOCAB_FORMAT_PRIMARY[formatKey] || 'WD';
+      const fb1 = VOCAB_SOURCE_FALLBACK[primary];
+      const fb2 = VOCAB_SOURCE_FALLBACK[fb1];
+      const allocated = vocabAllocWordsUnique(
+        perSection,
+        sourcePools[primary],
+        [sourcePools[fb1], sourcePools[fb2]],
+        usedKeys
+      );
+      if (allocated.length < perSection) {
+        const label = (VOCAB_FORMAT_MAP[formatKey] || {}).label || formatKey;
+        throw new Error(label + ' の語数が不足しています（必要 ' + perSection + ' / 確保 ' + allocated.length + '）。範囲や形式を見直してください。');
+      }
+      if (formatKey === 'PPH' || formatKey === 'PEX') {
+        const poolWords = vocabDedupePoolWords(allocated);
+        allocated.forEach(function (wordObj) {
+          const q = buildQuestionForFormat(wordObj, formatKey, pool, bookPool, options, qIdx++, poolWords);
+          if (q) questions.push(q);
+        });
+      } else {
+        allocated.forEach(function (wordObj) {
+          const q = buildQuestionForFormat(wordObj, formatKey, pool, bookPool, options, qIdx++);
+          if (q) questions.push(q);
+        });
+      }
+    });
+    return questions;
+  }
+
+  function buildNormalQuestions(words, pool, bookPool, options, formats) {
     const shuffled = vocabShuffle(words);
     let count = shuffled.length;
     if (options.questionCount !== 'all') {
-      count = Math.min(parseInt(options.questionCount, 10), shuffled.length);
+      count = Math.min(parseInt(options.questionCount, 10) || shuffled.length, shuffled.length);
     }
     const selectedWords = shuffled.slice(0, count);
     const noneRate = 0.25 + Math.random() * 0.0833;
+    const questions = [];
+    let qIdx = 0;
 
-    return selectedWords.map(function (wordObj, idx) {
-      const meanings = vocabGetMeanings(wordObj);
-      if (!meanings.length) return null;
-      const targetMeaning = meanings[Math.floor(Math.random() * meanings.length)];
-      const forceNone = options.includeNone && Math.random() < noneRate;
-      return buildSingleQuestion(wordObj, targetMeaning, pool, bookPool, options, forceNone, idx);
-    }).filter(Boolean);
+    selectedWords.forEach(function (wordObj) {
+      const available = formats.filter(function (f) { return vocabFormatAvailable(wordObj, f); });
+      if (!available.length) return;
+      const formatKey = available[Math.floor(Math.random() * available.length)];
+      const extra = {};
+      if (formatKey === 'vocab-enja') {
+        extra.forceNone = options.includeNone && Math.random() < noneRate;
+      }
+      const q = buildQuestionForFormat(wordObj, formatKey, pool, bookPool, options, qIdx++, null, extra);
+      if (q) questions.push(q);
+    });
+    return questions;
   }
 
-  function buildSingleQuestion(wordObj, targetMeaning, pool, bookPool, options, forceNone, idx) {
+  function buildQuestionForFormat(wordObj, formatKey, pool, bookPool, options, idx, poolWords, extra) {
+    extra = extra || {};
+    vocabCanonicalizeWordObj(wordObj);
+    const base = {
+      id: String(wordObj['通し番号']) + '-' + formatKey + '-' + idx,
+      wordId: vocabBuildWordId(options, wordObj),
+      format: formatKey,
+      explanation: vocabNorm(wordObj['メモ']),
+      wordObj: wordObj,
+      unit: options.sheetName,
+      vocabFormatLabel: (VOCAB_FORMAT_MAP[formatKey] || {}).label || formatKey
+    };
+    if (formatKey === 'vocab-enja') {
+      return buildEnJaQuestion(wordObj, base, pool, bookPool, options, !!extra.forceNone, idx);
+    }
+    if (formatKey === 'W1') return buildW1(wordObj, base);
+    if (formatKey === 'W2') return buildW2W3(wordObj, base, 'chunk');
+    if (formatKey === 'W3') return buildW2W3(wordObj, base, 'example');
+    if (formatKey === 'W4') return buildW4(wordObj, base);
+    if (formatKey === 'W5') return buildW5W6(wordObj, base, 'chunk');
+    if (formatKey === 'W6') return buildW5W6(wordObj, base, 'example');
+    if (formatKey === 'C1') return buildC1C2(wordObj, base, pool, bookPool, options, 'chunk');
+    if (formatKey === 'C2') return buildC1C2(wordObj, base, pool, bookPool, options, 'example');
+    if (formatKey === 'PPH') return buildPoolQuestion(wordObj, base, poolWords, 'chunk');
+    if (formatKey === 'PEX') return buildPoolQuestion(wordObj, base, poolWords, 'example');
+    return null;
+  }
+
+  function buildW1(wordObj, base) {
+    const meaning = vocabPickPrimaryMeaning(wordObj);
+    if (!meaning) return null;
+    const word = vocabNorm(wordObj['英単語・熟語の表現']);
+    return Object.assign(base, {
+      japanese: meaning.meaning,
+      posLabel: meaning.posLabel,
+      answerPrefix: '',
+      answerSuffix: '',
+      expectedInner: word,
+      acceptedSentences: [word]
+    });
+  }
+
+  function buildW2W3(wordObj, base, kind) {
+    const mat = kind === 'example' ? vocabGetExampleMaterial(wordObj) : vocabGetChunkMaterial(wordObj);
+    if (!mat.enCloze) return null;
+    const fullSentence = joinEnglish(mat.enCloze.prefix, mat.enCloze.answer, mat.enCloze.suffix);
+    return Object.assign(base, {
+      japanese: mat.jaHint,
+      answerPrefix: mat.enCloze.prefix,
+      answerSuffix: mat.enCloze.suffix,
+      expectedInner: mat.enCloze.answer,
+      acceptedSentences: [fullSentence]
+    });
+  }
+
+  function buildW4(wordObj, base) {
+    const meaning = vocabPickPrimaryMeaning(wordObj);
+    if (!meaning) return null;
+    return Object.assign(base, {
+      word: vocabNorm(wordObj['英単語・熟語の表現']),
+      posLabel: meaning.posLabel,
+      expectedAnswer: meaning.meaning
+    });
+  }
+
+  function buildW5W6(wordObj, base, kind) {
+    const mat = kind === 'example' ? vocabGetExampleMaterial(wordObj) : vocabGetChunkMaterial(wordObj);
+    return Object.assign(base, {
+      promptEn: kind === 'example' ? mat.enFull : mat.enFull,
+      expectedAnswer: kind === 'example' ? mat.jaFull : mat.jaFull
+    });
+  }
+
+  function buildC1C2(wordObj, base, pool, bookPool, options, kind) {
+    const mat = kind === 'example' ? vocabGetExampleMaterial(wordObj) : vocabGetChunkMaterial(wordObj);
+    if (!mat.enCloze) return null;
+    const baseWord = vocabNorm(wordObj['英単語・熟語の表現']);
+    const dummies = vocabPickEnglishWordDummies(wordObj, pool, bookPool, 3);
+    const choicesRaw = vocabShuffle([baseWord].concat(dummies)).slice(0, 4);
+    while (choicesRaw.length < 4) choicesRaw.push('');
+    const choices = choicesRaw.map(function (text) {
+      return { text: text, isCorrect: text === baseWord };
+    });
+    return Object.assign(base, {
+      japanese: mat.jaHint,
+      mcqPrefix: mat.enCloze.prefix,
+      mcqSuffix: mat.enCloze.suffix,
+      mcqAnswer: mat.enCloze.answer,
+      correctText: baseWord,
+      choices: choices
+    });
+  }
+
+  function buildPoolQuestion(wordObj, base, poolWords, kind) {
+    const mat = kind === 'example' ? vocabGetExampleMaterial(wordObj) : vocabGetChunkMaterial(wordObj);
+    if (!mat.enCloze || !poolWords || !poolWords.length) return null;
+    const baseWord = vocabNorm(wordObj['英単語・熟語の表現']);
+    const pool = poolWords.map(function (r, i) {
+      return { symbol: vocabChoiceSymbol(i), word: vocabNorm(r['英単語・熟語の表現']) };
+    });
+    const choices = pool.map(function (p) {
+      return { text: p.symbol + ' ' + p.word, isCorrect: p.word.toLowerCase() === baseWord.toLowerCase(), poolWord: p.word };
+    });
+    return Object.assign(base, {
+      japanese: mat.jaHint,
+      mcqPrefix: mat.enCloze.prefix,
+      mcqSuffix: mat.enCloze.suffix,
+      mcqAnswer: mat.enCloze.answer,
+      correctText: baseWord,
+      poolLegend: pool.map(function (p) { return p.symbol + ' ' + p.word; }).join('　'),
+      choices: choices
+    });
+  }
+
+  function buildEnJaQuestion(wordObj, base, pool, bookPool, options, forceNone, idx) {
+    const meanings = vocabGetMeanings(wordObj);
+    if (!meanings.length) return null;
+    const targetMeaning = meanings[Math.floor(Math.random() * meanings.length)];
     const normalSlots = options.choiceCount;
     const dummiesNeeded = Math.max(0, normalSlots - (forceNone ? 0 : 1));
     const dummies = pickDummies(wordObj, targetMeaning, pool, bookPool, options, dummiesNeeded, forceNone);
-
     const dummyTexts = dummies.map(function (d) { return d.meaning; });
-    let choices = forceNone ? dummyTexts : [targetMeaning.meaning].concat(dummyTexts);
-    choices = vocabShuffle(choices);
-
-    const choiceObjects = choices.map(function (text) {
+    let choiceTexts = forceNone ? dummyTexts : [targetMeaning.meaning].concat(dummyTexts);
+    choiceTexts = vocabShuffle(choiceTexts);
+    const choiceObjects = choiceTexts.map(function (text) {
       return { text: text, isCorrect: !forceNone && text === targetMeaning.meaning };
     });
-
     if (options.includeNone) {
       choiceObjects.push({ text: VOCAB_OPTION_NONE, isCorrect: forceNone, isSpecial: true });
     }
     if (options.includeUnknown) {
       choiceObjects.push({ text: VOCAB_OPTION_UNKNOWN, isCorrect: false, isSpecial: true });
     }
-
-    return {
+    return Object.assign(base, {
       id: wordObj['通し番号'] + '-' + targetMeaning.key + '-' + idx,
-      wordId: (window.SrsModule
-        ? window.SrsModule.buildWordId(options.bookName || '', options.sheetName || '', wordObj['通し番号'])
-        : String(options.bookName || '') + '|' + String(options.sheetName || '') + '|' + String(wordObj['通し番号'] || '')),
       format: 'vocab-enja',
       word: vocabNorm(wordObj['英単語・熟語の表現']),
       posLabel: targetMeaning.posLabel,
       correctAnswer: forceNone ? VOCAB_OPTION_NONE : targetMeaning.meaning,
       forceNone: forceNone,
-      choices: choiceObjects,
-      explanation: vocabNorm(wordObj['メモ']),
-      wordObj: wordObj,
-      unit: options.sheetName
-    };
+      choices: choiceObjects
+    });
   }
 
   function pickDummies(wordObj, targetMeaning, pool, bookPool, options, count, excludeCorrect) {
@@ -3656,9 +4091,7 @@ const VocabQuizGenerator = (() => {
     const scopes = vocabScopeChain(options.dummyScope);
     const usedMeanings = {};
     if (excludeCorrect) usedMeanings[vocabNorm(targetMeaning.meaning)] = true;
-
     const result = [];
-
     for (let s = 0; s < scopes.length && result.length < count; s++) {
       const scope = scopes[s];
       const sourcePool = scope === 'book' ? (bookPool || pool) : pool;
@@ -3673,7 +4106,6 @@ const VocabQuizGenerator = (() => {
           return passesDummyMethod(wordObj, candidate, targetMeaning, meaning, options);
         });
       });
-
       const shuffledCandidates = vocabShuffle(candidates);
       for (let c = 0; c < shuffledCandidates.length && result.length < count; c++) {
         const cand = shuffledCandidates[c];
@@ -3693,19 +4125,10 @@ const VocabQuizGenerator = (() => {
 
   function passesDummyMethod(wordObj, candidate, targetMeaning, candidateMeaning, options) {
     if (options.dummyMethod === 'none') return true;
-    if (options.dummyMethod === 'samePos') {
-      return candidateMeaning.posGroup === targetMeaning.posGroup;
-    }
-    if (options.dummyMethod === 'diffPos') {
-      return candidateMeaning.posGroup !== targetMeaning.posGroup;
-    }
+    if (options.dummyMethod === 'samePos') return candidateMeaning.posGroup === targetMeaning.posGroup;
+    if (options.dummyMethod === 'diffPos') return candidateMeaning.posGroup !== targetMeaning.posGroup;
     if (options.dummyMethod === 'sameAffix') {
-      return vocabAffixMatch(
-        wordObj['英単語・熟語の表現'],
-        candidate['英単語・熟語の表現'],
-        options.affixType,
-        options.affixLen
-      );
+      return vocabAffixMatch(wordObj['英単語・熟語の表現'], candidate['英単語・熟語の表現'], options.affixType, options.affixLen);
     }
     return true;
   }
@@ -3779,6 +4202,58 @@ const VocabQuizModule = (() => {
 })();
 
 window.VocabQuizModule = VocabQuizModule;
+
+// vocabJaModule.js — W4/W5/W6 和文記述
+const VocabJaModule = (() => {
+  const promptEl = document.getElementById('vocab-ja-prompt');
+  const inputEl = document.getElementById('vocab-ja-input');
+  const submitBtn = document.getElementById('vocab-ja-submit-btn');
+  const labelEl = document.getElementById('vocab-ja-input-label');
+  const ttsBtn = document.getElementById('vocab-ja-tts-btn');
+  const resultMsg = document.getElementById('result-msg');
+  let qData = null;
+  let answered = false;
+
+  function initGame(questionData) {
+    qData = questionData;
+    answered = false;
+    resultMsg.textContent = '';
+    inputEl.value = '';
+
+    if (qData.format === 'W4') {
+      promptEl.textContent = qData.word + (qData.posLabel ? '（' + qData.posLabel + '）' : '');
+      labelEl.textContent = '意味を日本語で入力';
+    } else {
+      promptEl.textContent = qData.promptEn || '';
+      labelEl.textContent = qData.format === 'W5' ? '句の和訳を入力' : '例文の和訳を入力';
+    }
+    if (ttsBtn) ttsBtn.style.display = (qData.format === 'W4' || qData.promptEn) ? '' : 'none';
+
+    submitBtn.onclick = function () {
+      if (answered) return;
+      const user = inputEl.value.trim();
+      if (!user) return;
+      answered = true;
+      const ok = vocabJapaneseMatch(user, qData.expectedAnswer);
+      const meta = { userAnswer: user, correctAnswer: qData.expectedAnswer };
+      if (ok) {
+        setResultVerdict(resultMsg, 'ok', '⭕️ 正解！');
+        if (window.onQuestionCompleted) window.onQuestionCompleted(true, meta);
+      } else {
+        setResultVerdict(resultMsg, 'ng', '❌ 不正解...');
+        const extra = document.createElement('div');
+        extra.className = 'result-correct-label';
+        extra.textContent = '正答: ' + qData.expectedAnswer;
+        resultMsg.appendChild(extra);
+        if (window.onQuestionCompleted) window.onQuestionCompleted(false, meta);
+      }
+    };
+  }
+
+  return { initGame };
+})();
+
+window.VocabJaModule = VocabJaModule;
 
 // vocabRegisterModule.js
 const VocabRegisterModule = (() => {
@@ -5191,6 +5666,14 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
     alert('ブックと教材（シート）を選択してください。');
     return;
   }
+  if (!options.formats || !options.formats.length) {
+    alert('出題形式を1つ以上選択してください。');
+    return;
+  }
+  if (options.homeworkMode && options.formats.length > 4) {
+    alert('宿題モードでは形式は最大4つまで選べます。');
+    return;
+  }
 
   await BusyButton.run(btn, async function () {
     try {
@@ -5288,7 +5771,7 @@ async function fetchGrammarRows(subject, unit, forceRefresh) {
   throw new Error(result.message || "問題の取得に失敗しました");
 }
 
-const QUESTION_UI_IDS = ['typing-ui', 'sort-ui', 'choice-ui', 'correction-ui', 'vocab-quiz-ui'];
+const QUESTION_UI_IDS = ['typing-ui', 'sort-ui', 'choice-ui', 'correction-ui', 'vocab-quiz-ui', 'vocab-ja-ui'];
 
 const QUESTION_HANDLERS = {
   A: { ui: 'typing-ui', module: TypingModule },
@@ -5299,7 +5782,17 @@ const QUESTION_HANDLERS = {
   E: { ui: 'sort-ui', module: SortingModule },
   G: { ui: 'choice-ui', module: ChoiceModule },
   H: { ui: 'correction-ui', module: CorrectionModule },
-  'vocab-enja': { ui: 'vocab-quiz-ui', module: VocabQuizModule }
+  'vocab-enja': { ui: 'vocab-quiz-ui', module: VocabQuizModule },
+  W1: { ui: 'typing-ui', module: TypingModule },
+  W2: { ui: 'typing-ui', module: TypingModule },
+  W3: { ui: 'typing-ui', module: TypingModule },
+  W4: { ui: 'vocab-ja-ui', module: VocabJaModule },
+  W5: { ui: 'vocab-ja-ui', module: VocabJaModule },
+  W6: { ui: 'vocab-ja-ui', module: VocabJaModule },
+  C1: { ui: 'choice-ui', module: ChoiceModule },
+  C2: { ui: 'choice-ui', module: ChoiceModule },
+  PPH: { ui: 'choice-ui', module: ChoiceModule },
+  PEX: { ui: 'choice-ui', module: ChoiceModule }
 };
 
 const FEEDBACK_SLOT_BY_FORMAT = {
@@ -5311,7 +5804,17 @@ const FEEDBACK_SLOT_BY_FORMAT = {
   E: 'sort-feedback-slot',
   G: 'choice-feedback-slot',
   H: 'correction-feedback-slot',
-  'vocab-enja': 'vocab-feedback-slot'
+  'vocab-enja': 'vocab-feedback-slot',
+  W1: 'typing-feedback-slot',
+  W2: 'typing-feedback-slot',
+  W3: 'typing-feedback-slot',
+  W4: 'vocab-ja-feedback-slot',
+  W5: 'vocab-ja-feedback-slot',
+  W6: 'vocab-ja-feedback-slot',
+  C1: 'choice-feedback-slot',
+  C2: 'choice-feedback-slot',
+  PPH: 'choice-feedback-slot',
+  PEX: 'choice-feedback-slot'
 };
 
 function placeAnswerFeedback(format) {
@@ -5336,6 +5839,24 @@ function loadQuestionToGame(qData) {
       instructionEl.hidden = true;
     }
     elements.qJa.textContent = '単語学習（英日） ' + (currentQuestionIndex + 1) + ' / ' + totalQuestionsCount;
+  } else if (isVocabFormat(qData.format)) {
+    const def = VOCAB_FORMAT_MAP[qData.format];
+    if (instructionBtn) {
+      instructionBtn.style.display = def ? '' : 'none';
+      instructionBtn.textContent = '出題指示を確認する';
+      instructionBtn.setAttribute('aria-expanded', 'false');
+    }
+    if (instructionEl && def) {
+      instructionEl.textContent = '【' + def.label + '】' + def.instruction;
+      instructionEl.hidden = true;
+    }
+    if (VOCAB_TYPING_FORMATS[qData.format] || VOCAB_CHOICE_FORMATS[qData.format]) {
+      elements.qJa.textContent = qData.japanese || def.label;
+    } else if (VOCAB_JA_FORMATS[qData.format]) {
+      elements.qJa.textContent = (def ? def.label : qData.format) + ' — ' + (currentQuestionIndex + 1) + ' / ' + totalQuestionsCount;
+    } else {
+      elements.qJa.textContent = def ? def.label : qData.format;
+    }
   } else {
     const def = GRAMMAR_FORMAT_MAP[qData.format];
     if (instructionBtn) {
@@ -5383,16 +5904,18 @@ function loadQuestionToGame(qData) {
 
 /** 回答後に解説（ターゲット文法領域つき）を表示する */
 function showExplanation(qData) {
-  if (!qData.explanation && !qData.grammarArea) return;
+  const explanation = normalizeExplanationField_(qData.explanation);
+  if (!explanation && !qData.grammarArea) return;
   const el = document.getElementById('question-explanation');
+  el.innerHTML = '';
   if (qData.grammarArea) {
     const area = document.createElement('span');
     area.className = 'explanation-area';
     area.textContent = 'ターゲット文法領域: ' + qData.grammarArea;
     el.appendChild(area);
   }
-  if (qData.explanation) {
-    el.appendChild(document.createTextNode(qData.explanation));
+  if (explanation) {
+    el.appendChild(document.createTextNode(explanation));
   }
   el.style.display = 'block';
 }
@@ -5411,6 +5934,15 @@ function getQuestionPrompt_(q) {
   if (q.format === 'vocab-enja') {
     return (q.word || '') + (q.posLabel ? '（' + q.posLabel + '）' : '');
   }
+  if (isVocabFormat(q.format)) {
+    if (q.format === 'W1') return q.japanese || '';
+    if (VOCAB_JA_FORMATS[q.format]) return q.word || q.promptEn || '';
+    if (VOCAB_CHOICE_FORMATS[q.format]) {
+      return (q.japanese || '') + ' / ' + joinEnglish(q.mcqPrefix || '', BLANK_MARK, q.mcqSuffix || '');
+    }
+    if (VOCAB_TYPING_FORMATS[q.format]) return q.japanese || '';
+    return q.vocabFormatLabel || q.format;
+  }
   if (q.format === 'H' && q.presentedSentence) {
     return (q.japanese || '') + ' / ' + q.presentedSentence;
   }
@@ -5419,7 +5951,11 @@ function getQuestionPrompt_(q) {
 
 function getTtsEnglish_(q) {
   if (!q) return '';
-  if (q.format === 'vocab-enja') return q.word || '';
+  if (q.format === 'vocab-enja' || q.format === 'W4') return q.word || '';
+  if (isVocabFormat(q.format)) {
+    if (q.promptEn) return q.promptEn;
+    if (q.mcqPrefix || q.mcqSuffix) return joinEnglish(q.mcqPrefix, q.mcqAnswer || q.correctText || '', q.mcqSuffix);
+  }
   if (q.fullSentenceDisplay) return q.fullSentenceDisplay;
   if (q.correctSentence) return q.correctSentence;
   if (q.presentedSentence) return q.presentedSentence;
@@ -5432,6 +5968,11 @@ function getTtsEnglish_(q) {
 function getDefaultCorrectAnswer_(q) {
   if (!q) return '';
   if (q.format === 'vocab-enja') return q.correctAnswer || '';
+  if (isVocabFormat(q.format)) {
+    if (q.expectedAnswer) return q.expectedAnswer;
+    if (q.correctText) return q.correctText;
+    if (q.expectedInner) return q.expectedInner;
+  }
   if (q.correctText) return q.correctText;
   if (q.expectedInner) return q.expectedInner;
   if (q.correctSentence) return q.correctSentence;
@@ -5461,7 +6002,7 @@ function renderResultReviewList_() {
     html += '<div class="result-review-head"><span class="result-review-no">Q' + (i + 1) + '</span>';
     html += '<span class="result-review-status">' + statusLabel + '</span></div>';
     html += '<div class="result-review-prompt">' + escapeHtml_(item.prompt);
-    if (item.format === 'vocab-enja' && item.prompt) {
+    if ((item.format === 'vocab-enja' || item.format === 'W4') && item.prompt) {
       html += ' <button type="button" class="tts-btn" data-tts-text="' + escapeHtml_(String(item.prompt).replace(/（.*?）/g, '')) + '" aria-label="読み上げ">📢</button>';
     }
     html += '</div>';
