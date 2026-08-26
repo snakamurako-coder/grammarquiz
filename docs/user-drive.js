@@ -540,9 +540,15 @@ const UserDriveModule = (function () {
       sheetName: sheetName,
       wordCount: count,
       divisions: {
-        dai: Object.keys(daiSet).sort(),
-        chu: Object.keys(chuSet).sort(),
-        sho: Object.keys(shoSet).sort()
+        dai: Object.keys(daiSet).sort(function (a, b) {
+          return String(a).localeCompare(String(b), 'ja', { numeric: true, sensitivity: 'base' });
+        }),
+        chu: Object.keys(chuSet).sort(function (a, b) {
+          return String(a).localeCompare(String(b), 'ja', { numeric: true, sensitivity: 'base' });
+        }),
+        sho: Object.keys(shoSet).sort(function (a, b) {
+          return String(a).localeCompare(String(b), 'ja', { numeric: true, sensitivity: 'base' });
+        })
       }
     };
   }

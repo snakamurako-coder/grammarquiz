@@ -42,6 +42,10 @@ const VOCABULARY_FOLDER_NAME = 'vocabulary';
 const APP_BOOK_NAME = 'DigitalDrill';
 const MY_VOCAB_BOOK_NAME = 'マイ単語帳';
 const UNREGISTERED = '(未登録)';
+
+function naturalLabelSort_(a, b) {
+  return String(a).localeCompare(String(b), 'ja', { numeric: true, sensitivity: 'base' });
+}
 const FORM_RESPONSE_HEADER_USER_ID = 'User_ID';
 
 /** config.js の GOOGLE_FORM と同期（集約フォーム） */
@@ -1768,9 +1772,9 @@ function buildVocabSheetInfo_(sheet) {
     sheetName: sheet.getName(),
     wordCount: data.length - 1,
     divisions: {
-      dai: Object.keys(daiSet).sort(),
-      chu: Object.keys(chuSet).sort(),
-      sho: Object.keys(shoSet).sort()
+      dai: Object.keys(daiSet).sort(naturalLabelSort_),
+      chu: Object.keys(chuSet).sort(naturalLabelSort_),
+      sho: Object.keys(shoSet).sort(naturalLabelSort_)
     }
   };
 }
