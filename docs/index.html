@@ -205,6 +205,199 @@ button.is-busy::after,
 .vocab-preview-table th, .vocab-preview-table td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; word-break: break-word; }
 .vocab-preview-table th { background: #f5f5f5; }
 .vocab-pool-legend { background:#f5f5f5; border:1px solid #ddd; border-radius:8px; padding:10px 12px; font-size:0.9em; line-height:1.6; }
+
+/* 選択肢プール：スマホUI（疑似スマホフレーム） */
+body.pool-match-active {
+  padding-bottom: calc(56px + env(safe-area-inset-bottom));
+}
+body.pool-match-active .question-box,
+body.pool-match-active #game-feedback-host { display: none !important; }
+.pool-phone-frame {
+  width: 100%;
+  max-width: 375px;
+  height: min(720px, calc(100dvh - 72px - env(safe-area-inset-bottom)));
+  margin: 0 auto 8px;
+  background: #fff;
+  border-radius: 36px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.15);
+  border: 8px solid #222;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+.pool-phone-header {
+  padding: 14px 16px;
+  background: #4f46e5;
+  color: white;
+  text-align: center;
+  font-weight: bold;
+  font-size: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+.pool-header-btn {
+  background: rgba(255,255,255,0.2);
+  border: none;
+  color: white;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.pool-quiz-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.pool-q-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: #e0e7ff;
+  border-bottom: 1px solid #c7d2fe;
+  flex-shrink: 0;
+}
+.pool-nav-arrow {
+  background: #4f46e5;
+  color: white;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pool-nav-arrow:disabled { background: #cbd5e1; cursor: not-allowed; }
+.pool-q-progress { font-size: 14px; font-weight: bold; color: #3730a3; }
+.pool-current-q-card {
+  padding: 16px;
+  background: #ffffff;
+  border-bottom: 2px solid #f1f5f9;
+  text-align: center;
+  flex-shrink: 0;
+}
+.pool-q-ja-text { font-size: 18px; font-weight: bold; color: #1e293b; margin-bottom: 8px; word-break: break-word; }
+.pool-q-en-text { font-size: 14px; font-weight: 600; color: #475569; margin-bottom: 10px; word-break: break-word; }
+.pool-answer-display {
+  display: inline-block;
+  min-width: 160px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 15px;
+  font-weight: bold;
+  background: #f1f5f9;
+  color: #94a3b8;
+  border: 1.5px dashed #cbd5e1;
+}
+.pool-answer-display.has-value {
+  background: #4f46e5;
+  color: #ffffff;
+  border: 1.5px solid #4f46e5;
+}
+.pool-filter-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+.pool-tab-btn {
+  flex: 1;
+  padding: 6px 0;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+}
+.pool-tab-btn.active { background: #4f46e5; color: white; border-color: #4f46e5; }
+.pool-grid {
+  flex: 1;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  align-content: start;
+  overflow-y: auto;
+  min-height: 0;
+}
+.pool-tile-card {
+  background: #f8fafc;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e293b;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  word-break: break-word;
+  min-height: 52px;
+}
+.pool-tile-card.used { background: #f1f5f9; border-color: #cbd5e1; color: #94a3b8; }
+.pool-tile-card.current { border-color: #10b981; background: #d1fae5; color: #065f46; }
+.pool-tile-badge {
+  font-size: 9px;
+  margin-top: 3px;
+  background: #94a3b8;
+  color: white;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.pool-summary-container {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+.pool-summary-title { font-size: 16px; font-weight: bold; color: #1e293b; text-align: center; margin-bottom: 6px; }
+.pool-summary-row {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.pool-summary-ja { font-weight: bold; font-size: 13px; color: #334155; text-align: left; }
+.pool-summary-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.pool-summary-en { font-weight: 600; font-size: 13px; color: #4f46e5; background: #e0e7ff; padding: 4px 8px; border-radius: 6px; }
+.pool-summary-en.empty { color: #ef4444; background: #fee2e2; }
+.pool-edit-btn { background: none; border: none; color: #64748b; font-size: 12px; cursor: pointer; text-decoration: underline; }
+.pool-phone-footer { padding: 12px 16px; background: white; border-top: 1px solid #f1f5f9; flex-shrink: 0; }
+.pool-submit-btn {
+  width: 100%;
+  padding: 12px;
+  background: #10b981;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-weight: bold;
+  font-size: 15px;
+  cursor: pointer;
+}
+.pool-hidden { display: none !important; }
 .vocab-word-display { font-size: clamp(1.4em, 5vw, 1.8em); font-weight: bold; color: #1565c0; margin-bottom: 8px; }
 .vocab-pos-hint { font-size: 0.9em; color: #666; margin-bottom: 12px; }
 .division-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 180px; overflow-y: auto; }
@@ -839,6 +1032,17 @@ button.is-busy::after,
           </div>
           <p id="stt-locale-status" style="font-size:0.85em;color:#555;margin-bottom:0;">認識言語: アメリカ英語（en-US）</p>
         </div>
+        <div class="setting-section">
+          <div class="section-title">選択肢プールの画面</div>
+          <p style="font-size:0.9em;color:#666;margin-bottom:12px;">プール形式の出題で使う画面です。いまはスマホ画面を使います。タブレット・PC横長は準備中です。</p>
+          <div class="form-group">
+            <label>レイアウト</label>
+            <select id="pool-layout-select">
+              <option value="phone" selected>スマホ画面</option>
+              <option value="wide" disabled>タブレット・PC（横長）※準備中</option>
+            </select>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -974,6 +1178,41 @@ button.is-busy::after,
           <button type="button" id="correction-confirm-btn" class="correction-confirm-inline">これでよい（回答する）</button>
         </div>
         <div id="correction-input-display" class="correction-input-display"></div>
+      </div>
+    </div>
+
+    <!-- 選択肢プール（スマホUI） -->
+    <div id="vocab-pool-match-ui" style="display:none;">
+      <div class="pool-phone-frame">
+        <div class="pool-phone-header">
+          <span>単語マッチング</span>
+          <button type="button" class="pool-header-btn" id="pool-toggle-view-btn">一覧で確認</button>
+        </div>
+        <div class="pool-quiz-container" id="pool-quiz-mode">
+          <div class="pool-q-nav">
+            <button type="button" class="pool-nav-arrow" id="pool-prev-btn">←</button>
+            <span class="pool-q-progress" id="pool-q-progress">問 1 / 1</span>
+            <button type="button" class="pool-nav-arrow" id="pool-next-q-btn">→</button>
+          </div>
+          <div class="pool-current-q-card">
+            <div class="pool-q-ja-text" id="pool-q-ja-text"></div>
+            <div class="pool-q-en-text" id="pool-q-en-text"></div>
+            <div class="pool-answer-display" id="pool-ans-display">未選択</div>
+          </div>
+          <div class="pool-filter-tabs">
+            <button type="button" class="pool-tab-btn active" id="pool-tab-all" data-filter="all">すべて</button>
+            <button type="button" class="pool-tab-btn" id="pool-tab-unused" data-filter="unused">未使用</button>
+            <button type="button" class="pool-tab-btn" id="pool-tab-used" data-filter="used">使用済み</button>
+          </div>
+          <div class="pool-grid" id="pool-grid"></div>
+        </div>
+        <div class="pool-summary-container pool-hidden" id="pool-summary-mode">
+          <div class="pool-summary-title">回答一覧・確認</div>
+          <div id="pool-summary-list"></div>
+        </div>
+        <div class="pool-phone-footer">
+          <button type="button" class="pool-submit-btn" id="pool-submit-btn">回答を送信</button>
+        </div>
       </div>
     </div>
 
@@ -3811,6 +4050,301 @@ const VocabPoolSession = {
 };
 window.VocabPoolSession = VocabPoolSession;
 
+const PoolLayout = (() => {
+  const STORAGE_KEY = 'digitaldrill_pool_layout';
+  function get() {
+    try {
+      const v = localStorage.getItem(STORAGE_KEY);
+      return v === 'wide' ? 'phone' : 'phone';
+    } catch (e) { return 'phone'; }
+  }
+  function save(v) {
+    try { localStorage.setItem(STORAGE_KEY, v === 'wide' ? 'wide' : 'phone'); } catch (e) {}
+  }
+  function bindUi() {
+    const el = document.getElementById('pool-layout-select');
+    if (!el) return;
+    el.value = 'phone';
+    el.addEventListener('change', function () { save(el.value); });
+  }
+  return { get, save, bindUi };
+})();
+window.PoolLayout = PoolLayout;
+
+function vocabSessionIsPoolMatch_(questions) {
+  return !!(questions && questions.length && questions.every(function (q) {
+    return vocabIsPoolFormat(q.format) && q.sharedPool && q.sharedPool.length;
+  }));
+}
+
+const VocabPoolMatchModule = (() => {
+  let questions = [];
+  let poolOptions = [];
+  let userAnswers = {};
+  let currentIndex = 0;
+  let currentFilter = 'all';
+  let isSummaryView = false;
+  let bound = false;
+
+  function lemmaKey_(text) {
+    return String(text || '').trim().toLowerCase();
+  }
+
+  function collectPool_(qs) {
+    const seen = {};
+    const out = [];
+    qs.forEach(function (q) {
+      (q.sharedPool || []).forEach(function (t) {
+        const key = lemmaKey_(t);
+        if (!key || seen[key]) return;
+        seen[key] = true;
+        out.push(t);
+      });
+    });
+    out.sort(function (a, b) { return a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' }); });
+    return out;
+  }
+
+  function promptMain_(q, idx) {
+    const n = (idx + 1) + '. ';
+    if (VOCAB_JA_POOL_FORMATS[q.format]) return n + (q.word || q.promptEn || '');
+    return n + (q.japanese || q.word || '');
+  }
+
+  function promptSub_(q) {
+    if (q.mcqPrefix || q.mcqSuffix) return joinEnglish(q.mcqPrefix, BLANK_MARK, q.mcqSuffix);
+    return '';
+  }
+
+  function correctOf_(q) {
+    return q.correctText || q.correctAnswer || '';
+  }
+
+  function usedByQuestionId_(opt) {
+    const keys = Object.keys(userAnswers);
+    for (let i = 0; i < keys.length; i++) {
+      if (lemmaKey_(userAnswers[keys[i]]) === lemmaKey_(opt)) return keys[i];
+    }
+    return null;
+  }
+
+  function render() {
+    const quizMode = document.getElementById('pool-quiz-mode');
+    const summaryMode = document.getElementById('pool-summary-mode');
+    const toggleBtn = document.getElementById('pool-toggle-view-btn');
+    if (isSummaryView) {
+      quizMode.classList.add('pool-hidden');
+      summaryMode.classList.remove('pool-hidden');
+      if (toggleBtn) toggleBtn.textContent = '問題に戻る';
+      renderSummary();
+    } else {
+      quizMode.classList.remove('pool-hidden');
+      summaryMode.classList.add('pool-hidden');
+      if (toggleBtn) toggleBtn.textContent = '一覧で確認';
+      renderQuiz();
+    }
+  }
+
+  function renderQuiz() {
+    const q = questions[currentIndex];
+    const qid = String(q.id);
+    const selected = userAnswers[qid];
+    document.getElementById('pool-q-progress').textContent = '問 ' + (currentIndex + 1) + ' / ' + questions.length;
+    document.getElementById('pool-q-ja-text').textContent = promptMain_(q, currentIndex);
+    const sub = promptSub_(q);
+    const subEl = document.getElementById('pool-q-en-text');
+    subEl.textContent = sub;
+    subEl.style.display = sub ? '' : 'none';
+    const ansDisplay = document.getElementById('pool-ans-display');
+    if (selected) {
+      ansDisplay.textContent = selected;
+      ansDisplay.classList.add('has-value');
+    } else {
+      ansDisplay.textContent = '未選択';
+      ansDisplay.classList.remove('has-value');
+    }
+    document.getElementById('pool-prev-btn').disabled = currentIndex === 0;
+    document.getElementById('pool-next-q-btn').disabled = currentIndex === questions.length - 1;
+    renderPool();
+  }
+
+  function renderPool() {
+    const poolGrid = document.getElementById('pool-grid');
+    poolGrid.innerHTML = '';
+    const usedCount = Object.keys(userAnswers).length;
+    document.getElementById('pool-tab-all').textContent = 'すべて (' + poolOptions.length + ')';
+    document.getElementById('pool-tab-unused').textContent = '未使用 (' + Math.max(0, poolOptions.length - usedCount) + ')';
+    document.getElementById('pool-tab-used').textContent = '使用済み (' + usedCount + ')';
+    const currentQId = String(questions[currentIndex].id);
+    const filtered = poolOptions.filter(function (opt) {
+      const isUsed = !!usedByQuestionId_(opt);
+      if (currentFilter === 'unused') return !isUsed;
+      if (currentFilter === 'used') return isUsed;
+      return true;
+    });
+    filtered.forEach(function (opt) {
+      const usedBy = usedByQuestionId_(opt);
+      const isCurrent = usedBy === currentQId;
+      const tile = document.createElement('button');
+      tile.type = 'button';
+      tile.className = 'pool-tile-card' + (usedBy ? ' used' : '') + (isCurrent ? ' current' : '');
+      const span = document.createElement('span');
+      span.textContent = opt;
+      tile.appendChild(span);
+      if (usedBy) {
+        const badge = document.createElement('span');
+        badge.className = 'pool-tile-badge';
+        badge.textContent = '問' + usedBy;
+        tile.appendChild(badge);
+      }
+      tile.addEventListener('click', function () { selectOption(opt); });
+      poolGrid.appendChild(tile);
+    });
+  }
+
+  function selectOption(opt) {
+    const currentQId = String(questions[currentIndex].id);
+    const prevQId = usedByQuestionId_(opt);
+    if (prevQId) delete userAnswers[prevQId];
+    userAnswers[currentQId] = opt;
+    if (Object.keys(userAnswers).length === questions.length) {
+      isSummaryView = true;
+    } else if (currentIndex < questions.length - 1) {
+      currentIndex++;
+    }
+    render();
+  }
+
+  function moveQuestion(dir) {
+    currentIndex += dir;
+    if (currentIndex < 0) currentIndex = 0;
+    if (currentIndex >= questions.length) currentIndex = questions.length - 1;
+    render();
+  }
+
+  function filterOptions(filterType) {
+    currentFilter = filterType;
+    document.querySelectorAll('.pool-tab-btn').forEach(function (btn) { btn.classList.remove('active'); });
+    const tab = document.getElementById('pool-tab-' + filterType);
+    if (tab) tab.classList.add('active');
+    renderPool();
+  }
+
+  function toggleView() {
+    isSummaryView = !isSummaryView;
+    render();
+  }
+
+  function jumpToQuestion(index) {
+    currentIndex = index;
+    isSummaryView = false;
+    render();
+  }
+
+  function renderSummary() {
+    const container = document.getElementById('pool-summary-list');
+    container.innerHTML = '';
+    questions.forEach(function (q, idx) {
+      const ans = userAnswers[String(q.id)];
+      const row = document.createElement('div');
+      row.className = 'pool-summary-row';
+      const ja = document.createElement('span');
+      ja.className = 'pool-summary-ja';
+      ja.textContent = promptMain_(q, idx);
+      const right = document.createElement('div');
+      right.className = 'pool-summary-right';
+      const en = document.createElement('span');
+      en.className = 'pool-summary-en' + (ans ? '' : ' empty');
+      en.textContent = ans || '未選択';
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'pool-edit-btn';
+      edit.textContent = '変更';
+      edit.addEventListener('click', function () { jumpToQuestion(idx); });
+      right.appendChild(en);
+      right.appendChild(edit);
+      row.appendChild(ja);
+      row.appendChild(right);
+      container.appendChild(row);
+    });
+  }
+
+  function handleSubmit() {
+    const unanswered = questions.filter(function (q) { return !userAnswers[String(q.id)]; }).length;
+    if (unanswered && !confirm('未選択が ' + unanswered + ' 問あります。このまま採点しますか？')) return;
+    finishAndScore_();
+  }
+
+  function finishAndScore_() {
+    sessionAnswerLog = [];
+    currentScore = 0;
+    questions.forEach(function (q, i) {
+      currentQuestionIndex = i;
+      const user = userAnswers[String(q.id)] || '';
+      const correct = correctOf_(q);
+      const ok = !!user && lemmaKey_(user) === lemmaKey_(correct);
+      if (typeof window.onQuestionCompleted === 'function') {
+        window.onQuestionCompleted(ok, { userAnswer: user || '未選択', correctAnswer: correct });
+      }
+    });
+    const nextBtn = document.getElementById('next-btn');
+    if (nextBtn) nextBtn.style.display = 'none';
+    showResultScreen();
+    stop();
+  }
+
+  function bind_() {
+    if (bound) return;
+    bound = true;
+    document.getElementById('pool-toggle-view-btn').addEventListener('click', toggleView);
+    document.getElementById('pool-prev-btn').addEventListener('click', function () { moveQuestion(-1); });
+    document.getElementById('pool-next-q-btn').addEventListener('click', function () { moveQuestion(1); });
+    document.getElementById('pool-submit-btn').addEventListener('click', handleSubmit);
+    document.querySelectorAll('.pool-tab-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () { filterOptions(btn.getAttribute('data-filter')); });
+    });
+  }
+
+  function start(qs) {
+    bind_();
+    questions = (qs || []).map(function (q, i) {
+      const copy = Object.assign({}, q);
+      copy.id = i + 1;
+      return copy;
+    });
+    poolOptions = collectPool_(questions);
+    userAnswers = {};
+    currentIndex = 0;
+    currentFilter = 'all';
+    isSummaryView = false;
+    document.querySelectorAll('.pool-tab-btn').forEach(function (btn) { btn.classList.remove('active'); });
+    const allTab = document.getElementById('pool-tab-all');
+    if (allTab) allTab.classList.add('active');
+    document.body.classList.add('pool-match-active');
+    QUESTION_UI_IDS.forEach(function (id) {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    const root = document.getElementById('vocab-pool-match-ui');
+    if (root) root.style.display = 'block';
+    render();
+  }
+
+  function stop() {
+    document.body.classList.remove('pool-match-active');
+    const root = document.getElementById('vocab-pool-match-ui');
+    if (root) root.style.display = 'none';
+  }
+
+  function isActive() {
+    const root = document.getElementById('vocab-pool-match-ui');
+    return !!(root && root.style.display === 'block');
+  }
+
+  return { start, stop, isActive };
+})();
+window.VocabPoolMatchModule = VocabPoolMatchModule;
+
 function isVocabFormat(format) {
   return !!VOCAB_FORMAT_MAP[format];
 }
@@ -6512,10 +7046,15 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
       currentSessionIsPreset = bookType === 'preset';
       BackendSyncStatus.refresh();
 
-      loadQuestionToGame(currentQuestionDataList[0]);
       screens.settings.style.display = 'none';
       document.getElementById('result-screen').style.display = 'none';
       screens.game.style.display = 'block';
+      if (vocabSessionIsPoolMatch_(questions) && (!window.PoolLayout || PoolLayout.get() === 'phone')) {
+        VocabPoolMatchModule.start(questions);
+      } else {
+        VocabPoolMatchModule.stop();
+        loadQuestionToGame(currentQuestionDataList[0]);
+      }
     } catch (error) {
       console.error(error);
       alert('通信エラーが発生しました: ' + error.message);
@@ -6525,6 +7064,7 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
 
 elements.backBtn.addEventListener('click', () => {
   if (window.TtsModule) TtsModule.stop();
+  if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
   screens.game.style.display = 'none';
   screens.settings.style.display = 'block';
 });
@@ -7774,6 +8314,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindLoginScreen_();
   if (window.TtsModule) TtsModule.bindUi();
   if (window.SttSettings) SttSettings.bindUi();
+  if (window.PoolLayout) PoolLayout.bindUi();
   const logoutBtn = document.getElementById('logout-btn');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', async () => {
