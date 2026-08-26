@@ -6,6 +6,13 @@ const UserDriveModule = (function () {
   const META_KEY = 'dd_user_drive_meta';
   const TOKEN_KEY = 'dd_google_access_token';
   const TOKEN_EXP_KEY = 'dd_google_token_expiry';
+  const REFRESH_KEY = 'dd_google_refresh_token';
+  const REFRESH_OBTAINED_KEY = 'dd_google_refresh_obtained';
+  /** PKCE リダイレクト往復用（sessionStorage） */
+  const PKCE_VERIFIER_SS = 'dd_oauth_pkce_verifier';
+  const PKCE_STATE_SS = 'dd_oauth_state';
+  const PKCE_REDIRECT_SS = 'dd_oauth_redirect_uri';
+  const PKCE_TOAST_SS = 'dd_oauth_pending_toast';
   const FOLDER_NAME = 'DigitalDrill_MyData';
   const VOCAB_BOOK_NAME = 'マイ単語帳';
   const LOG_BOOK_NAME = 'DigitalDrill学習記録';
@@ -14,6 +21,8 @@ const UserDriveModule = (function () {
   /** ローカルキャッシュに読み込んだ学習セットの記録（通信量抑制用） */
   const SET_CACHE_LOG_SHEET = '学習セット更新記録';
   const UNREGISTERED = '(未登録)';
+  /** refresh_token による再同意なし運用の目標期間（UX・ドキュメント用。Google 側の失効が優先） */
+  const REFRESH_SOFT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
   const VOCAB_HEADERS = [
     '通し番号', '大区分', '中区分', '小区分', '英単語・熟語の表現',
@@ -40,7 +49,6 @@ const UserDriveModule = (function () {
     '意味＠前置詞', '意味＠接続詞', '意味＠その他品詞', '意味＠熟語・慣用表現'
   ];
 
-  let tokenClient = null;
   let authPromise = null;
 
   function getClientId_() {
@@ -54,6 +62,13 @@ const UserDriveModule = (function () {
 
   function isEnabled_() {
     return !!getClientId_();
+  }
+
+  /** GCP の「承認済みのリダイレクト URI」と一字一句一致させること */
+  function getRedirectUri_() {
+    const cfg = window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.GOOGLE_OAUTH_REDIRECT_URI;
+    if (cfg) return String(cfg);
+    return window.location.origin + window.location.pathname;
   }
 
   function accountSuffix_() {
@@ -77,20 +92,41 @@ const UserDriveModule = (function () {
     return suffix ? TOKEN_EXP_KEY + ':' + suffix : TOKEN_EXP_KEY;
   }
 
+  function refreshStorageKey_() {
+    const suffix = accountSuffix_();
+    return suffix ? REFRESH_KEY + ':' + suffix : REFRESH_KEY;
+  }
+
+  function refreshObtainedStorageKey_() {
+    const suffix = accountSuffix_();
+    return suffix ? REFRESH_OBTAINED_KEY + ':' + suffix : REFRESH_OBTAINED_KEY;
+  }
+
   /** cceec0b 以前のグローバルキーからアカウント別キーへ一度だけ移行 */
   function migrateLegacyToken_() {
     const suffix = accountSuffix_();
     if (!suffix) return;
     const key = tokenStorageKey_();
     const expKey = tokenExpStorageKey_();
-    if (localStorage.getItem(key)) return;
-    const legacyToken = localStorage.getItem(TOKEN_KEY);
-    if (!legacyToken) return;
-    localStorage.setItem(key, legacyToken);
-    const legacyExp = localStorage.getItem(TOKEN_EXP_KEY);
-    if (legacyExp) localStorage.setItem(expKey, legacyExp);
+    const refreshKey = refreshStorageKey_();
+    const obtainedKey = refreshObtainedStorageKey_();
+    if (!localStorage.getItem(key)) {
+      const legacyToken = localStorage.getItem(TOKEN_KEY);
+      if (legacyToken) {
+        localStorage.setItem(key, legacyToken);
+        const legacyExp = localStorage.getItem(TOKEN_EXP_KEY);
+        if (legacyExp) localStorage.setItem(expKey, legacyExp);
+      }
+    }
+    if (!localStorage.getItem(refreshKey)) {
+      const legacyRefresh = localStorage.getItem(REFRESH_KEY);
+      if (legacyRefresh) {
+        localStorage.setItem(refreshKey, legacyRefresh);
+        const legacyObtained = localStorage.getItem(REFRESH_OBTAINED_KEY);
+        if (legacyObtained) localStorage.setItem(obtainedKey, legacyObtained);
+      }
+    }
   }
-
   /** アカウント別 meta キー導入前の dd_user_drive_meta を移行 */
   function migrateLegacyMeta_() {
     const suffix = accountSuffix_();
@@ -170,7 +206,7 @@ const UserDriveModule = (function () {
   }
 
   async function apiFetch_(url, options) {
-    const token = await ensureAuthorized_();
+    const token = await ensureAuthorized_({ interactive: false });
     options = options || {};
     options.headers = Object.assign({}, options.headers || {}, {
       Authorization: 'Bearer ' + token
@@ -182,95 +218,265 @@ const UserDriveModule = (function () {
         const err = await res.json();
         detail = err.error && err.error.message ? err.error.message : JSON.stringify(err);
       } catch (e) {}
+      // 401 時は refresh を一度試してリトライ
+      if (res.status === 401 && getRefreshToken_()) {
+        try {
+          clearAccessTokenOnly_();
+          const retryToken = await refreshAccessToken_();
+          options.headers.Authorization = 'Bearer ' + retryToken;
+          const res2 = await fetch(url, options);
+          if (!res2.ok) {
+            let detail2 = res2.statusText;
+            try {
+              const err2 = await res2.json();
+              detail2 = err2.error && err2.error.message ? err2.error.message : JSON.stringify(err2);
+            } catch (e2) {}
+            throw new Error('Google API エラー (' + res2.status + '): ' + detail2);
+          }
+          if (res2.status === 204) return null;
+          return res2.json();
+        } catch (e) {
+          throw e;
+        }
+      }
       throw new Error('Google API エラー (' + res.status + '): ' + detail);
     }
     if (res.status === 204) return null;
     return res.json();
   }
 
-  function waitForOAuth2_(attempts) {
-    attempts = attempts || 0;
-    return new Promise(function (resolve, reject) {
-      if (window.google && google.accounts && google.accounts.oauth2) {
-        resolve(true);
-        return;
-      }
-      if (attempts >= 50) {
-        reject(new Error('Google OAuth ライブラリが読み込まれていません'));
-        return;
-      }
-      setTimeout(function () {
-        waitForOAuth2_(attempts + 1).then(resolve, reject);
-      }, 100);
-    });
+  function clearAccessTokenOnly_() {
+    migrateLegacyToken_();
+    localStorage.removeItem(tokenStorageKey_());
+    localStorage.removeItem(tokenExpStorageKey_());
   }
 
-  function initTokenClient_() {
-    if (tokenClient) return tokenClient;
-    if (!window.google || !google.accounts || !google.accounts.oauth2) return null;
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: getClientId_(),
-      scope: getScopes_(),
-      callback: function () {}
-    });
-    return tokenClient;
+  function base64UrlEncode_(bytes) {
+    let binary = '';
+    const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    for (let i = 0; i < arr.length; i++) binary += String.fromCharCode(arr[i]);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
   }
 
-  function requestAccessToken_(prompt) {
-    return waitForOAuth2_().then(function () {
-      return new Promise(function (resolve, reject) {
-        const client = initTokenClient_();
-        if (!client) {
-          reject(new Error('Google OAuth ライブラリが初期化できません'));
-          return;
-        }
-        client.callback = function (resp) {
-          if (resp.error) {
-            reject(new Error(resp.error_description || resp.error));
-            return;
-          }
-          localStorage.setItem(tokenStorageKey_(), resp.access_token);
-          localStorage.setItem(tokenExpStorageKey_(), String(Date.now() + (resp.expires_in - 60) * 1000));
-          resolve(resp.access_token);
-        };
-        client.requestAccessToken({ prompt: prompt || '' });
-      });
-    });
+  function randomUrlSafe_(byteLen) {
+    const bytes = new Uint8Array(byteLen);
+    crypto.getRandomValues(bytes);
+    return base64UrlEncode_(bytes);
   }
 
-  function hasCachedToken_() {
+  async function pkceChallenge_(verifier) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+    return base64UrlEncode_(digest);
+  }
+
+  function persistTokenResponse_(data) {
+    migrateLegacyToken_();
+    if (!data || !data.access_token) {
+      throw new Error('トークン応答に access_token がありません');
+    }
+    localStorage.setItem(tokenStorageKey_(), data.access_token);
+    const expiresIn = parseInt(data.expires_in, 10) || 3600;
+    localStorage.setItem(tokenExpStorageKey_(), String(Date.now() + (expiresIn - 60) * 1000));
+    if (data.refresh_token) {
+      localStorage.setItem(refreshStorageKey_(), data.refresh_token);
+      localStorage.setItem(refreshObtainedStorageKey_(), String(Date.now()));
+    }
+  }
+
+  function getRefreshToken_() {
+    migrateLegacyToken_();
+    return localStorage.getItem(refreshStorageKey_()) || '';
+  }
+
+  function hasValidAccessToken_() {
     migrateLegacyToken_();
     const token = localStorage.getItem(tokenStorageKey_());
     const exp = parseInt(localStorage.getItem(tokenExpStorageKey_()) || '0', 10);
     return !!(token && Date.now() < exp);
   }
 
+  /** access 有効、または refresh がありサイレント更新できる見込み */
+  function hasCachedToken_() {
+    if (hasValidAccessToken_()) return true;
+    return !!getRefreshToken_();
+  }
+
+  function stripOAuthParamsFromUrl_() {
+    try {
+      const url = new URL(window.location.href);
+      ['code', 'state', 'scope', 'authuser', 'prompt', 'hd', 'error', 'error_description'].forEach(function (k) {
+        url.searchParams.delete(k);
+      });
+      const cleaned = url.pathname + (url.search ? url.search : '') + (url.hash || '');
+      window.history.replaceState({}, document.title, cleaned);
+    } catch (e) {}
+  }
+
+  async function exchangeCodeForTokens_(code, redirectUri, verifier) {
+    const body = new URLSearchParams({
+      client_id: getClientId_(),
+      code: code,
+      code_verifier: verifier,
+      grant_type: 'authorization_code',
+      redirect_uri: redirectUri
+    });
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    });
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok) {
+      throw new Error(data.error_description || data.error || ('token exchange failed: ' + res.status));
+    }
+    persistTokenResponse_(data);
+    if (!data.refresh_token && !getRefreshToken_()) {
+      console.warn('Drive OAuth: refresh_token が返りませんでした。再同意が必要になることがあります。');
+    }
+    return data.access_token;
+  }
+
+  async function refreshAccessToken_() {
+    const refresh = getRefreshToken_();
+    if (!refresh) {
+      const err = new Error('Drive へのアクセスが許可されていません。画面の「Drive を接続」を押してください。');
+      err.code = 'drive_auth_required';
+      throw err;
+    }
+    const body = new URLSearchParams({
+      client_id: getClientId_(),
+      refresh_token: refresh,
+      grant_type: 'refresh_token'
+    });
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    });
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok) {
+      clearAuth_();
+      const err = new Error(data.error_description || data.error || 'refresh_token が無効です。再接続してください。');
+      err.code = 'drive_auth_required';
+      throw err;
+    }
+    persistTokenResponse_(data);
+    return data.access_token;
+  }
+
+  /**
+   * 同タブを Google 認可画面へ遷移（ポップアップなし）。
+   * ページはアンロードされるため、呼び出し元の Promise は通常完了しない。
+   */
+  async function beginRedirectAuth_() {
+    const clientId = getClientId_();
+    if (!clientId) throw new Error('GOOGLE_CLIENT_ID が未設定です');
+    if (!window.crypto || !crypto.subtle) {
+      throw new Error('このブラウザでは安全な OAuth（PKCE）を利用できません');
+    }
+    const verifier = randomUrlSafe_(32);
+    const challenge = await pkceChallenge_(verifier);
+    const state = 'dddrv.' + randomUrlSafe_(16);
+    const redirectUri = getRedirectUri_();
+    try {
+      sessionStorage.setItem(PKCE_VERIFIER_SS, verifier);
+      sessionStorage.setItem(PKCE_STATE_SS, state);
+      sessionStorage.setItem(PKCE_REDIRECT_SS, redirectUri);
+      sessionStorage.setItem(PKCE_TOAST_SS, '1');
+    } catch (e) {
+      throw new Error('sessionStorage に書き込めません。ブラウザ設定を確認してください。');
+    }
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: getScopes_(),
+      state: state,
+      access_type: 'offline',
+      include_granted_scopes: 'true',
+      prompt: 'consent',
+      code_challenge: challenge,
+      code_challenge_method: 'S256'
+    });
+    window.location.assign('https://accounts.google.com/o/oauth2/v2/auth?' + params.toString());
+    return new Promise(function () {});
+  }
+
+  /**
+   * 認可リダイレクト復帰時の ?code= / ?error= を処理する。
+   * @returns {Promise<{handled:boolean, ok?:boolean, justConnected?:boolean, error?:string}>}
+   */
+  async function consumeOAuthRedirect_() {
+    let params;
+    try {
+      params = new URLSearchParams(window.location.search);
+    } catch (e) {
+      return { handled: false };
+    }
+    const state = params.get('state') || '';
+    const code = params.get('code');
+    const oauthError = params.get('error');
+    if (!state || state.indexOf('dddrv.') !== 0) return { handled: false };
+    if (!code && !oauthError) return { handled: false };
+
+    const expectedState = sessionStorage.getItem(PKCE_STATE_SS) || '';
+    const verifier = sessionStorage.getItem(PKCE_VERIFIER_SS) || '';
+    const redirectUri = sessionStorage.getItem(PKCE_REDIRECT_SS) || getRedirectUri_();
+    const wantToast = sessionStorage.getItem(PKCE_TOAST_SS) === '1';
+    sessionStorage.removeItem(PKCE_STATE_SS);
+    sessionStorage.removeItem(PKCE_VERIFIER_SS);
+    sessionStorage.removeItem(PKCE_REDIRECT_SS);
+    sessionStorage.removeItem(PKCE_TOAST_SS);
+    stripOAuthParamsFromUrl_();
+
+    if (oauthError) {
+      return {
+        handled: true,
+        ok: false,
+        error: params.get('error_description') || oauthError
+      };
+    }
+    if (!expectedState || state !== expectedState) {
+      return { handled: true, ok: false, error: 'OAuth state が一致しません。もう一度「Drive を接続」してください。' };
+    }
+    if (!verifier) {
+      return { handled: true, ok: false, error: 'OAuth 検証情報が見つかりません。もう一度接続してください。' };
+    }
+    try {
+      await exchangeCodeForTokens_(code, redirectUri, verifier);
+      return { handled: true, ok: true, justConnected: wantToast };
+    } catch (e) {
+      return { handled: true, ok: false, error: String(e.message || e) };
+    }
+  }
+
   /**
    * @param {{interactive?: boolean}} opts
-   * interactive=false のときはポップアップを出さず、キャッシュが無ければ失敗する。
-   * GAS① リダイレクト復帰など「ユーザー操作なし」の経路では interactive:false を使うこと。
+   * interactive=false のときはリダイレクトせず、キャッシュ／refresh が無ければ失敗する。
+   * GAS① 復帰など「ユーザー操作なし」の経路では interactive:false を使うこと。
    */
   async function ensureAuthorized_(opts) {
     opts = opts || {};
     const interactive = opts.interactive !== false;
     migrateLegacyToken_();
-    const token = localStorage.getItem(tokenStorageKey_());
-    const exp = parseInt(localStorage.getItem(tokenExpStorageKey_()) || '0', 10);
-    if (token && Date.now() < exp) return token;
-    if (!interactive) {
-      const err = new Error('Drive へのアクセスが許可されていません。画面の「Drive を接続」を押してください。');
-      err.code = 'drive_auth_required';
-      throw err;
+    if (hasValidAccessToken_()) {
+      return localStorage.getItem(tokenStorageKey_());
     }
     if (authPromise) return authPromise;
     authPromise = (async function () {
-      try {
-        return await requestAccessToken_(token ? '' : 'consent');
-      } catch (e) {
-        if (!token) throw e;
-        clearAuth_();
-        return await requestAccessToken_('consent');
+      if (getRefreshToken_()) {
+        try {
+          return await refreshAccessToken_();
+        } catch (e) {
+          if (!interactive) throw e;
+        }
       }
+      if (!interactive) {
+        const err = new Error('Drive へのアクセスが許可されていません。画面の「Drive を接続」を押してください。');
+        err.code = 'drive_auth_required';
+        throw err;
+      }
+      return beginRedirectAuth_();
     })().finally(function () {
       authPromise = null;
     });
@@ -278,8 +484,19 @@ const UserDriveModule = (function () {
   }
 
   function clearAuth_() {
+    migrateLegacyToken_();
     localStorage.removeItem(tokenStorageKey_());
     localStorage.removeItem(tokenExpStorageKey_());
+    localStorage.removeItem(refreshStorageKey_());
+    localStorage.removeItem(refreshObtainedStorageKey_());
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_EXP_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(REFRESH_OBTAINED_KEY);
+  }
+
+  function getRefreshSoftTtlMs_() {
+    return REFRESH_SOFT_TTL_MS;
   }
 
   async function driveList_(query) {
@@ -1090,7 +1307,10 @@ const UserDriveModule = (function () {
     ensureAuthorized: ensureAuthorized_,
     ensureUserDataEnvironment: ensureUserDataEnvironment_,
     retryAuthorization: retryAuthorization_,
+    consumeOAuthRedirect: consumeOAuthRedirect_,
     clearAuth: clearAuth_,
+    getRedirectUri: getRedirectUri_,
+    refreshSoftTtlMs: getRefreshSoftTtlMs_,
     dispatch: dispatch_
   };
 })();

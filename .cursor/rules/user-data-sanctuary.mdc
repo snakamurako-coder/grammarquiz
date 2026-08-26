@@ -22,12 +22,13 @@ alwaysApply: false
 ## 効いている設定（壊したら戻す）
 
 1. 存在確認は **`files.get`**（`q=id=` 禁止）
-2. 「Drive を接続」ボタン（ページ読込直後の自動 OAuth 禁止）
-3. `ensureAuthorized_({ interactive })`
-4. アカウント別 OAuth／meta + migrate
+2. 「Drive を接続」→ **同タブ・リダイレクト + PKCE + refresh_token**（ポップアップ禁止・自動 OAuth 禁止）
+3. `ensureAuthorized_({ interactive })` / `apiFetch_` は非対話。起動時 `consumeOAuthRedirect`
+4. アカウント別 OAuth／meta + migrate（access / refresh）
 5. マイ単語帳: 開始=キャッシュ / 更新=modifiedTime→A列指紋→必要時のみフル読込
 6. `USER_BRIDGE_WRITE_OPS` に `upsertSetCacheLog` を含める
 7. `VOCAB_HEADERS` 変更時は生成プロンプト同期
+8. 1ヶ月以上の再同意なしには OAuth 同意画面の **本番** 化が必要（テストは refresh 7日）
 
 ## 触る前に確認
 

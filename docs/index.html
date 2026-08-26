@@ -659,7 +659,7 @@ body.pool-match-active .game-footer {
       <p style="margin-bottom: 20px; font-size: 0.9em; color: #777;">どちらかの方法でサインインしてください。ホワイトリスト照合後に学習画面へ進みます。</p>
       <p style="margin: 0 auto 8px; max-width: 320px; font-size: 0.85em; font-weight: bold; color: #455a64; text-align: left;">Googleでサインイン</p>
       <div id="google-signin-container" style="display:flex;justify-content:center;margin:0 auto 4px;"></div>
-      <p style="margin: 0 auto 18px; max-width: 320px; font-size: 0.8em; color: #888; text-align: left;">このページ上でログインします。初回は Drive・スプレッドシートへのアクセス許可も求められます（マイ単語帳・学習記録の保存に必要）。</p>
+      <p style="margin: 0 auto 18px; max-width: 320px; font-size: 0.8em; color: #888; text-align: left;">このページ上でログインします。マイ単語帳・学習記録を使うときは、ログイン後に「Drive を接続」で Google の許可画面へ進みます（ポップアップではなく同じタブで開きます）。</p>
       <p style="margin: 0 auto 8px; max-width: 320px; font-size: 0.85em; font-weight: bold; color: #455a64; text-align: left;">Googleアカウントでログイン（GAS経由）</p>
       <button type="button" id="login-via-gas-btn" class="btn-primary" style="max-width:320px;margin:0 auto;display:block;">GAS経由でログイン</button>
       <p style="margin: 8px auto 0; max-width: 320px; font-size: 0.8em; color: #888; text-align: left;">学校アカウントで上のボタンが出ない場合はこちらです。</p>
@@ -990,7 +990,7 @@ body.pool-match-active .game-footer {
               <input type="text" id="register-sheet-name" value="デフォルト">
               <a id="register-open-book-btn" class="btn-small" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">スプレッドシートを開く</a>
             </div>
-            <p class="register-dest-hint">登録先はあなたの Google Drive「DigitalDrill_MyData / マイ単語帳」です。Google ログイン時に Drive 権限を許可してください。</p>
+            <p class="register-dest-hint">登録先はあなたの Google Drive「DigitalDrill_MyData / マイ単語帳」です。「Drive を接続」で許可してください。</p>
           </div>
           <div id="register-msg" style="margin-top:4px;font-weight:bold;"></div>
         </div>
@@ -1891,7 +1891,7 @@ function showDriveConnectBanner_() {
     el.style.cssText = 'margin-top:12px;padding:12px;border:1px solid #ffcc80;background:#fff8e1;border-radius:8px;text-align:left;';
     el.innerHTML = ''
       + '<p style="margin:0 0 8px;font-size:0.92em;color:#e65100;font-weight:bold;">マイ単語帳・学習記録のため、Google Drive の接続が必要です</p>'
-      + '<p style="margin:0 0 10px;font-size:0.85em;color:#666;">GAS 経由ログイン後は、ブラウザが自動ポップアップを止めることがあります。下のボタンを押して許可してください（組織の権限不足ではありません）。</p>'
+      + '<p style="margin:0 0 10px;font-size:0.85em;color:#666;">下のボタンで Google の許可画面へ進みます（同じタブで開くため、ポップアップブロックの影響を受けません）。一度許可すると、しばらくは再接続なしで利用できます。</p>'
       + '<button type="button" id="drive-connect-btn" class="btn-primary" style="width:auto;min-width:160px;padding:10px 16px;">Drive を接続</button>';
     profile.appendChild(el);
     const btn = document.getElementById('drive-connect-btn');
@@ -1930,7 +1930,7 @@ async function retryDriveAccess_() {
 window.retryDriveAccess_ = retryDriveAccess_;
 window.showDriveConnectBanner_ = showDriveConnectBanner_;
 
-/** ログイン後: キャッシュ済みトークンがあれば環境準備。無ければバナーでユーザー操作を待つ（ポップアップ阻止対策） */
+/** ログイン後: refresh/access キャッシュがあれば環境準備。無ければバナーでユーザー操作を待つ（リダイレクト OAuth） */
 function prepareDriveAfterLogin_() {
   if (!window.UserDriveModule || !UserDriveModule.isEnabled()) {
     return refreshUserDataAfterLogin_();
@@ -8856,6 +8856,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (window.ReadingSessionModule) ReadingSessionModule.bindEvents();
 
   const params = new URLSearchParams(window.location.search);
+  if (window.UserDriveModule && UserDriveModule.consumeOAuthRedirect) {
+    try {
+      const oauthRes = await UserDriveModule.consumeOAuthRedirect();
+      if (oauthRes && oauthRes.handled && oauthRes.ok === false) {
+        showToast_('Drive 接続に失敗しました: ' + (oauthRes.error || '不明なエラー'));
+      } else if (oauthRes && oauthRes.handled && oauthRes.ok && oauthRes.justConnected) {
+        showToast_('Drive に接続しました。マイフォルダを準備します…');
+      }
+    } catch (e) {
+      console.warn('Drive OAuth 復帰処理:', e.message || e);
+    }
+  }
   captureAuthFromUrl_(params);
   VocabLaunchConfig.captureFromUrl_(params);
 

@@ -4,8 +4,13 @@ window.DIGITALDRILL_CONFIG = {
   API_URL: 'https://script.google.com/macros/s/AKfycbwZlw4Q3SGI06YRHogjImWKc25jtLaKAVeEyuAwY0SCY34PvmI14W1LRpRzPxWvTgI/exec',
   /** GAS① ユーザー権限デプロイの exec URL（認証） */
   DASHBOARD_URL: 'https://script.google.com/macros/s/AKfycbxN9pnUp_mG6QHBKJz2WPaS-YqZlrhUaSI1XjTc3aXbmivNowfQPAi1Vi0WmpmfcDSo/exec',
-  /** Google Identity Services（Pages 上のログインボタン用） */
+  /** Google Identity Services（Pages 上のログインボタン用）／Drive OAuth（PKCE）兼用 */
   GOOGLE_CLIENT_ID: '505252303455-84r495bnnsgiefcrv24ro2qtohlgbk2h.apps.googleusercontent.com',
+  /**
+   * Drive OAuth のリダイレクト URI（GCP「承認済みのリダイレクト URI」と一致必須）。
+   * 未設定時は location.origin + pathname を使うが、/ と /index.html の揺れを避けるため明示推奨。
+   */
+  GOOGLE_OAUTH_REDIRECT_URI: 'https://snakamurako-coder.github.io/grammarquiz/',
   /** ユーザー Drive 操作用 OAuth スコープ（GCP で Drive API / Sheets API を有効化し、同意画面に登録） */
   GOOGLE_DRIVE_SCOPES: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive',
   /**

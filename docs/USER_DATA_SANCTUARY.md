@@ -5,34 +5,37 @@
 
 ---
 
-## 0. 動作確認済みスナップショット（2026-08-26）
+## 0. 動作確認済みスナップショット（2026-08-27）
 
 | 項目 | 値 |
 |---|---|
-| **確認** | 利用者マイドライブへのフォルダ／ブック生成・参照が**修復成功**（ユーザー確認済み） |
-| 反映コミット例 | `a2119f7`（Form引き継ぎ書＋DriveOauth回り修正）前後の Pages（`user-drive.js` / `index.html`） |
-| 実装の正 | Pages → `UserBridge` → `UserDriveModule` → GCP OAuth → Drive/Sheets REST |
+| **確認** | Drive OAuth を **同タブ・リダイレクト + PKCE + refresh_token** に変更（ポップアップ廃止）。旧 Token Client 経路からの移行は「Drive を接続」1回 |
+| 実装の正 | Pages → `UserBridge` → `UserDriveModule` → GCP OAuth（認可コード）→ Drive/Sheets REST |
 | 保存先 | マイドライブ直下 `DigitalDrill_MyData/` → `マイ単語帳` / `DigitalDrill学習記録` |
-| 初回接続 UI | プロフィール下の **「Drive を接続」**（`#drive-connect-banner`） |
+| 初回接続 UI | プロフィール下の **「Drive を接続」**（`#drive-connect-banner`）→ 同タブで Google 許可画面 |
 
 ### 効いている設定・実装要点（壊したら戻す）
 
 1. **存在確認は `files.get`** — `driveVerifyFolder_` / `driveVerifyOwnedInFolder_`。`files.list` の `q=id='…'` は **Drive API 非対応**で常に失敗する（過去の主因）。
-2. **ログイン ≠ Drive 許可** — アプリログイン（GAS① `authToken`）と Drive OAuth（`dd_google_access_token:<account>`）は別物。
-3. **自動ポップアップ禁止（ページ読込直後）** — GAS① リダイレクト復帰後はブラウザが OAuth をブロックしやすい。`prepareDriveAfterLogin_()` は:
-   - キャッシュ済みトークンあり → `ensureUserDataEnvironment({ interactive: false })`
-   - なし → 「Drive を接続」バナーのみ（ユーザー操作で `retryDriveAccess_`）
-4. **`ensureAuthorized_({ interactive })`** — `interactive: false` のときはポップアップを出さず失敗する。ユーザー操作経路だけ `true`。
-5. **メタ／トークンはアカウント別キー** — `dd_user_drive_meta:<account>` / `dd_google_access_token:<account>` + `migrateLegacyToken_` / `migrateLegacyMeta_`。
-6. **GAS①・GAS② にユーザー Drive 操作を書かない** — 「Dashboard が怪しい」ように見えても、フォルダ作成を GAS に戻さない（保存先不一致でデータが消えたように見える）。
+2. **ログイン ≠ Drive 許可** — アプリログイン（GAS① `authToken`）と Drive OAuth（`dd_google_access_token:<account>` / `dd_google_refresh_token:<account>`）は別物。
+3. **ポップアップ禁止・自動 OAuth 禁止** — Drive 許可は **同タブ・リダイレクト**（PKCE）。`prepareDriveAfterLogin_()` は:
+   - access 有効 or refresh あり → `ensureUserDataEnvironment({ interactive: false })`（サイレント refresh）
+   - なし → 「Drive を接続」バナーのみ（ユーザー操作でリダイレクト）
+4. **`ensureAuthorized_({ interactive })`** — `interactive: false` のときはリダイレクトせず失敗する。ユーザー操作経路だけ `true`。`apiFetch_` は常に非対話。
+5. **メタ／トークンはアカウント別キー** — `dd_user_drive_meta:<account>` / `dd_google_access_token:<account>` / `dd_google_refresh_token:<account>` + migrate。
+6. **GAS①・GAS② にユーザー Drive 操作を書かない** — トークン交換も Pages（PKCE）で完結。フォルダ作成を GAS に戻さない。
+7. **GCP リダイレクト URI** — `GOOGLE_OAUTH_REDIRECT_URI` または `origin+pathname` を「承認済みのリダイレクト URI」に登録。
+8. **約1ヶ月の再同意なし** — `refresh_token` で access を更新。OAuth 同意画面が **テスト** のままだと Google 側で refresh が **7日** で失効する。1ヶ月以上狙うなら同意画面を **本番** にする。
 
 ### 運用時の確認手順（デプロイ後）
 
-1. Pages をハードリロード
-2. ログイン（GAS① 経由でも可）
-3. プロフィール下 **「Drive を接続」** → Google の Drive/Sheets 許可
-4. マイドライブに `DigitalDrill_MyData` / `マイ単語帳` / `DigitalDrill学習記録` がある
-5. マイページに学習記録が出る／単語の「マイ単語帳」が選べる
+1. GCP に Pages のリダイレクト URI を登録
+2. Pages をハードリロード
+3. ログイン（GAS① 経由でも可）
+4. プロフィール下 **「Drive を接続」** → 同じタブで Google の Drive/Sheets 許可 → Pages に戻る
+5. マイドライブに `DigitalDrill_MyData` / `マイ単語帳` / `DigitalDrill学習記録` がある
+6. マイページに学習記録が出る／単語の「マイ単語帳」が選べる
+7. ブラウザを閉じたあと再度開いても、バナーなしで Drive が使える（refresh 有効時）
 
 ### よくある切り分け
 
@@ -40,7 +43,9 @@
 |---|---|
 | Form 集計 SS には行があるがマイページが空 | **正常な別経路**。Form 成功 ≠ Drive 成功。まず「Drive を接続」 |
 | GAS① ダッシュボードは動くがマイフォルダが無い | GAS① はユーザー Drive を作らない。Pages の OAuth を見る |
-| 「組織の権限」に見える | 多くはポップアップブロックか OAuth 未接続。ボタン経由で再許可 |
+| `redirect_uri_mismatch` | GCP のリダイレクト URI と Pages の URL が不一致 |
+| 約1週間で再接続を求められる | 同意画面がテストモード。本番化で長期 refresh が可能 |
+| 「組織の権限」に見える | 多くは OAuth 未接続や URI 不一致。ボタン経由で再許可 |
 
 ---
 
@@ -61,11 +66,12 @@
 ```text
 【ログイン】Pages → GAS①（?action=auth）→ AuthGateService（authToken のみ）
 
-【Drive 初回】プロフィール「Drive を接続」→ GIS Token Client（ユーザー操作）
-           → ensureUserDataEnvironment({ interactive: true })
+【Drive 初回】プロフィール「Drive を接続」→ 同タブ OAuth リダイレクト（PKCE・offline）
+           → consumeOAuthRedirect → refresh_token 保存
+           → ensureUserDataEnvironment({ interactive: false })
            → DigitalDrill_MyData + 両スプレッドシート作成
 
-【ユーザー操作】Pages → UserBridge → UserDriveModule → GCP OAuth → Drive/Sheets API
+【ユーザー操作】Pages → UserBridge → UserDriveModule → access/refresh → Drive/Sheets API
   ├─ 単語登録     registerVocabWords
   ├─ 学習状態     getItemStates / upsertItemStates
   ├─ セッションログ saveSessionLog / startSession / countSessionAttempts
@@ -79,8 +85,8 @@
 
 | 種類 | 保存キー | 用途 | 取得方法 |
 |---|---|---|---|
-| **アプリログイン** | `digitaldrill_auth_token` 等 | ホワイトリスト・UI 表示 | GAS① 認証 |
-| **Drive OAuth** | `dd_google_access_token:<account>` 等 | マイドライブ読み書き | GIS `initTokenClient`（「Drive を接続」またはキャッシュ） |
+| **アプリログイン** | `digitaldrill_auth_token` 等 | ホワイトリスト・UI 表示 | GAS① 認証（約90分） |
+| **Drive OAuth** | `dd_google_access_token:<account>` / `dd_google_refresh_token:<account>` | マイドライブ読み書き | 同タブ・リダイレクト（PKCE）。以降は refresh で更新 |
 
 ログイン成功 ≠ Drive 権限済み。詳細は §0。
 
@@ -214,11 +220,13 @@ VocabRegisterModule.submitCard_
 
 ### 必須ルール
 
-1. **アカウント別キー**を使う: `dd_google_access_token:<account>` / `dd_google_token_expiry:<account>`
-2. **`migrateLegacyToken_()` を削除しない** — 旧グローバルキー `dd_google_access_token` からの移行
-3. **`ensureAuthorized_({ interactive })`** — 期限切れ時はサイレント更新 → 失敗したら `consent`。非対話経路ではポップアップしない
+1. **アカウント別キー**を使う: `dd_google_access_token:<account>` / `dd_google_token_expiry:<account>` / `dd_google_refresh_token:<account>`
+2. **`migrateLegacyToken_()` を削除しない** — 旧グローバルキーからの移行
+3. **`ensureAuthorized_({ interactive })`** — 期限切れ時は refresh → 失敗したら（対話時のみ）リダイレクト。非対話経路ではリダイレクトしない
 4. キー形式変更時は**必ず移行処理**を添える（移行なしのキー変更は禁止）
-5. **ページ読込直後の自動 `requestAccessToken` は禁止** — 「Drive を接続」ボタン経由にする（§0）
+5. **ポップアップ型 `requestAccessToken` / Token Client は使わない** — 同タブ・リダイレクト + PKCE（§0）
+6. **ページ読込直後の自動 OAuth 開始は禁止** — 「Drive を接続」ボタン経由
+7. 起動時は `consumeOAuthRedirect` で `?code=` を処理してからセッション復帰
 
 ### account サフィックス
 
@@ -244,7 +252,8 @@ VocabRegisterModule.submitCard_
 | `UserBridge.queueOp` の try/catch 削除 | OAuth 拒否が未処理例外に |
 | `dispatch_` が throw のみ（status 返却なし） | UI が「登録失敗」の詳細を失う |
 | 保存先をマイドライブ以外に変更 | 既存ユーザーのデータが見えなくなる |
-| `onLoginSuccess` でユーザー操作なしに OAuth ポップアップ | GAS① 復帰後にブロック → フォルダ未作成 |
+| `onLoginSuccess` でユーザー操作なしに OAuth 開始（リダイレクト含む） | GAS① 復帰直後に意図しない遷移・未接続 |
+| GIS Token Client / ポップアップ OAuth の復活 | ポップアップブロックで接続失敗 |
 | `files.list` の `q=id='…'` で存在確認 | 検証が常に失敗し meta が不安定 |
 | `driveVerifyOwnedRootFolder_` 風の誤った root 判定のみ | meta が毎回消える |
 | `code.gs` にユーザー Drive 操作を再実装 | 聖域の二重化。GAS①「が怪しい」時も戻さない |
@@ -259,7 +268,10 @@ VocabRegisterModule.submitCard_
 - [ ] 保存先が `DigitalDrill_MyData`（マイドライブ直下）のままか
 - [ ] ログイン（GAS①）と Drive OAuth が分離されているか
 - [ ] 存在確認が `files.get` か（`q=id=` を使っていないか）
-- [ ] ログイン直後に自動ポップアップしていないか（バナー＋ユーザー操作）
+- [ ] ログイン直後に自動 OAuth（リダイレクト含む）していないか（バナー＋ユーザー操作）
+- [ ] Drive 接続が同タブ・リダイレクト（ポップアップでない）か
+- [ ] `consumeOAuthRedirect` が起動時に走るか
+- [ ] GCP リダイレクト URI が Pages URL と一致しているか
 - [ ] `UserBridge.call` の戻りが `{ status, message? }` 形式か
 - [ ] 書込 op が `USER_BRIDGE_WRITE_OPS` / `SendOutbox` に載っているか
 - [ ] マイ単語帳の学習開始がキャッシュのみか（開始時に getVocabWords を呼ばないか）
@@ -302,5 +314,6 @@ VocabRegisterModule.submitCard_
 | 日付 | 内容 |
 |---|---|
 | 2026-08-23 | ensureUserDataEnvironment・フォルダ検証修正・setupVocabBook 堅牢化 |
+| 2026-08-27 | Drive OAuth を同タブ・リダイレクト + PKCE + refresh_token に変更（ポップアップ廃止・約1ヶ月再同意目標） |
 | 2026-08-26 | Drive 検証を files.get に修正。「Drive を接続」ボタン。§0 動作確認済みを追記（修復成功） |
 | 2026-08-26 | マイ単語帳ローカルキャッシュ・学習セット更新記録シート（§4-b）。開始はキャッシュのみ |
