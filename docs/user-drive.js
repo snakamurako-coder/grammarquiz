@@ -1190,7 +1190,7 @@ const UserDriveModule = (function () {
     if (values.length <= 1) return { status: 'success', data: [] };
     const headers = values[0];
     const logs = [];
-    for (let i = values.length - 1; i >= 1 && logs.length < 50; i--) {
+    for (let i = values.length - 1; i >= 1 && logs.length < 60; i--) {
       logs.push(normalizeSessionLog_(rowToObj_(headers, values[i])));
     }
     return { status: 'success', data: logs };

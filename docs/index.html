@@ -139,7 +139,7 @@ button.is-busy::after,
 .mode-tab { flex: 1; min-width: 100px; min-height: 44px; padding: 10px 12px; border: 2px solid #cfd8dc; border-radius: 10px; background: #fff; font-weight: bold; cursor: pointer; font-size: 0.9em; }
 .mode-tab.active { background: #e3f2fd; border-color: var(--c-primary); color: var(--c-primary-dark); }
 
-/* 文法：出題数（プルダウン + 指定入力） */
+/* 出題数（プルダウン + 指定入力）— 文法・単語共通 */
 .grammar-count-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-top: 6px; }
 .grammar-count-controls select { min-height: var(--tap); font-size: 16px; flex: 0 1 auto; min-width: 120px; }
 .grammar-count-specify { display: inline-flex; align-items: center; gap: 6px; margin: 0; white-space: nowrap; font-size: 0.92em; }
@@ -559,10 +559,15 @@ body.pool-match-active .game-footer {
 .grammar-area-card .card-title { color: #6a1b9a; border-bottom-color: #f3e5f5; }
 
 .dashboard-content { font-size: 0.92em; color: #555; }
-.log-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid #f5f5f5; }
+.log-item { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 10px 0; border-bottom: 1px solid #f5f5f5; }
 .log-item:last-child { border-bottom: none; }
 .log-title { font-weight: bold; color: var(--c-text); margin-bottom: 4px; word-break: break-word; }
 .log-meta { font-size: 0.8em; color: #888; }
+.log-settings { font-size: 0.8em; color: #555; margin-top: 6px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.log-item-main { flex: 1; min-width: 0; }
+.log-item-aside { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+.log-reproduce-btn { font-size: 0.8em; padding: 6px 10px; min-height: 36px; border: 1px solid var(--c-primary); background: #e3f2fd; color: var(--c-primary-dark); border-radius: 8px; cursor: pointer; font-weight: bold; }
+.log-reproduce-btn:hover { background: #bbdefb; }
 .log-score { font-weight: bold; font-size: 1.1em; padding: 4px 8px; border-radius: 6px; flex-shrink: 0; }
 
 .score-perfect { background-color: #e8f5e9; color: #2e7d32; }
@@ -682,7 +687,7 @@ body.pool-match-active .game-footer {
       <button type="button" class="mode-tab" data-mode="manage">マイページ</button>
     </div>
 
-    <div class="setting-section" id="profile-container">
+    <div class="setting-section" id="profile-container" style="display: none;">
       <div class="profile-header">
         <div class="section-title">0. ユーザー情報（認証済み）</div>
         <button type="button" id="logout-btn" class="profile-logout-btn">ログアウト</button>
@@ -890,12 +895,25 @@ body.pool-match-active .game-footer {
         <div class="section-title">4. 出題設定</div>
         <div class="form-group">
           <label>出題数</label>
-          <select id="vocab-question-count">
-            <option value="all">すべて</option>
-            <option value="10">10問</option>
-            <option value="20">20問</option>
-            <option value="30">30問</option>
-          </select>
+          <div class="grammar-count-controls">
+            <select id="vocab-question-count" aria-label="出題数プリセット">
+              <option value="all">すべて</option>
+              <option value="5">5問</option>
+              <option value="10" selected>10問</option>
+              <option value="15">15問</option>
+              <option value="20">20問</option>
+              <option value="30">30問</option>
+            </select>
+            <label class="grammar-count-specify check-item" for="vocab-question-count-specify">
+              <input type="checkbox" id="vocab-question-count-specify"> 問題数を指定する
+            </label>
+            <div class="number-stepper is-disabled" id="vocab-count-stepper">
+              <button type="button" class="stepper-btn" id="vocab-count-up" aria-label="問題数を1増やす" disabled>△</button>
+              <input type="number" id="vocab-question-count-custom" min="1" max="200" value="10" inputmode="numeric" aria-label="指定する問題数" disabled>
+              <button type="button" class="stepper-btn" id="vocab-count-down" aria-label="問題数を1減らす" disabled>▽</button>
+            </div>
+          </div>
+          <p class="filter-axis-hint" style="margin-top:6px;margin-bottom:0;">プリセット「すべて」のときは条件に合う語から出題可能なだけ出します。「問題数を指定する」にチェックすると右の数値（最大200）が使われます。</p>
         </div>
         <div class="form-group" id="vocab-choice-count-wrap">
           <label>選択肢数（各問専用）</label>
@@ -1017,7 +1035,8 @@ body.pool-match-active .game-footer {
       </div>
       <div id="manage-logs-panel" style="display:none;">
         <div class="setting-section" id="mypage-container-inner">
-          <div class="section-title">学習記録（直近）</div>
+          <div class="section-title">学習記録（直近30回）</div>
+          <p style="font-size:0.85em;color:#666;margin:0 0 10px;">各行の「再現」で、当時の出題設定だけを学習タブに復元します（出た問題そのものは再現しません）。</p>
           <div id="user-logs-list">ログイン後に読み込まれます</div>
         </div>
       </div>
@@ -5016,10 +5035,104 @@ const VocabSettingsModule = (() => {
     return el ? el.value : fallback;
   }
 
+  function clampVocabCount_(value) {
+    const n = parseInt(value, 10);
+    if (!n || n < 1) return 1;
+    if (n > 200) return 200;
+    return n;
+  }
+
+  function getQuestionCount_() {
+    const specify = document.getElementById('vocab-question-count-specify');
+    const customInput = document.getElementById('vocab-question-count-custom');
+    if (specify && specify.checked && customInput) {
+      return String(clampVocabCount_(customInput.value));
+    }
+    const sel = document.getElementById('vocab-question-count');
+    return sel ? sel.value : '10';
+  }
+
+  function syncVocabQuestionCountUi_() {
+    const specify = document.getElementById('vocab-question-count-specify');
+    const select = document.getElementById('vocab-question-count');
+    const stepper = document.getElementById('vocab-count-stepper');
+    const customInput = document.getElementById('vocab-question-count-custom');
+    const upBtn = document.getElementById('vocab-count-up');
+    const downBtn = document.getElementById('vocab-count-down');
+    if (!specify || !select || !stepper || !customInput) return;
+
+    const homework = VocabLaunchConfig.isHomeworkMode();
+    const useCustom = !homework && specify.checked;
+    select.disabled = homework || useCustom;
+    specify.disabled = homework;
+    customInput.disabled = !useCustom;
+    if (upBtn) upBtn.disabled = !useCustom;
+    if (downBtn) downBtn.disabled = !useCustom;
+    stepper.classList.toggle('is-disabled', !useCustom);
+
+    if (useCustom) {
+      customInput.value = String(clampVocabCount_(customInput.value));
+    } else if (select.value !== 'all') {
+      customInput.value = select.value;
+    }
+  }
+
+  function bindVocabQuestionCountUi_() {
+    const specify = document.getElementById('vocab-question-count-specify');
+    const select = document.getElementById('vocab-question-count');
+    const customInput = document.getElementById('vocab-question-count-custom');
+    const upBtn = document.getElementById('vocab-count-up');
+    const downBtn = document.getElementById('vocab-count-down');
+    if (!specify || !select || !customInput) return;
+
+    specify.addEventListener('change', function () {
+      syncVocabQuestionCountUi_();
+      persistSettings_();
+    });
+    select.addEventListener('change', function () {
+      if (!specify.checked && select.value !== 'all') {
+        customInput.value = select.value;
+      }
+      persistSettings_();
+    });
+    customInput.addEventListener('change', function () {
+      customInput.value = String(clampVocabCount_(customInput.value));
+      persistSettings_();
+    });
+    customInput.addEventListener('input', function () {
+      if (customInput.value === '') return;
+      const n = parseInt(customInput.value, 10);
+      if (n > 200) customInput.value = '200';
+    });
+    if (upBtn) {
+      upBtn.addEventListener('click', function () {
+        if (!specify.checked) {
+          specify.checked = true;
+          syncVocabQuestionCountUi_();
+        }
+        customInput.value = String(clampVocabCount_((parseInt(customInput.value, 10) || 1) + 1));
+        persistSettings_();
+      });
+    }
+    if (downBtn) {
+      downBtn.addEventListener('click', function () {
+        if (!specify.checked) {
+          specify.checked = true;
+          syncVocabQuestionCountUi_();
+        }
+        customInput.value = String(clampVocabCount_((parseInt(customInput.value, 10) || 1) - 1));
+        persistSettings_();
+      });
+    }
+    syncVocabQuestionCountUi_();
+  }
+
   function persistSettings_() {
     if (restoring_) return;
     const dummyMethodEl = document.getElementById('vocab-dummy-method');
     const affixTypeEl = document.querySelector('input[name="vocab-affix-type"]:checked');
+    const specify = document.getElementById('vocab-question-count-specify');
+    const customInput = document.getElementById('vocab-question-count-custom');
     writeSettings({
       bookType: (document.getElementById('vocab-book-type') || {}).value || 'preset',
       bookName: (document.getElementById('vocab-book-select') || {}).value || '',
@@ -5028,7 +5141,9 @@ const VocabSettingsModule = (() => {
       grains: checkedValues_('vocab-axis-grain'),
       response: getRadio_('vocab-response', 'choice'),
       choiceStyle: getRadio_('vocab-choice-style', 'dedicated'),
-      questionCount: (document.getElementById('vocab-question-count') || {}).value || '10',
+      questionCount: getQuestionCount_(),
+      questionCountSpecify: !!(specify && specify.checked),
+      questionCountCustom: customInput ? String(customInput.value || '') : '',
       choiceCount: (document.getElementById('vocab-choice-count') || {}).value || '4',
       poolDummyCount: (function () {
         const n = parseInt((document.getElementById('vocab-pool-dummy-count') || {}).value, 10);
@@ -5077,8 +5192,27 @@ const VocabSettingsModule = (() => {
       if (saved.grains && saved.grains.length) setCheckedValues_('vocab-axis-grain', saved.grains);
       if (saved.response) setRadio_('vocab-response', saved.response);
       if (saved.choiceStyle) setRadio_('vocab-choice-style', saved.choiceStyle);
+      const specify = document.getElementById('vocab-question-count-specify');
       const qCount = document.getElementById('vocab-question-count');
-      if (qCount && saved.questionCount) qCount.value = saved.questionCount;
+      const customInput = document.getElementById('vocab-question-count-custom');
+      if (specify) {
+        specify.checked = !!saved.questionCountSpecify;
+        if (saved.questionCountSpecify && customInput) {
+          customInput.value = String(clampVocabCount_(saved.questionCountCustom || saved.questionCount || '10'));
+        } else if (qCount && saved.questionCount) {
+          if (Array.from(qCount.options).some(function (o) { return o.value === String(saved.questionCount); })) {
+            qCount.value = String(saved.questionCount);
+          } else if (saved.questionCount !== 'all') {
+            specify.checked = true;
+            if (customInput) customInput.value = String(clampVocabCount_(saved.questionCount));
+          } else {
+            qCount.value = 'all';
+          }
+        }
+        syncVocabQuestionCountUi_();
+      } else if (qCount && saved.questionCount) {
+        qCount.value = saved.questionCount;
+      }
       const cCount = document.getElementById('vocab-choice-count');
       if (cCount && saved.choiceCount) cCount.value = String(saved.choiceCount);
       const dummyCountEl = document.getElementById('vocab-pool-dummy-count');
@@ -5313,7 +5447,12 @@ const VocabSettingsModule = (() => {
       useStt: axes.response === 'speech',
       homeworkMode: homeworkMode,
       homeworkPerSection: (launch && launch.homeworkPerSection) || 5,
-      questionCount: document.getElementById('vocab-question-count').value,
+      questionCount: getQuestionCount_(),
+      questionCountSpecify: !!(document.getElementById('vocab-question-count-specify') || {}).checked,
+      questionCountCustom: (function () {
+        const el = document.getElementById('vocab-question-count-custom');
+        return el ? String(el.value || '') : '';
+      })(),
       choiceCount: choiceCount,
       poolDummyCount: poolDummyCount,
       includeUnknown: document.getElementById('vocab-include-unknown').checked,
@@ -5344,7 +5483,6 @@ const VocabSettingsModule = (() => {
   function syncHomeworkUi_() {
     const homework = VocabLaunchConfig.isHomeworkMode();
     const banner = document.getElementById('vocab-homework-banner');
-    const countSelect = document.getElementById('vocab-question-count');
     const launch = VocabLaunchConfig.get();
     if (banner) {
       if (homework) {
@@ -5356,7 +5494,7 @@ const VocabSettingsModule = (() => {
         banner.textContent = '';
       }
     }
-    if (countSelect) countSelect.disabled = homework;
+    syncVocabQuestionCountUi_();
   }
 
   function init() {
@@ -5383,6 +5521,7 @@ const VocabSettingsModule = (() => {
         persistSettings_();
       });
     }
+    bindVocabQuestionCountUi_();
     syncChoiceUi_();
     syncHomeworkUi_();
   }
@@ -5391,7 +5530,7 @@ const VocabSettingsModule = (() => {
     return catalog.userBooks || [];
   }
 
-  return { loadCatalog, init, getQuizOptions, refreshBookSelect, getUserBooks };
+  return { loadCatalog, init, getQuizOptions, getQuestionCount: getQuestionCount_, refreshBookSelect, getUserBooks, applySettings: applySavedSettings_ };
 })();
 
 window.VocabSettingsModule = VocabSettingsModule;
@@ -6624,6 +6763,9 @@ const ReadingSessionModule = (() => {
     currentAppMode = 'reading';
     currentReadingSetName = sessionData.setName;
     currentSessionIsPreset = false;
+    currentSessionSettings = typeof captureSessionSettingsSnapshot_ === 'function'
+      ? captureSessionSettingsSnapshot_('reading')
+      : { kind: 'reading', sheetName: sheetName, bookName: 'マイ単語帳' };
     showReadingScreen();
     renderCurrentWord();
     return true;
@@ -6954,6 +7096,10 @@ let currentVocabBookName = '';
 let currentVocabSheetName = '';
 /** 現在セッションが管理者プリセット教材か（Form 集約対象） */
 let currentSessionIsPreset = true;
+/** セッション開始時の出題設定スナップショット（学習記録の詳細・再現用。問題そのものは含まない） */
+let currentSessionSettings = null;
+/** fetchUserLogs の直近結果（再現ボタン用） */
+let lastFetchedLearningLogs_ = [];
 
 // UI要素
 const screens = {
@@ -7388,7 +7534,99 @@ const GrammarSettingsModule = (() => {
     refreshDivisions();
   });
 
-  return { init, refreshDivisions, reloadCatalog, prepareForStart, getSelectedUnits, getFilteredRows, getQuizOptions, getQuestionCount };
+  function getSessionFilters_() {
+    return {
+      dai: selectedDivisions(daiContainer),
+      sho: selectedDivisions(shoContainer),
+      area: selectedDivisions(areaContainer)
+    };
+  }
+
+  function getSessionSettings() {
+    const specify = document.getElementById('grammar-question-count-specify');
+    const customInput = document.getElementById('grammar-question-count-custom');
+    const playEl = document.querySelector('input[name="play-mode"]:checked');
+    const sortVariantEl = document.getElementById('e-sort-variant');
+    return {
+      kind: 'grammar',
+      subject: getSelectedSubjectName(),
+      units: getSelectedUnits(),
+      filters: getSessionFilters_(),
+      formatKeys: getCheckedFormatKeys(),
+      eSortVariant: sortVariantEl ? sortVariantEl.value : 'E',
+      choiceCount: parseInt((document.getElementById('g-choice-count') || {}).value, 10) || 4,
+      includeNone: !!(document.getElementById('g-include-none') || {}).checked,
+      includeUnknown: !!(document.getElementById('include-unknown') || {}).checked,
+      playMode: playEl ? playEl.value : 'normal',
+      questionCount: getQuestionCount(),
+      questionCountSpecify: !!(specify && specify.checked),
+      questionCountCustom: customInput ? String(customInput.value || '') : ''
+    };
+  }
+
+  async function applySessionSettings(settings) {
+    if (!settings || settings.kind !== 'grammar') return false;
+    const subject = settings.subject || '';
+    if (!subject) return false;
+    if (!grammarCatalog[subject]) {
+      await loadCatalog(false);
+    }
+    if (!grammarCatalog[subject]) {
+      throw new Error('学年・区分「' + subject + '」が見つかりません。キャッシュ更新後に再度お試しください。');
+    }
+    const all = readSettings();
+    all.subject = subject;
+    all.books[subject] = {
+      units: Array.isArray(settings.units) ? settings.units.slice() : [],
+      dai: (settings.filters && settings.filters.dai) || [],
+      sho: (settings.filters && settings.filters.sho) || [],
+      area: (settings.filters && settings.filters.area) || []
+    };
+    writeSettings(all);
+    renderSubjects();
+    renderUnits();
+    await refreshDivisions();
+
+    const formatKeys = settings.formatKeys || [];
+    formatList.querySelectorAll('input[type="checkbox"]').forEach(function (inp) {
+      inp.checked = formatKeys.indexOf(inp.value) >= 0;
+    });
+    updateFormatOptions();
+    const sortVariantEl = document.getElementById('e-sort-variant');
+    if (sortVariantEl && settings.eSortVariant) sortVariantEl.value = settings.eSortVariant;
+    const choiceEl = document.getElementById('g-choice-count');
+    if (choiceEl && settings.choiceCount) choiceEl.value = String(settings.choiceCount);
+    const noneEl = document.getElementById('g-include-none');
+    if (noneEl && settings.includeNone != null) noneEl.checked = !!settings.includeNone;
+    const unkEl = document.getElementById('include-unknown');
+    if (unkEl && settings.includeUnknown != null) unkEl.checked = !!settings.includeUnknown;
+
+    if (settings.playMode) {
+      const playRadio = document.querySelector('input[name="play-mode"][value="' + settings.playMode + '"]');
+      if (playRadio) playRadio.checked = true;
+    }
+    const specify = document.getElementById('grammar-question-count-specify');
+    const select = document.getElementById('grammar-question-count');
+    const customInput = document.getElementById('grammar-question-count-custom');
+    if (specify) {
+      specify.checked = !!settings.questionCountSpecify;
+      if (settings.questionCountSpecify && customInput) {
+        customInput.value = String(settings.questionCountCustom || settings.questionCount || '10');
+      } else if (select && settings.questionCount) {
+        if (Array.from(select.options).some(function (o) { return o.value === String(settings.questionCount); })) {
+          select.value = String(settings.questionCount);
+        } else {
+          specify.checked = true;
+          if (customInput) customInput.value = String(settings.questionCount);
+        }
+      }
+      syncGrammarQuestionCountUi_();
+    }
+    persistCurrent();
+    return true;
+  }
+
+  return { init, refreshDivisions, reloadCatalog, prepareForStart, getSelectedUnits, getFilteredRows, getQuizOptions, getQuestionCount, getSessionSettings, applySessionSettings };
 })();
 
 window.GrammarSettingsModule = GrammarSettingsModule;
@@ -7432,6 +7670,9 @@ elements.startBtn.addEventListener('click', async () => {
       const questions = AlgorithmModule.buildQuestionSet(generated, mode, questionCount);
 
       if (questions.length > 0) {
+        currentSessionSettings = (GrammarSettingsModule.getSessionSettings
+          ? GrammarSettingsModule.getSessionSettings()
+          : null);
         currentQuestionDataList = questions;
         totalQuestionsCount = questions.length;
         currentQuestionIndex = 0;
@@ -7504,6 +7745,7 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
       currentVocabSetName = options.bookName + ' / ' + options.sheetName;
       currentVocabBookName = options.bookName;
       currentVocabSheetName = options.sheetName;
+      currentSessionSettings = captureSessionSettingsSnapshot_('vocab');
 
       const questions = prepareVocabQuestions(words, pool, bookPool, options, null);
       if (questions.length === 0) {
@@ -7971,7 +8213,8 @@ async function saveSessionResultsUnified(modeOverride, setNameOverride) {
     timeTaken: summary.Duration_Sec,
     Set_ID: summary.Set_ID,
     Set_Name: summary.Set_Name,
-    Mode: summary.Mode
+    Mode: summary.Mode,
+    settings: currentSessionSettings || captureSessionSettingsSnapshot_(summary.Mode)
   });
   const stateRes = await ItemStateModule.syncToServer();
 
@@ -8103,6 +8346,9 @@ function enterAppAsGuest() {
   if (profileTitle) profileTitle.textContent = "0. ユーザー情報";
   if (logoutBtn) logoutBtn.style.display = 'none';
   if (mypage) mypage.style.display = 'none';
+  if (document.getElementById('profile-container')) {
+    document.getElementById('profile-container').style.display = 'none';
+  }
 
   screens.login.style.display = 'none';
   screens.settings.style.display = 'block';
@@ -8125,20 +8371,34 @@ function initModeTabs() {
   const readingPanel = document.getElementById('reading-info-panel');
   const managePanel = document.getElementById('manage-panel');
   const startBtn = document.getElementById('start-btn');
+  const profileEl = document.getElementById('profile-container');
+  const mypageEl = document.getElementById('mypage-container');
+
+  function applyModePanels_(mode) {
+    grammarPanel.style.display = mode === 'grammar' ? 'block' : 'none';
+    vocabPanel.style.display = mode === 'vocab' ? 'block' : 'none';
+    readingPanel.style.display = mode === 'reading' ? 'block' : 'none';
+    if (managePanel) managePanel.style.display = mode === 'manage' ? 'block' : 'none';
+    if (startBtn) startBtn.style.display = mode === 'grammar' ? 'block' : 'none';
+    if (profileEl) profileEl.style.display = mode === 'manage' ? 'block' : 'none';
+    if (mypageEl) mypageEl.style.display = mode === 'manage' ? 'block' : 'none';
+  }
 
   tabs.forEach(function (tab) {
     tab.addEventListener('click', function () {
       tabs.forEach(function (t) { t.classList.remove('active'); });
       tab.classList.add('active');
       const mode = tab.dataset.mode;
-      grammarPanel.style.display = mode === 'grammar' ? 'block' : 'none';
-      vocabPanel.style.display = mode === 'vocab' ? 'block' : 'none';
-      readingPanel.style.display = mode === 'reading' ? 'block' : 'none';
-      if (managePanel) managePanel.style.display = mode === 'manage' ? 'block' : 'none';
-      if (startBtn) startBtn.style.display = mode === 'grammar' ? 'block' : 'none';
-      if (mode === 'manage') loadManagePanel_();
+      applyModePanels_(mode);
+      if (mode === 'manage') {
+        loadManagePanel_();
+        fetchUserLogs().catch(function (e) { console.warn('マイページ学習記録:', e); });
+      }
     });
   });
+
+  const activeTab = document.querySelector('.mode-tab.active:not(.manage-sub-tab)');
+  applyModePanels_(activeTab && activeTab.dataset.mode ? activeTab.dataset.mode : 'grammar');
 
   document.querySelectorAll('.manage-sub-tab').forEach(function (tab) {
     tab.addEventListener('click', function () {
@@ -8518,6 +8778,249 @@ function bindLoginScreen_() {
   });
 }
 
+function captureSessionSettingsSnapshot_(mode) {
+  mode = mode || currentAppMode || 'grammar';
+  if (mode === 'vocab' && window.VocabSettingsModule && VocabSettingsModule.getQuizOptions) {
+    const opts = VocabSettingsModule.getQuizOptions();
+    const bookTypeEl = document.getElementById('vocab-book-type');
+    return {
+      kind: 'vocab',
+      bookType: bookTypeEl ? bookTypeEl.value : 'preset',
+      bookName: opts.bookName || '',
+      sheetName: opts.sheetName || '',
+      filters: opts.filters || { dai: [], chu: [], sho: [] },
+      directions: (opts.axes && opts.axes.directions) || [],
+      grains: (opts.axes && opts.axes.grains) || [],
+      response: (opts.axes && opts.axes.response) || 'choice',
+      choiceStyle: (opts.axes && opts.axes.choiceStyle) || 'dedicated',
+      formats: opts.formats || [],
+      questionCount: opts.questionCount,
+      questionCountSpecify: !!opts.questionCountSpecify,
+      questionCountCustom: opts.questionCountCustom || '',
+      choiceCount: opts.choiceCount,
+      poolDummyCount: opts.poolDummyCount,
+      includeUnknown: opts.includeUnknown,
+      includeNone: opts.includeNone,
+      dummyScope: opts.dummyScope,
+      dummyMethod: opts.dummyMethod,
+      affixType: opts.affixType,
+      affixLen: opts.affixLen,
+      homeworkMode: !!opts.homeworkMode,
+      homeworkPerSection: opts.homeworkPerSection
+    };
+  }
+  if (mode === 'reading') {
+    const sheetEl = document.getElementById('reading-sheet-select');
+    return {
+      kind: 'reading',
+      bookName: 'マイ単語帳',
+      sheetName: (sheetEl && sheetEl.value) || currentReadingSetName || ''
+    };
+  }
+  if (window.GrammarSettingsModule && GrammarSettingsModule.getSessionSettings) {
+    return GrammarSettingsModule.getSessionSettings();
+  }
+  return { kind: 'grammar' };
+}
+
+function extractSessionSettingsFromLog_(log) {
+  const detail = parseLogDetail_(log);
+  if (detail && detail.settings && typeof detail.settings === 'object') {
+    return detail.settings;
+  }
+  const mode = String(log['モード'] || detail.Mode || detail.mode || '').toLowerCase();
+  const setId = String(detail.Set_ID || detail.setId || '');
+  const setName = log['学習セット名'] || detail.Set_Name || detail.setName || '';
+  if (mode === 'vocab' || setId.indexOf('vocab:') === 0) {
+    let bookName = '';
+    let sheetName = '';
+    if (setId.indexOf('vocab:') === 0) {
+      const rest = setId.slice(6);
+      const slash = rest.indexOf('/');
+      bookName = slash >= 0 ? rest.slice(0, slash) : rest;
+      sheetName = slash >= 0 ? rest.slice(slash + 1) : '';
+    } else if (setName.indexOf(' / ') >= 0) {
+      const parts = setName.split(' / ');
+      bookName = parts[0];
+      sheetName = parts.slice(1).join(' / ');
+    }
+    return { kind: 'vocab', bookName: bookName, sheetName: sheetName, filters: { dai: [], chu: [], sho: [] } };
+  }
+  if (mode === 'reading' || setId.indexOf('reading:') === 0) {
+    let sheetName = setName;
+    if (setName.indexOf(' / ') >= 0) sheetName = setName.split(' / ').pop();
+    return { kind: 'reading', bookName: 'マイ単語帳', sheetName: sheetName };
+  }
+  if (mode === 'grammar' || setId.indexOf('grammar:') === 0 || setName.indexOf(' - ') >= 0) {
+    let subject = '';
+    let units = [];
+    if (setId.indexOf('grammar:') === 0) {
+      const rest = setId.slice(8);
+      const slash = rest.indexOf('/');
+      subject = slash >= 0 ? rest.slice(0, slash) : rest;
+      units = slash >= 0 ? rest.slice(slash + 1).split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];
+    } else if (setName.indexOf(' - ') >= 0) {
+      const parts = setName.split(' - ');
+      subject = parts[0];
+      units = (parts[1] || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    }
+    return { kind: 'grammar', subject: subject, units: units, filters: { dai: [], sho: [], area: [] }, formatKeys: [] };
+  }
+  return null;
+}
+
+function joinSettingList_(arr, emptyLabel) {
+  if (!arr || !arr.length) return emptyLabel || '指定なし';
+  return arr.join('、');
+}
+
+function formatSessionSettingsText_(log) {
+  const settings = extractSessionSettingsFromLog_(log);
+  const detail = parseLogDetail_(log);
+  const modeRaw = String((settings && settings.kind) || log['モード'] || detail.Mode || detail.mode || '');
+  const lines = [];
+  const modeLabel = modeRaw === 'grammar' || modeRaw === '文法' ? '文法・語法演習'
+    : (modeRaw === 'vocab' || modeRaw === '単語' ? '単語学習'
+      : (modeRaw === 'reading' || modeRaw === '音読' ? '音読練習' : (modeRaw || '不明')));
+  lines.push('モード: ' + modeLabel);
+
+  if (!settings) {
+    lines.push('設定詳細: （古い記録のため詳細なし）');
+    return lines.join('\n');
+  }
+
+  if (settings.kind === 'grammar') {
+    const playLabels = {
+      normal: '順番通り', random10: 'ランダム演習', weakness: '苦手克服優先', unseen: '未定着優先'
+    };
+    lines.push('学年・区分: ' + (settings.subject || '（不明）'));
+    lines.push('教材: ' + joinSettingList_(settings.units, '（未選択）'));
+    const f = settings.filters || {};
+    lines.push('絞り込み 大単元: ' + joinSettingList_(f.dai));
+    lines.push('絞り込み 小単元: ' + joinSettingList_(f.sho));
+    lines.push('絞り込み ターゲット文法領域: ' + joinSettingList_(f.area));
+    const formatLabels = (settings.formatKeys || []).map(function (k) {
+      const meta = GRAMMAR_FORMAT_MAP[k];
+      if (k === 'E' && settings.eSortVariant && settings.eSortVariant !== 'E') {
+        const vMeta = GRAMMAR_FORMAT_MAP[settings.eSortVariant];
+        return 'E:' + ((vMeta && vMeta.label) || settings.eSortVariant);
+      }
+      return meta ? (k + ' ' + meta.label) : k;
+    });
+    lines.push('出題形式: ' + joinSettingList_(formatLabels, '（未記録）'));
+    if ((settings.formatKeys || []).indexOf('G') >= 0) {
+      lines.push('形式G 選択肢数: ' + (settings.choiceCount || '?')
+        + ' / 「正答はない」' + (settings.includeNone ? 'あり' : 'なし')
+        + ' / 「わからない」' + (settings.includeUnknown ? 'あり' : 'なし'));
+    }
+    lines.push('出題モード: ' + (playLabels[settings.playMode] || settings.playMode || '（未記録）'));
+    lines.push('出題数: ' + (settings.questionCount === 'all' ? 'すべて' : ((settings.questionCount || '?') + '問')));
+  } else if (settings.kind === 'vocab') {
+    const dirMap = { jaen: '和英', enja: '英和' };
+    const grainMap = { WD: '語to語', PH: '句to句', EX: '例文to例文' };
+    const respMap = { choice: '選択', typing: 'タイピング', speech: '音声入力' };
+    const styleMap = { dedicated: '各問専用選択肢', pool: '選択肢プール' };
+    const dummyMap = {
+      none: 'なし', random: 'ランダム', samePos: '同品詞', diffPos: '異品詞', sameAffix: '同接辞'
+    };
+    lines.push('教材種別: ' + (settings.bookType === 'user' ? 'マイ単語帳' : 'プリセット'));
+    lines.push('ブック: ' + (settings.bookName || '（不明）'));
+    lines.push('シート: ' + (settings.sheetName || '（不明）'));
+    const f = settings.filters || {};
+    lines.push('絞り込み 大区分: ' + joinSettingList_(f.dai));
+    lines.push('絞り込み 中区分: ' + joinSettingList_(f.chu));
+    lines.push('絞り込み 小区分: ' + joinSettingList_(f.sho));
+    lines.push('和英/英和: ' + joinSettingList_((settings.directions || []).map(function (d) { return dirMap[d] || d; }), '（未記録）'));
+    lines.push('語/句/例文: ' + joinSettingList_((settings.grains || []).map(function (g) { return grainMap[g] || g; }), '（未記録）'));
+    lines.push('解答方法: ' + (respMap[settings.response] || settings.response || '（未記録）'));
+    if (settings.response === 'choice' || !settings.response) {
+      lines.push('選択の出し方: ' + (styleMap[settings.choiceStyle] || settings.choiceStyle || '（未記録）'));
+      if (settings.choiceStyle === 'pool') {
+        lines.push('プール用ダミー数: ' + (settings.poolDummyCount != null ? settings.poolDummyCount : '?'));
+      } else {
+        lines.push('選択肢数: ' + (settings.choiceCount != null ? settings.choiceCount : '?'));
+        lines.push('特殊選択肢: 「わからない」' + (settings.includeUnknown ? 'あり' : 'なし')
+          + ' / 「正答はない」' + (settings.includeNone ? 'あり' : 'なし'));
+      }
+      lines.push('ダミー範囲: ' + (settings.dummyScope === 'book' ? 'ブック全体' : 'シート内'));
+      lines.push('ダミー方式: ' + (dummyMap[settings.dummyMethod] || settings.dummyMethod || '（未記録）'));
+    }
+    lines.push('出題数: ' + (settings.questionCount === 'all' ? 'すべて' : ((settings.questionCount || '?') + '問'))
+      + (settings.questionCountSpecify ? '（手動指定）' : ''));
+    if (settings.homeworkMode) lines.push('宿題モード: 各形式' + (settings.homeworkPerSection || 5) + '問');
+  } else if (settings.kind === 'reading') {
+    lines.push('ブック: ' + (settings.bookName || 'マイ単語帳'));
+    lines.push('シート: ' + (settings.sheetName || '（不明）'));
+  } else {
+    lines.push('設定詳細: （種別不明）');
+  }
+  return lines.join('\n');
+}
+
+function switchMainModeTab_(mode) {
+  const tab = document.querySelector('.mode-tab:not(.manage-sub-tab)[data-mode="' + mode + '"]');
+  if (tab) tab.click();
+}
+
+async function reproduceSessionSettings_(log) {
+  const settings = extractSessionSettingsFromLog_(log);
+  if (!settings || !settings.kind) {
+    showToast_('この記録には再現できる設定がありません');
+    return false;
+  }
+  try {
+    if (settings.kind === 'grammar') {
+      switchMainModeTab_('grammar');
+      await GrammarSettingsModule.applySessionSettings(settings);
+      showToast_('文法の出題設定を再現しました（問題そのものは再現しません）');
+      return true;
+    }
+    if (settings.kind === 'vocab') {
+      switchMainModeTab_('vocab');
+      if (window.VocabSettingsModule) {
+        if (VocabSettingsModule.loadCatalog) await VocabSettingsModule.loadCatalog(false);
+        if (VocabSettingsModule.applySettings) VocabSettingsModule.applySettings(settings);
+      }
+      showToast_('単語学習の出題設定を再現しました（問題そのものは再現しません）');
+      return true;
+    }
+    if (settings.kind === 'reading') {
+      switchMainModeTab_('reading');
+      await loadManagePanel_();
+      const sheetEl = document.getElementById('reading-sheet-select');
+      if (sheetEl && settings.sheetName) {
+        const has = Array.from(sheetEl.options).some(function (o) { return o.value === settings.sheetName; });
+        if (has) sheetEl.value = settings.sheetName;
+        else showToast_('シート「' + settings.sheetName + '」が見つかりません。キャッシュ更新後に再試行してください');
+      }
+      showToast_('音読のシート設定を再現しました');
+      return true;
+    }
+    showToast_('未対応の学習モードです');
+    return false;
+  } catch (e) {
+    showToast_('設定の再現に失敗しました: ' + (e.message || e));
+    return false;
+  }
+}
+
+function bindUserLogsReproduceClicks_() {
+  const el = document.getElementById('user-logs-list');
+  if (!el || el._reproduceBound) return;
+  el._reproduceBound = true;
+  el.addEventListener('click', function (ev) {
+    const btn = ev.target && ev.target.closest ? ev.target.closest('[data-reproduce-log]') : null;
+    if (!btn) return;
+    const idx = parseInt(btn.getAttribute('data-reproduce-log'), 10);
+    const log = lastFetchedLearningLogs_[idx];
+    if (!log) {
+      showToast_('記録が見つかりません');
+      return;
+    }
+    BusyButton.run(btn, function () { return reproduceSessionSettings_(log); }, '再現中…');
+  });
+}
+
 // ログ取得とマイページ描画
 async function fetchUserLogs() {
   if (!AuthGateService.isValid()) return;
@@ -8560,14 +9063,32 @@ async function fetchUserLogs() {
 function renderUserLogsList_(logs) {
   const el = document.getElementById('user-logs-list');
   if (!el) return;
-  if (!logs || logs.length === 0) {
+  lastFetchedLearningLogs_ = logs || [];
+  bindUserLogsReproduceClicks_();
+  if (!lastFetchedLearningLogs_.length) {
     el.innerHTML = '<p>まだ記録がありません。</p>';
     return;
   }
+  const show = lastFetchedLearningLogs_.slice(0, 30);
   let html = '';
-  logs.forEach(function (log) {
-    html += '<div class="log-item"><strong>' + (log['学習セット名'] || '') + '</strong><br>';
-    html += '<span style="font-size:.85em;color:#888;">' + (log['タイムスタンプ'] || '') + ' / ' + (log['モード'] || '') + ' / ' + (log['正答率'] || '') + '%</span></div>';
+  show.forEach(function (log, idx) {
+    const rate = parseInt(log['正答率'], 10);
+    const rateLabel = isNaN(rate) ? (log['正答率'] || '-') : (rate + '%');
+    const duration = formatLogDuration_(log);
+    const metaParts = [log['タイムスタンプ'] || '', log['モード'] || '', '正答率 ' + rateLabel];
+    if (duration) metaParts.push(duration);
+    const settingsText = formatSessionSettingsText_(log);
+    html += '<div class="log-item">'
+      + '<div class="log-item-main">'
+      + '<div class="log-title">' + escapeHtml_(log['学習セット名'] || '(未登録)') + '</div>'
+      + '<div class="log-meta">' + escapeHtml_(metaParts.filter(Boolean).join(' / ')) + '</div>'
+      + '<div class="log-settings">' + escapeHtml_(settingsText) + '</div>'
+      + '</div>'
+      + '<div class="log-item-aside">'
+      + '<div class="log-score">' + escapeHtml_(String(rateLabel)) + '</div>'
+      + '<button type="button" class="log-reproduce-btn" data-reproduce-log="' + idx + '">再現</button>'
+      + '</div>'
+      + '</div>';
   });
   el.innerHTML = html;
 }
@@ -8745,7 +9266,10 @@ function renderGrammarAreaProgress_(areaMap) {
 
 async function renderMyPage(logs) {
   const container = document.getElementById('mypage-container');
-  if (container) container.style.display = 'block';
+  const manageActive = document.querySelector('.mode-tab.active:not(.manage-sub-tab)');
+  if (container) {
+    container.style.display = (manageActive && manageActive.dataset.mode === 'manage') ? 'block' : 'none';
+  }
 
   const areaEl = document.getElementById('grammar-area-progress-list');
   if (areaEl) areaEl.innerHTML = '読込中...';
@@ -8755,7 +9279,7 @@ async function renderMyPage(logs) {
     document.getElementById('set-progress-list').innerHTML = "<p>まだ学習記録がありません。</p>";
     document.getElementById('weakness-list').innerHTML = "<p>まだ学習記録がありません。</p>";
   } else {
-  // 1. 最近の学習履歴 (直近5件) — getLearningLogs は新しい順
+  // 1. 最近の学習履歴 (直近5件) — 設定詳細つき
   const recentLogs = logs.slice(0, 5);
   let recentHtml = '';
   recentLogs.forEach(log => {
@@ -8764,13 +9288,17 @@ async function renderMyPage(logs) {
     const duration = formatLogDuration_(log);
     const metaParts = [log['タイムスタンプ'] || ''];
     if (duration) metaParts.push(duration);
+    const settingsText = formatSessionSettingsText_(log);
     recentHtml += `
       <div class="log-item">
-        <div>
-          <div class="log-title">${log['学習セット名'] || '(未登録)'}</div>
-          <div class="log-meta">${metaParts.join(' - ')}</div>
+        <div class="log-item-main">
+          <div class="log-title">${escapeHtml_(log['学習セット名'] || '(未登録)')}</div>
+          <div class="log-meta">${escapeHtml_(metaParts.join(' - '))}</div>
+          <div class="log-settings">${escapeHtml_(settingsText)}</div>
         </div>
-        <div class="log-score ${scoreClass}">${rate}%</div>
+        <div class="log-item-aside">
+          <div class="log-score ${scoreClass}">${rate}%</div>
+        </div>
       </div>
     `;
   });
