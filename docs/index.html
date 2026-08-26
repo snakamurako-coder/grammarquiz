@@ -4644,11 +4644,13 @@ const VocabSettingsModule = (() => {
     if (!saved) return;
     restoring_ = true;
     try {
-      if (saved.bookType) {
-        const typeEl = document.getElementById('vocab-book-type');
-        if (typeEl) typeEl.value = saved.bookType;
-        refreshBookSelect();
+      let bookType = saved.bookType || 'preset';
+      if (bookType === 'user' && !(catalog.userBooks && catalog.userBooks.length)) {
+        bookType = 'preset';
       }
+      const typeEl = document.getElementById('vocab-book-type');
+      if (typeEl) typeEl.value = bookType;
+      refreshBookSelect();
       if (saved.bookName) {
         const bookEl = document.getElementById('vocab-book-select');
         if (bookEl && Array.from(bookEl.options).some(function (o) { return o.value === saved.bookName; })) {
@@ -4730,32 +4732,43 @@ const VocabSettingsModule = (() => {
     syncHomeworkUi_();
   }
 
-  async function loadCatalog(force) {
-    const result = await PresetModule.getVocabCatalog(!!force);
-    if (result.status !== 'success') throw new Error(result.message || 'カタログ取得失敗');
-    catalog = result.data;
-    catalog.userBooks = [];
-    catalog.presets = catalog.presets || [];
-    if (AuthGateService.isValid()) {
-      try {
-        const userRes = await UserBridge.call('getVocabCatalog', {});
-        if (userRes.status === 'success' && userRes.data && userRes.data.userBooks) {
-          catalog.userBooks = userRes.data.userBooks;
-        } else if (userRes.status !== 'success') {
-          console.warn('ユーザーカタログ:', userRes.message || userRes);
-        }
-      } catch (e) { console.warn('ユーザーカタログ:', e.message); }
+  function applyCatalogToUi_() {
+    try {
+      refreshBookSelect();
+      applySavedSettings_(readSettings());
+      applyLaunchConfigSelections_();
+    } catch (e) {
+      console.warn('単語ブック選択の反映:', e.message || e);
+      try { refreshBookSelect(); } catch (e2) {}
     }
-    refreshBookSelect();
-    applySavedSettings_(readSettings());
-    applyLaunchConfigSelections_();
     if (window.VocabRegisterModule && window.VocabRegisterModule.refreshBookShortcut) {
       window.VocabRegisterModule.refreshBookShortcut();
     }
   }
 
+  async function loadCatalog(force) {
+    const result = await PresetModule.getVocabCatalog(!!force);
+    if (result.status !== 'success') throw new Error(result.message || 'カタログ取得失敗');
+    catalog = result.data || {};
+    catalog.userBooks = [];
+    catalog.presets = catalog.presets || [];
+    applyCatalogToUi_();
+    if (AuthGateService.isValid()) {
+      try {
+        const userRes = await UserBridge.call('getVocabCatalog', {});
+        if (userRes.status === 'success' && userRes.data && userRes.data.userBooks) {
+          catalog.userBooks = userRes.data.userBooks;
+          applyCatalogToUi_();
+        } else if (userRes.status !== 'success') {
+          console.warn('ユーザーカタログ:', userRes.message || userRes);
+        }
+      } catch (e) { console.warn('ユーザーカタログ:', e.message); }
+    }
+  }
+
   function getBooksByType(type) {
-    return type === 'user' ? catalog.userBooks : catalog.presets;
+    if (type === 'user') return catalog.userBooks || [];
+    return catalog.presets || [];
   }
 
   function refreshBookSelect() {
@@ -4765,6 +4778,14 @@ const VocabSettingsModule = (() => {
     const prev = select.value;
     const books = getBooksByType(typeEl.value);
     select.innerHTML = '';
+    if (!books.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = typeEl.value === 'user' ? '（マイ単語帳がありません）' : '（プリセットブックがありません）';
+      select.appendChild(opt);
+      refreshSheetSelect();
+      return;
+    }
     books.forEach(function (b) {
       const opt = document.createElement('option');
       opt.value = b.bookName;
@@ -4786,7 +4807,7 @@ const VocabSettingsModule = (() => {
     const prev = sheetSelect.value;
     sheetSelect.innerHTML = '';
     if (!book) return;
-    book.sheets.forEach(function (s) {
+    (book.sheets || []).forEach(function (s) {
       const opt = document.createElement('option');
       opt.value = s.sheetName;
       opt.textContent = s.sheetName + ' (' + s.wordCount + '語)';
@@ -7849,6 +7870,7 @@ window.onLoginSuccess = function(user) {
   initModeTabs();
   if (window.VocabRegisterModule) window.VocabRegisterModule.init();
   try { sessionStorage.removeItem('dd_my_vocab_book_url'); } catch (e) {}
+  initVocabModules();
   if (window.UserDriveModule && UserDriveModule.isEnabled()) {
     UserDriveModule.ensureUserDataEnvironment().then(function () {
       return refreshUserDataAfterLogin_();
