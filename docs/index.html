@@ -206,28 +206,49 @@ button.is-busy::after,
 .vocab-preview-table th { background: #f5f5f5; }
 .vocab-pool-legend { background:#f5f5f5; border:1px solid #ddd; border-radius:8px; padding:10px 12px; font-size:0.9em; line-height:1.6; }
 
-/* 選択肢プール：スマホUI（疑似スマホフレーム） */
+/* 選択肢プール：実機ではフル画面（PC向けの疑似スマホ枠は使わない） */
 body.pool-match-active {
-  padding-bottom: calc(56px + env(safe-area-inset-bottom));
+  overflow: hidden;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  background: #fff;
 }
 body.pool-match-active .question-box,
 body.pool-match-active #game-feedback-host { display: none !important; }
+body.pool-match-active #vocab-pool-match-ui {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex !important;
+  flex-direction: column;
+  background: #fff;
+}
+body.pool-match-active .game-footer {
+  max-width: none;
+  left: 0;
+  transform: none;
+}
 .pool-phone-frame {
   width: 100%;
-  max-width: 375px;
-  height: min(720px, calc(100dvh - 72px - env(safe-area-inset-bottom)));
-  margin: 0 auto 8px;
+  max-width: none;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  margin: 0;
   background: #fff;
-  border-radius: 36px;
-  box-shadow: 0 12px 30px rgba(0,0,0,0.15);
-  border: 8px solid #222;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   position: relative;
   overflow: hidden;
+  padding-bottom: calc(56px + env(safe-area-inset-bottom));
 }
 .pool-phone-header {
   padding: 14px 16px;
+  padding-top: calc(14px + env(safe-area-inset-top));
   background: #4f46e5;
   color: white;
   text-align: center;
@@ -1034,7 +1055,7 @@ body.pool-match-active #game-feedback-host { display: none !important; }
         </div>
         <div class="setting-section">
           <div class="section-title">選択肢プールの画面</div>
-          <p style="font-size:0.9em;color:#666;margin-bottom:12px;">プール形式の出題で使う画面です。いまはスマホ画面を使います。タブレット・PC横長は準備中です。</p>
+          <p style="font-size:0.9em;color:#666;margin-bottom:12px;">プール形式の出題は画面いっぱいに表示します。タブレット・PC横長レイアウトは準備中です。</p>
           <div class="form-group">
             <label>レイアウト</label>
             <select id="pool-layout-select">
