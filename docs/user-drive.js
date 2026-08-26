@@ -452,21 +452,23 @@ const UserDriveModule = (function () {
     const ss = await sheetsGet_(bookId);
     const sheets = ss.sheets || [];
     let logSheet = sheets.find(function (s) { return s.properties.title === SESSION_LOG_SHEET; });
-    if (!logSheet && sheets.length) {
-      const first = sheets[0].properties;
-      if (first.title === 'シート1' || first.title === 'Sheet1') {
+    if (!logSheet) {
+      const first = sheets[0] && sheets[0].properties;
+      if (first && (first.title === 'シート1' || first.title === 'Sheet1')) {
         await sheetsBatchUpdate_(bookId, [{
           updateSheetProperties: {
             properties: { sheetId: first.sheetId, title: SESSION_LOG_SHEET },
             fields: 'title'
           }
         }]);
-      } else if (first.title !== ITEM_STATE_SHEET) {
+      } else {
         await sheetsBatchUpdate_(bookId, [{ addSheet: { properties: { title: SESSION_LOG_SHEET } } }]);
       }
     }
     const header = await sheetsValuesGet_(bookId, SESSION_LOG_SHEET + '!A1:F1');
-    if (!header.length || !header[0].length) {
+    const headerRow = header[0] || [];
+    const hasTs = headerRow.indexOf('タイムスタンプ') >= 0;
+    if (!headerRow.length || !hasTs) {
       await sheetsValuesUpdate_(bookId, SESSION_LOG_SHEET + '!A1:F1', [SESSION_LOG_HEADERS]);
     }
     await ensureItemStateSheet_(bookId);
@@ -771,6 +773,36 @@ const UserDriveModule = (function () {
     return { status: 'success', data: { updated: updated, inserted: inserted } };
   }
 
+  function pickLogField_(obj, names) {
+    for (let i = 0; i < names.length; i++) {
+      const v = obj[names[i]];
+      if (v !== undefined && v !== null && String(v).trim() !== '') return v;
+    }
+    return '';
+  }
+
+  function normalizeSessionLog_(obj) {
+    const detailRaw = pickLogField_(obj, ['詳細', 'Detail', 'detail']);
+    let detail = {};
+    if (detailRaw) {
+      try { detail = typeof detailRaw === 'string' ? JSON.parse(detailRaw) : (detailRaw || {}); }
+      catch (e) { detail = {}; }
+    }
+    const setName = pickLogField_(obj, ['学習セット名', 'Set_Name', 'setName'])
+      || detail.Set_Name || detail.setName || '';
+    const mode = pickLogField_(obj, ['モード', 'Mode', 'mode']) || detail.Mode || detail.mode || '';
+    const score = pickLogField_(obj, ['正答率', 'Score', 'score']);
+    const duration = pickLogField_(obj, ['解答時間', 'Duration_Sec', 'durationSec', 'timeTaken']);
+    return {
+      'タイムスタンプ': pickLogField_(obj, ['タイムスタンプ', 'Timestamp', 'timestamp']),
+      '学習セット名': setName,
+      'モード': mode,
+      '正答率': score !== '' ? score : (detail.Score != null ? detail.Score : ''),
+      '解答時間': duration !== '' ? duration : (detail.Duration_Sec != null ? detail.Duration_Sec : ''),
+      '詳細': typeof detailRaw === 'string' ? detailRaw : (detailRaw ? JSON.stringify(detailRaw) : JSON.stringify(obj))
+    };
+  }
+
   async function opGetLearningLogs_() {
     const bookId = await getLogBookId_();
     await ensureLogBookReady_(bookId);
@@ -778,8 +810,8 @@ const UserDriveModule = (function () {
     if (values.length <= 1) return { status: 'success', data: [] };
     const headers = values[0];
     const logs = [];
-    for (let i = values.length - 1; i >= 1 && logs.length < 20; i--) {
-      logs.push(rowToObj_(headers, values[i]));
+    for (let i = values.length - 1; i >= 1 && logs.length < 50; i--) {
+      logs.push(normalizeSessionLog_(rowToObj_(headers, values[i])));
     }
     return { status: 'success', data: logs };
   }
@@ -809,9 +841,22 @@ const UserDriveModule = (function () {
     if (values.length <= 1) return { status: 'success', data: { count: 0, attemptNo: 1 } };
     const headers = values[0];
     const setIdx = headers.indexOf('学習セット名');
+    const detailIdx = headers.indexOf('詳細');
     let count = 0;
     for (let i = 1; i < values.length; i++) {
-      if (String(values[i][setIdx] || '') === String(setId || '')) count++;
+      const name = setIdx >= 0 ? String(values[i][setIdx] || '') : '';
+      if (name === String(setId || '')) {
+        count++;
+        continue;
+      }
+      if (detailIdx >= 0) {
+        try {
+          const d = JSON.parse(values[i][detailIdx] || '{}');
+          if (d && (String(d.setId || '') === String(setId || '') || String(d.Set_Name || d.setName || '') === String(setId || ''))) {
+            count++;
+          }
+        } catch (e) {}
+      }
     }
     return { status: 'success', data: { count: count, attemptNo: count + 1 } };
   }

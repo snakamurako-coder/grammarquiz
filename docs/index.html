@@ -1692,6 +1692,15 @@ const AuthGateService = {
         localStorage.setItem(this.USER_KEY, JSON.stringify(data.user));
         return data.user;
       }
+      if (window.DASHBOARD_URL && window.DASHBOARD_URL !== window.API_URL) {
+        url = window.DASHBOARD_URL + '?action=getAuthUser&token=' + encodeURIComponent(this.getToken());
+        res = await fetch(url, gasFetchOptions_({ redirect: 'follow' }));
+        data = await parseGasJson_(res);
+        if (data.status === 'success' && data.user) {
+          localStorage.setItem(this.USER_KEY, JSON.stringify(data.user));
+          return data.user;
+        }
+      }
     } catch (e) {
       console.warn('getAuthUser failed', e);
     }
@@ -1863,12 +1872,8 @@ function formatUserBridgeError_(res) {
 
 function renderUserLogsError_(message) {
   const html = '<p style="color:#c62828;">' + escapeHtml_(message) + '</p>';
-  const ids = ['user-logs-list', 'recent-history-list', 'set-progress-list', 'weakness-list'];
-  ids.forEach(function (id) {
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = html;
-  });
-  renderGrammarAreaProgress_(null);
+  const el = document.getElementById('user-logs-list');
+  if (el) el.innerHTML = html;
 }
 
 async function retryDriveAccess_() {
@@ -2262,38 +2267,52 @@ const ItemStateModule = (() => {
 window.ItemStateModule = ItemStateModule;
 
 async function sendResultToGoogleForm(summary) {
-  // 設計契約: docs/FORM_AGGREGATION_SANCTUARY.md（GAS② submitFormSummary 経由のみ）
+  // 設計契約: docs/FORM_AGGREGATION_SANCTUARY.md（GAS submitFormSummary → fbzx 付き formResponse）
   const cfg = window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.GOOGLE_FORM;
   if (!cfg || !cfg.ACTION_URL) return { skipped: true, reason: 'form_not_configured' };
   if (!AuthGateService.isValid()) return { skipped: true, reason: 'not_authenticated' };
-  if (!window.API_URL) return { skipped: true, reason: 'no_api_url' };
 
-  const trackPromise = fetchWithBackoff_(window.API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({
-      action: 'submitFormSummary',
-      authToken: AuthGateService.getToken(),
-      summary: {
-        Mode: summary.Mode,
-        Set_ID: summary.Set_ID,
-        Set_Name: summary.Set_Name,
-        Attempt_No: summary.Attempt_No,
-        Correct: summary.Correct,
-        Total: summary.Total,
-        Score: summary.Score,
-        Duration_Sec: summary.Duration_Sec,
-        Started_At: summary.Started_At,
-        Ended_At: summary.Ended_At
+  const payload = {
+    action: 'submitFormSummary',
+    authToken: AuthGateService.getToken(),
+    summary: {
+      Mode: summary.Mode,
+      Set_ID: summary.Set_ID,
+      Set_Name: summary.Set_Name,
+      Attempt_No: summary.Attempt_No,
+      Correct: summary.Correct,
+      Total: summary.Total,
+      Score: summary.Score,
+      Duration_Sec: summary.Duration_Sec,
+      Started_At: summary.Started_At,
+      Ended_At: summary.Ended_At
+    }
+  };
+  const urls = [];
+  if (window.API_URL) urls.push(window.API_URL);
+  if (window.DASHBOARD_URL && window.DASHBOARD_URL !== window.API_URL) urls.push(window.DASHBOARD_URL);
+  if (!urls.length) return { skipped: true, reason: 'no_api_url' };
+
+  const trackPromise = (async function () {
+    let last = { status: 'error', message: 'フォーム送信失敗' };
+    for (let i = 0; i < urls.length; i++) {
+      try {
+        const res = await fetchWithBackoff_(urls[i], {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload)
+        }, 2);
+        const data = await parseGasJson_(res);
+        if (data.status === 'success') return { status: 'success' };
+        last = { status: 'error', message: data.message || 'フォーム送信失敗' };
+        if (!/認証トークン/.test(String(data.message || ''))) return last;
+      } catch (e) {
+        last = { status: 'error', message: String(e.message || e) };
       }
-    })
-  }, 2).then(async function (res) {
-    const data = await parseGasJson_(res);
-    if (data.status === 'success') return { status: 'success' };
-    return { status: 'error', message: data.message || 'フォーム送信失敗' };
-  }).catch(function (e) {
-    return { status: 'error', message: String(e.message || e) };
-  });
+    }
+    console.warn('[Form]', last.message);
+    return last;
+  })();
 
   return BackendSyncStatus.track(trackPromise);
 }
@@ -7526,6 +7545,8 @@ async function saveSessionResultsUnified(modeOverride, setNameOverride) {
   if (!AuthGateService.isValid()) return { skipped: true, reason: 'not_authenticated' };
 
   const summary = await buildSessionSummary_(modeOverride, setNameOverride);
+  submitSessionSummary_(summary).catch(function (e) { console.warn('[Form]', e); });
+
   const logRes = await UserBridge.call('saveSessionLog', {
     setId: summary.Set_ID,
     setName: summary.Set_Name,
@@ -7539,7 +7560,6 @@ async function saveSessionResultsUnified(modeOverride, setNameOverride) {
     Mode: summary.Mode
   });
   const stateRes = await ItemStateModule.syncToServer();
-  submitSessionSummary_(summary).catch(function (e) { console.warn('[Form]', e); });
 
   const ok = logRes.status === 'success'
     && (stateRes.status === 'success' || stateRes.skipped);
@@ -8056,9 +8076,15 @@ function bindLoginScreen_() {
 async function fetchUserLogs() {
   if (!AuthGateService.isValid()) return;
   try {
+    if (window.UserDriveModule && UserDriveModule.isEnabled()) {
+      try { await UserDriveModule.ensureUserDataEnvironment(); } catch (e) {
+        console.warn('学習記録ブックの準備:', e.message || e);
+      }
+    }
     const data = await UserBridge.call('getLearningLogs', {});
     if (data.status !== 'success') {
       renderUserLogsError_(formatUserBridgeError_(data));
+      renderMyPage([]).catch(function (e) { console.error('renderMyPage error:', e); });
       return;
     }
     renderUserLogsList_(data.data);
@@ -8068,6 +8094,7 @@ async function fetchUserLogs() {
   } catch (e) {
     console.error('fetchUserLogs error:', e);
     renderUserLogsError_('学習記録の取得に失敗しました: ' + (e.message || e));
+    renderMyPage([]).catch(function (err) { console.error('renderMyPage error:', err); });
   }
 }
 
@@ -8268,12 +8295,9 @@ async function renderMyPage(logs) {
     document.getElementById('recent-history-list').innerHTML = "<p>まだ学習記録がありません。</p>";
     document.getElementById('set-progress-list').innerHTML = "<p>まだ学習記録がありません。</p>";
     document.getElementById('weakness-list').innerHTML = "<p>まだ学習記録がありません。</p>";
-    renderGrammarAreaProgress_(null);
-    return;
-  }
-
-  // 1. 最近の学習履歴 (直近5件) — API側は古い順で返す想定
-  const recentLogs = [...logs].reverse().slice(0, 5);
+  } else {
+  // 1. 最近の学習履歴 (直近5件) — getLearningLogs は新しい順
+  const recentLogs = logs.slice(0, 5);
   let recentHtml = '';
   recentLogs.forEach(log => {
     const rate = parseInt(log['正答率'], 10) || 0;
@@ -8303,7 +8327,6 @@ async function renderMyPage(logs) {
       }
       sheetMap[sheetName].playCount++;
       if (rate > sheetMap[sheetName].maxRate) sheetMap[sheetName].maxRate = rate;
-      sheetMap[sheetName].recentRate = rate;
     });
   });
 
@@ -8339,6 +8362,7 @@ async function renderMyPage(logs) {
     weaknessHtml = "<p>現在、目立った弱点はありません。すばらしい！</p>";
   }
   document.getElementById('weakness-list').innerHTML = weaknessHtml;
+  }
 
   try {
     if (AuthGateService.isValid()) {

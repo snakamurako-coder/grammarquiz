@@ -1865,6 +1865,14 @@ function parseGoogleFormContextFromHtml_(html) {
     const m2 = String(html || '').match(/"fbzx","([^"]+)"/);
     if (m2) fbzx = m2[1];
   }
+  if (!fbzx) {
+    const m3 = String(html || '').match(/name=['"]fbzx['"][^>]*value=['"]([^'"]+)['"]/i);
+    if (m3) fbzx = m3[1];
+  }
+  if (!fbzx) {
+    const m4 = String(html || '').match(/\[null,null,"(-?\d+)"\]/);
+    if (m4) fbzx = m4[1];
+  }
   if (!fbzx) throw new Error('Googleフォームの fbzx を取得できませんでした');
   return {
     fbzx: fbzx,
