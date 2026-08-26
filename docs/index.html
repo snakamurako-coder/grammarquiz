@@ -672,6 +672,7 @@ body.pool-match-active .game-footer {
     <div class="header-title">DigitalDrill（デジドリ） 学習</div>
     <p style="text-align:center;margin:-8px 0 12px;font-size:0.9em;">
       <button type="button" id="cache-refresh-btn" class="btn-small">キャッシュ更新</button>
+      <span style="display:block;margin-top:6px;font-size:0.8em;color:#666;">古い／未取得の学習セットだけ再取得します。すべて強制的に取り直す場合は マイページ → 詳細設定 を使います。</span>
     </p>
 
     <div class="mode-tabs">
@@ -1052,6 +1053,12 @@ body.pool-match-active .game-footer {
             </select>
           </div>
           <p id="stt-locale-status" style="font-size:0.85em;color:#555;margin-bottom:0;">認識言語: アメリカ英語（en-US）</p>
+        </div>
+        <div class="setting-section">
+          <div class="section-title">学習セットのキャッシュ</div>
+          <p style="font-size:0.9em;color:#666;margin-bottom:12px;">画面上部の「キャッシュ更新」は、古い／未取得セットだけを再取得します。下のボタンはプリセットとマイ単語帳の<strong>全学習セット</strong>を強制的に取り直します（通信量が多くなります）。</p>
+          <button type="button" id="cache-force-refresh-btn" class="btn-primary" style="width:auto;min-width:220px;">全学習セットを強制更新</button>
+          <p id="cache-force-refresh-status" style="font-size:0.85em;color:#555;margin:10px 0 0;"></p>
         </div>
         <div class="setting-section">
           <div class="section-title">選択肢プールの画面</div>
@@ -1809,7 +1816,8 @@ window.BusyButton = BusyButton;
 const USER_BRIDGE_WRITE_OPS = {
   saveSessionLog: true,
   upsertItemStates: true,
-  registerVocabWords: true
+  registerVocabWords: true,
+  upsertSetCacheLog: true
 };
 
 /** UserBridge: ユーザー操作は UserDriveModule（Drive/Sheets API）経由のみ — docs/USER_DATA_SANCTUARY.md */
@@ -2185,6 +2193,308 @@ const PresetModule = (() => {
   return { getVocabCatalog, getVocabWords, getGrammarCatalog, getQuestions, clearAll, refreshAll, revalidate };
 })();
 window.PresetModule = PresetModule;
+
+/**
+ * マイ単語帳の学習セットローカルキャッシュ。
+ * 学習開始はキャッシュのみ。Drive からの取得は「キャッシュ更新」時のみ（古いセットだけ）。
+ * 新旧判定: ブック modifiedTime → 変化時のみ通し番号列指紋。指紋一致ならフル読込しない。
+ * Drive 側記録: DigitalDrill学習記録 / 学習セット更新記録
+ */
+const UserVocabCacheModule = (() => {
+  const PREFIX = 'dd_user_vocab_set:';
+  const BOOK = 'マイ単語帳';
+
+  function setId_(sheetName) {
+    return 'vocab:' + BOOK + '/' + String(sheetName || '');
+  }
+
+  function storageKey_(sheetName) {
+    return PREFIX + String(sheetName || '');
+  }
+
+  function listCachedSheetNames() {
+    const names = [];
+    try {
+      Object.keys(localStorage).forEach(function (k) {
+        if (k.indexOf(PREFIX) === 0) names.push(k.slice(PREFIX.length));
+      });
+    } catch (e) {}
+    return names;
+  }
+
+  function read_(sheetName) {
+    try {
+      const raw = localStorage.getItem(storageKey_(sheetName));
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  function write_(sheetName, entry) {
+    try { localStorage.setItem(storageKey_(sheetName), JSON.stringify(entry)); } catch (e) {}
+  }
+
+  function invalidate(sheetName) {
+    try { localStorage.removeItem(storageKey_(sheetName)); } catch (e) {}
+  }
+
+  function clearAll() {
+    listCachedSheetNames().forEach(invalidate);
+  }
+
+  function buildDivisions_(words) {
+    const daiSet = {};
+    const chuSet = {};
+    const shoSet = {};
+    (words || []).forEach(function (w) {
+      const dai = String(w['大区分'] || '(未登録)').trim() || '(未登録)';
+      const chu = String(w['中区分'] || '(未登録)').trim() || '(未登録)';
+      const sho = String(w['小区分'] || '(未登録)').trim() || '(未登録)';
+      daiSet[dai] = true;
+      chuSet[chu] = true;
+      shoSet[sho] = true;
+    });
+    function keys(o) {
+      return Object.keys(o).sort(function (a, b) {
+        return String(a).localeCompare(String(b), 'ja', { numeric: true, sensitivity: 'base' });
+      });
+    }
+    return { dai: keys(daiSet), chu: keys(chuSet), sho: keys(shoSet) };
+  }
+
+  function filterWords_(allWords, filters) {
+    const daiFilter = (filters && filters.dai) || [];
+    const chuFilter = (filters && filters.chu) || [];
+    const shoFilter = (filters && filters.sho) || [];
+    return (allWords || []).filter(function (rowObj) {
+      const dai = String(rowObj['大区分'] || '(未登録)').trim() || '(未登録)';
+      const chu = String(rowObj['中区分'] || '(未登録)').trim() || '(未登録)';
+      const sho = String(rowObj['小区分'] || '(未登録)').trim() || '(未登録)';
+      if (daiFilter.length && daiFilter.indexOf(dai) === -1) return false;
+      if (chuFilter.length && chuFilter.indexOf(chu) === -1) return false;
+      if (shoFilter.length && shoFilter.indexOf(sho) === -1) return false;
+      return true;
+    });
+  }
+
+  function getSheetMeta(sheetName) {
+    const c = read_(sheetName);
+    if (!c) return null;
+    return {
+      sheetName: sheetName,
+      wordCount: c.wordCount,
+      divisions: c.divisions || { dai: [], chu: [], sho: [] },
+      loadedAt: c.loadedAt,
+      fingerprint: c.fingerprint
+    };
+  }
+
+  function getWordsForStart(sheetName, filters) {
+    const cached = read_(sheetName);
+    if (!cached || !cached.words) {
+      return {
+        status: 'error',
+        code: 'cache_miss',
+        message: 'マイ単語帳「' + sheetName + '」はまだローカルにありません。「キャッシュ更新」を押してから開始してください。'
+      };
+    }
+    const pool = cached.words;
+    const words = filterWords_(pool, filters || {});
+    const bookPool = [];
+    const seen = {};
+    listCachedSheetNames().forEach(function (name) {
+      const other = read_(name);
+      (other && other.words || []).forEach(function (w) {
+        const k = String(w['英単語・熟語の表現'] || '').toLowerCase();
+        if (!k || seen[k]) return;
+        seen[k] = true;
+        bookPool.push(w);
+      });
+    });
+    return {
+      status: 'success',
+      data: {
+        words: words,
+        pool: pool,
+        bookPool: bookPool.length ? bookPool : pool.slice()
+      }
+    };
+  }
+
+  async function persistLog_(sheetName, entry) {
+    const payload = {
+      Set_ID: setId_(sheetName),
+      Set_Name: BOOK + ' / ' + sheetName,
+      Kind: 'user_vocab',
+      Cache_Loaded_At: entry.loadedAt || '',
+      Source_Modified_At: entry.sourceModifiedAt || '',
+      Fingerprint: entry.fingerprint || '',
+      Word_Count: entry.wordCount != null ? entry.wordCount : ''
+    };
+    return UserBridge.call('upsertSetCacheLog', payload);
+  }
+
+  async function markStudied(sheetName) {
+    if (!sheetName) return;
+    const now = new Date().toISOString();
+    const cached = read_(sheetName);
+    await UserBridge.call('upsertSetCacheLog', {
+      Set_ID: setId_(sheetName),
+      Set_Name: BOOK + ' / ' + sheetName,
+      Kind: 'user_vocab',
+      Last_Studied_At: now,
+      Cache_Loaded_At: cached && cached.loadedAt ? cached.loadedAt : '',
+      Source_Modified_At: cached && cached.sourceModifiedAt ? cached.sourceModifiedAt : '',
+      Fingerprint: cached && cached.fingerprint ? cached.fingerprint : '',
+      Word_Count: cached && cached.wordCount != null ? cached.wordCount : ''
+    });
+  }
+
+  async function fetchAndStoreSheet_(sheetName, bookModifiedTime) {
+    const res = await UserBridge.call('getVocabWords', {
+      sheetName: sheetName,
+      filters: {},
+      filtersJson: '{}',
+      includeBookPool: false
+    });
+    if (res.status !== 'success') throw new Error(res.message || '単語取得失敗: ' + sheetName);
+    const pool = res.data.pool || res.data.words || [];
+    const fpRes = await UserBridge.call('getVocabSheetFingerprint', { sheetName: sheetName });
+    const fingerprint = (fpRes.status === 'success' && fpRes.data) ? fpRes.data.fingerprint : '';
+    const wordCount = (fpRes.status === 'success' && fpRes.data) ? fpRes.data.wordCount : pool.length;
+    const entry = {
+      sheetName: sheetName,
+      words: pool,
+      wordCount: wordCount,
+      fingerprint: fingerprint,
+      divisions: buildDivisions_(pool),
+      sourceModifiedAt: bookModifiedTime || '',
+      loadedAt: new Date().toISOString()
+    };
+    write_(sheetName, entry);
+    await persistLog_(sheetName, entry);
+    return entry;
+  }
+
+  /**
+   * 古い／未キャッシュの学習セットだけ Drive から読み直す。
+   * @param {{preferredSheets?: string[]}} opts
+   */
+  async function refreshStale(opts) {
+    opts = opts || {};
+    if (!AuthGateService.isValid()) {
+      return { status: 'skipped', reason: 'not_authenticated', updated: [], skipped: [] };
+    }
+    const metaRes = await UserBridge.call('getVocabBookMeta', {});
+    if (metaRes.status !== 'success') throw new Error(metaRes.message || 'マイ単語帳メタ取得失敗');
+    const bookModified = metaRes.data.modifiedTime || '';
+    const bookSheets = (metaRes.data.sheets || []).map(function (s) { return s.sheetName; });
+
+    const logRes = await UserBridge.call('getSetCacheLog', {});
+    const logRows = (logRes.status === 'success' && logRes.data) ? logRes.data : [];
+    const studiedSheets = {};
+    logRows.forEach(function (row) {
+      const id = String(row.Set_ID || '');
+      if (id.indexOf('vocab:' + BOOK + '/') !== 0) return;
+      studiedSheets[id.slice(('vocab:' + BOOK + '/').length)] = row;
+    });
+
+    const preferred = {};
+    (opts.preferredSheets || []).forEach(function (n) { if (n) preferred[n] = true; });
+    listCachedSheetNames().forEach(function (n) { preferred[n] = true; });
+    Object.keys(studiedSheets).forEach(function (n) { preferred[n] = true; });
+
+    let candidates = bookSheets.filter(function (n) { return preferred[n]; });
+    if (!candidates.length && bookSheets.length) {
+      candidates = bookSheets.slice();
+    }
+
+    const updated = [];
+    const skipped = [];
+    for (let i = 0; i < candidates.length; i++) {
+      const sheetName = candidates[i];
+      const local = read_(sheetName);
+      const logRow = studiedSheets[sheetName];
+      let needFetch = !local;
+
+      if (!needFetch && bookModified && local.sourceModifiedAt && bookModified > local.sourceModifiedAt) {
+        const fpRes = await UserBridge.call('getVocabSheetFingerprint', { sheetName: sheetName });
+        if (fpRes.status === 'success' && fpRes.data) {
+          if (fpRes.data.fingerprint !== local.fingerprint) {
+            needFetch = true;
+          } else {
+            local.sourceModifiedAt = bookModified;
+            write_(sheetName, local);
+            await persistLog_(sheetName, local);
+            skipped.push({ sheetName: sheetName, reason: 'fingerprint_match' });
+          }
+        } else {
+          needFetch = true;
+        }
+      } else if (!needFetch) {
+        skipped.push({ sheetName: sheetName, reason: 'fresh' });
+      }
+
+      // ログ上は学習済みだがキャッシュ欠落
+      if (!local && logRow) needFetch = true;
+
+      if (needFetch) {
+        await fetchAndStoreSheet_(sheetName, bookModified);
+        updated.push(sheetName);
+      }
+    }
+
+    return { status: 'success', updated: updated, skipped: skipped, bookModified: bookModified };
+  }
+
+  /** 指紋判定を無視し、マイ単語帳の全シートを Drive から取り直す */
+  async function refreshAllForce() {
+    if (!AuthGateService.isValid()) {
+      return { status: 'skipped', reason: 'not_authenticated', updated: [] };
+    }
+    const metaRes = await UserBridge.call('getVocabBookMeta', {});
+    if (metaRes.status !== 'success') throw new Error(metaRes.message || 'マイ単語帳メタ取得失敗');
+    const bookModified = metaRes.data.modifiedTime || '';
+    const bookSheets = (metaRes.data.sheets || []).map(function (s) { return s.sheetName; });
+    clearAll();
+    const updated = [];
+    for (let i = 0; i < bookSheets.length; i++) {
+      await fetchAndStoreSheet_(bookSheets[i], bookModified);
+      updated.push(bookSheets[i]);
+    }
+    return { status: 'success', updated: updated, bookModified: bookModified };
+  }
+
+  function enrichUserCatalogSheets_(userBooks) {
+    (userBooks || []).forEach(function (book) {
+      (book.sheets || []).forEach(function (s) {
+        const meta = getSheetMeta(s.sheetName);
+        if (!meta) {
+          if (s.wordCount == null) s.wordCount = '?';
+          s.cacheStatus = 'missing';
+          return;
+        }
+        s.wordCount = meta.wordCount;
+        s.divisions = meta.divisions;
+        s.cacheStatus = 'cached';
+        s.cacheLoadedAt = meta.loadedAt;
+      });
+    });
+  }
+
+  return {
+    getWordsForStart: getWordsForStart,
+    getSheetMeta: getSheetMeta,
+    refreshStale: refreshStale,
+    refreshAllForce: refreshAllForce,
+    invalidate: invalidate,
+    clearAll: clearAll,
+    markStudied: markStudied,
+    listCachedSheetNames: listCachedSheetNames,
+    enrichUserCatalogSheets_: enrichUserCatalogSheets_,
+    setId: setId_
+  };
+})();
+window.UserVocabCacheModule = UserVocabCacheModule;
 
 /** 学習状態（文法・単語統合・localStorage + Drive同期） */
 const ItemStateModule = (() => {
@@ -4853,9 +5163,12 @@ const VocabSettingsModule = (() => {
     applyCatalogToUi_();
     if (AuthGateService.isValid()) {
       try {
-        const userRes = await UserBridge.call('getVocabCatalog', {});
+        const userRes = await UserBridge.call('getVocabCatalog', { light: true });
         if (userRes.status === 'success' && userRes.data && userRes.data.userBooks) {
           catalog.userBooks = userRes.data.userBooks;
+          if (window.UserVocabCacheModule) {
+            UserVocabCacheModule.enrichUserCatalogSheets_(catalog.userBooks);
+          }
           applyCatalogToUi_();
         } else if (userRes.status !== 'success') {
           console.warn('ユーザーカタログ:', userRes.message || userRes);
@@ -4908,7 +5221,11 @@ const VocabSettingsModule = (() => {
     (book.sheets || []).forEach(function (s) {
       const opt = document.createElement('option');
       opt.value = s.sheetName;
-      opt.textContent = s.sheetName + ' (' + s.wordCount + '語)';
+      const countLabel = s.wordCount != null ? s.wordCount : '?';
+      const cacheLabel = type === 'user'
+        ? (s.cacheStatus === 'cached' ? '・キャッシュ済' : '・未キャッシュ')
+        : '';
+      opt.textContent = s.sheetName + ' (' + countLabel + '語' + cacheLabel + ')';
       sheetSelect.appendChild(opt);
     });
     if (prev && Array.from(sheetSelect.options).some(function (o) { return o.value === prev; })) {
@@ -4946,7 +5263,11 @@ const VocabSettingsModule = (() => {
     const books = getBooksByType(type);
     const book = books.find(function (b) { return b.bookName === bookName; });
     const sheet = book && book.sheets.find(function (s) { return s.sheetName === sheetName; });
-    const div = sheet ? sheet.divisions : { dai: [], chu: [], sho: [] };
+    let div = sheet ? sheet.divisions : { dai: [], chu: [], sho: [] };
+    if (type === 'user' && window.UserVocabCacheModule) {
+      const meta = UserVocabCacheModule.getSheetMeta(sheetName);
+      if (meta && meta.divisions) div = meta.divisions;
+    }
     const filters = (saved && saved.filters) || {};
     const sameSheet = saved.bookName === bookName && saved.sheetName === sheetName;
     renderDivisionCheckboxes('vocab-dai-container', div.dai, 'dai', sameSheet ? filters.dai : []);
@@ -5968,6 +6289,7 @@ const VocabRegisterModule = (() => {
     if (d.sheetUrl || d.bookUrl) setBookShortcut(d.bookUrl, d.sheetUrl);
     const bookName = d.bookName || 'マイ単語帳';
     const sheetName = d.sheetName || (document.getElementById('register-sheet-name') || {}).value || 'デフォルト';
+    if (window.UserVocabCacheModule) UserVocabCacheModule.invalidate(sheetName);
     return { bookName: bookName, sheetName: sheetName };
   }
 
@@ -6256,21 +6578,51 @@ const ReadingSessionModule = (() => {
       alert('音読練習にはログインが必要です');
       return false;
     }
-    const result = await UserBridge.call('startSession', {
-      mode: 'reading',
-      sheetName: sheetName,
-      filters: {},
-      options: {}
-    });
-    if (result.status !== 'success') {
-      alert('セッション開始エラー: ' + (result.message || ''));
+    if (!window.UserVocabCacheModule) {
+      alert('ユーザー単語キャッシュが未初期化です');
       return false;
     }
-    sessionData = result.data;
+    const cached = UserVocabCacheModule.getWordsForStart(sheetName, {});
+    if (cached.status !== 'success') {
+      alert(cached.message || 'キャッシュがありません。「キャッシュ更新」を押してください。');
+      return false;
+    }
+    UserVocabCacheModule.markStudied(sheetName).catch(function (e) {
+      console.warn('学習セット更新記録:', e.message || e);
+    });
+    const words = cached.data.words || [];
+    if (!words.length) {
+      alert('出題できる単語がありません');
+      return false;
+    }
+    let srsStates = {};
+    try {
+      await ItemStateModule.syncFromServer('');
+      const all = ItemStateModule.loadLocal();
+      words.forEach(function (w) {
+        const id = window.SrsModule
+          ? SrsModule.buildWordId('マイ単語帳', sheetName, w['通し番号'])
+          : ('マイ単語帳|' + sheetName + '|' + w['通し番号']);
+        if (all[id]) srsStates[id] = all[id];
+      });
+    } catch (e) { console.warn('学習状態:', e.message || e); }
+    sessionData = {
+      mode: 'reading',
+      setName: 'マイ単語帳 / ' + sheetName,
+      bookName: 'マイ単語帳',
+      sheetName: sheetName,
+      filters: {},
+      words: words,
+      pool: cached.data.pool || words,
+      bookPool: cached.data.bookPool || words,
+      srsStates: srsStates,
+      options: {},
+      createdAt: new Date().toISOString()
+    };
     currentIndex = 0;
     sessionStartTs = Date.now();
     currentAppMode = 'reading';
-    currentReadingSetName = sessionData.setName || ('マイ単語帳 / ' + sheetName);
+    currentReadingSetName = sessionData.setName;
     currentSessionIsPreset = false;
     showReadingScreen();
     renderCurrentWord();
@@ -7126,11 +7478,15 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
       let result;
       const bookType = document.getElementById('vocab-book-type').value;
       if (bookType === 'user' && AuthGateService.isValid()) {
-        result = await UserBridge.call('getVocabWords', {
-          sheetName: options.sheetName,
-          filtersJson: JSON.stringify(options.filters)
+        if (!window.UserVocabCacheModule) throw new Error('ユーザー単語キャッシュが未初期化です');
+        result = UserVocabCacheModule.getWordsForStart(options.sheetName, options.filters);
+        if (result.status !== 'success') {
+          alert(result.message || 'キャッシュがありません。「キャッシュ更新」を押してください。');
+          return;
+        }
+        UserVocabCacheModule.markStudied(options.sheetName).catch(function (e) {
+          console.warn('学習セット更新記録:', e.message || e);
         });
-        if (result.status === 'success') result = { status: 'success', data: result.data };
       } else {
         result = await PresetModule.getVocabWords(options.bookName, options.sheetName, JSON.stringify(options.filters), true, false);
       }
@@ -7819,13 +8175,50 @@ function initModeTabs() {
     await BusyButton.run(btn, async function () {
       try {
         await PresetModule.refreshAll();
+        let userMsg = '';
+        if (AuthGateService.isValid() && window.UserVocabCacheModule) {
+          const preferred = [];
+          const sheetEl = document.getElementById('vocab-sheet-select');
+          if (sheetEl && sheetEl.value) preferred.push(sheetEl.value);
+          const uref = await UserVocabCacheModule.refreshStale({ preferredSheets: preferred });
+          userMsg = ' マイ単語帳: 更新' + (uref.updated || []).length + '件 / スキップ' + (uref.skipped || []).length + '件';
+        }
         await reloadPresetScreens_();
-        showToast_('教材を最新に更新しました。');
+        showToast_('教材を最新に更新しました。' + userMsg);
       } catch (e) {
         alert('更新エラー: ' + e.message);
       }
     }, '更新中…');
   });
+
+  const forceRefreshBtn = document.getElementById('cache-force-refresh-btn');
+  if (forceRefreshBtn) {
+    forceRefreshBtn.addEventListener('click', async function () {
+      const btn = this;
+      const statusEl = document.getElementById('cache-force-refresh-status');
+      if (!confirm('プリセットとマイ単語帳の全学習セットを強制的に再取得します。通信量が多くなります。続行しますか？')) return;
+      await BusyButton.run(btn, async function () {
+        try {
+          if (statusEl) statusEl.textContent = 'プリセットを更新中…';
+          await PresetModule.refreshAll();
+          let userMsg = '';
+          if (AuthGateService.isValid() && window.UserVocabCacheModule) {
+            if (statusEl) statusEl.textContent = 'マイ単語帳を全件取得中…';
+            const uref = await UserVocabCacheModule.refreshAllForce();
+            userMsg = ' マイ単語帳: ' + (uref.updated || []).length + '件を強制更新';
+          } else {
+            userMsg = ' （マイ単語帳はログイン後に更新できます）';
+          }
+          await reloadPresetScreens_();
+          if (statusEl) statusEl.textContent = '完了しました。' + userMsg;
+          showToast_('全学習セットを強制更新しました。' + userMsg);
+        } catch (e) {
+          if (statusEl) statusEl.textContent = '失敗: ' + (e.message || e);
+          alert('強制更新エラー: ' + e.message);
+        }
+      }, '強制更新中…');
+    });
+  }
 
   // 裏側の版チェックで教材の更新を検知したら、設定画面を静かに描き直す
   window.addEventListener('digitaldrill:presets-updated', async function () {
@@ -7871,7 +8264,7 @@ async function loadManagePanel_() {
   try {
     const el = document.getElementById('user-set-list');
     const manageBtn = document.getElementById('manage-open-book-btn');
-    const result = await UserBridge.call('getVocabCatalog', {});
+    const result = await UserBridge.call('getVocabCatalog', { light: true });
     if (result.status !== 'success') {
       const msg = formatUserBridgeError_(result);
       if (el) {
@@ -7880,6 +8273,9 @@ async function loadManagePanel_() {
       }
       if (manageBtn) manageBtn.style.display = 'none';
       return;
+    }
+    if (window.UserVocabCacheModule && result.data && result.data.userBooks) {
+      UserVocabCacheModule.enrichUserCatalogSheets_(result.data.userBooks);
     }
     const books = (result.data && result.data.userBooks) || [];
     const select = document.getElementById('reading-sheet-select');
@@ -7902,10 +8298,12 @@ async function loadManagePanel_() {
     let html = '';
     select.innerHTML = '';
     book.sheets.forEach(function (s) {
-      html += '<div class="log-item"><strong>' + s.sheetName + '</strong> — ' + s.wordCount + '語</div>';
+      const countLabel = s.wordCount != null ? s.wordCount : '?';
+      const cacheLabel = s.cacheStatus === 'cached' ? '（キャッシュ済）' : '（未キャッシュ・更新が必要）';
+      html += '<div class="log-item"><strong>' + s.sheetName + '</strong> — ' + countLabel + '語 ' + cacheLabel + '</div>';
       const opt = document.createElement('option');
       opt.value = s.sheetName;
-      opt.textContent = s.sheetName + ' (' + s.wordCount + '語)';
+      opt.textContent = s.sheetName + ' (' + countLabel + '語' + (s.cacheStatus === 'cached' ? '・キャッシュ済' : '・未キャッシュ') + ')';
       select.appendChild(opt);
     });
     el.innerHTML = html;

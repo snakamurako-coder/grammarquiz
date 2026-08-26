@@ -21,7 +21,7 @@ GAS①（ユーザー権限）
   └─ 管理者ダッシュボード（フォーム回答・whitelist）
 ```
 
-> マイ単語帳・学習記憶: [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md)  
+> マイ単語帳・学習記憶: [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §0（2026-08-26 修復・動作確認済み）  
 > Google Form 集約: [FORM_AGGREGATION_SANCTUARY.md](FORM_AGGREGATION_SANCTUARY.md) §0（2026-08-26 動作確認済み）
 
 ---
@@ -121,10 +121,12 @@ window.DIGITALDRILL_CONFIG = {
 
 ```text
 UserBridge.call(op, payload)
-  → UserDriveModule.ensureAuthorized()   // Drive OAuth（ログインとは別）
+  → UserDriveModule.ensureAuthorized({ interactive })  // Drive OAuth（ログインとは別。「Drive を接続」経由）
   → UserDriveModule.dispatch(op, payload)
   → マイドライブ/DigitalDrill_MyData/…
 ```
+
+存在確認は `files.get`（`q=id=` 禁止）。詳細は [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §0。
 
 対応 op: `getVocabCatalog`, `getVocabWords`, `registerVocabWords`, `getLearningLogs`, `getItemStates`, `upsertItemStates`, `saveSessionLog`, `startSession`, `countSessionAttempts`
 
@@ -199,12 +201,14 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 
 ### Drive OAuth（UserDriveModule）
 
-1. ログイン成功後、`onLoginSuccess` で `UserDriveModule.ensureUserDataEnvironment()` を実行
-2. **フォルダ `DigitalDrill_MyData`・`マイ単語帳`・`DigitalDrill学習記録` がなければ自動作成**
-3. 初回 or 期限切れ時、Google の Drive/Sheets 権限ダイアログを表示
+詳細・動作確認済み設定: [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §0。
+
+1. ログイン成功 ≠ Drive 許可。キャッシュが無ければプロフィール下 **「Drive を接続」** を表示（ページ読込直後の自動ポップアップは使わない）
+2. ユーザー操作で OAuth 許可後、`ensureUserDataEnvironment` が **フォルダ `DigitalDrill_MyData`・`マイ単語帳`・`DigitalDrill学習記録`** をなければ作成
+3. フォルダ／ファイルの存在確認は **`files.get`**（`files.list` の `q=id=` は使わない）
 4. トークンは `dd_google_access_token:<account>` に保存（アカウント別）
 
-**ログイン成功だけでは単語登録できない。** Drive 権限の許可が別途必要。許可後は上記3点がマイドライブ直下に作られる。
+**ログイン成功だけでは単語登録・学習記録の読み書きはできない。** Drive 権限の許可が別途必要。
 
 ---
 
@@ -232,8 +236,8 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 
 ## トラブルシューティング
 
-- **単語登録・学習記憶が保存されない**: [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §9 を参照。Drive OAuth 未許可が最多。`GOOGLE_CLIENT_ID` が Pages に反映されているか確認
+- **単語登録・学習記憶が保存されない**: [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §0・§9。「Drive を接続」→ `DigitalDrill_MyData`。`GOOGLE_CLIENT_ID` が Pages に反映されているか
 - **セッション集約が空**: フォーム回答先 SS に行が入っているか、`config.js` の `GOOGLE_FORM` が正しいか確認。**GAS①・GAS② を再デプロイ**（`submitFormSummary` 必須）。プリセット学習（マイ単語帳以外）で終了しているか。詳細は [FORM_AGGREGATION_SANCTUARY.md](FORM_AGGREGATION_SANCTUARY.md)
-- **マイページ／マイ単語帳が空**: ユーザー Drive は Pages の `UserDriveModule`（GAS① ではない）。[USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md)・HANDOVER「未解決: ユーザー Drive」
+- **マイページ／マイ単語帳が空**: ユーザー Drive は Pages の `UserDriveModule`（GAS① ではない）。[USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §0・HANDOVER「ユーザー Drive — 動作確認済み」
 - **教材の更新が反映されない**: サーバー側の版キャッシュ（120秒）が切れるのを待つか「キャッシュ更新」ボタン
 - **初回表示が遅い**: `docs/data/manifest.json` が未生成。`scripts/export-static.ps1` を実行

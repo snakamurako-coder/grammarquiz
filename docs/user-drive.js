@@ -11,6 +11,8 @@ const UserDriveModule = (function () {
   const LOG_BOOK_NAME = 'DigitalDrill学習記録';
   const ITEM_STATE_SHEET = '学習状態';
   const SESSION_LOG_SHEET = '学習記録';
+  /** ローカルキャッシュに読み込んだ学習セットの記録（通信量抑制用） */
+  const SET_CACHE_LOG_SHEET = '学習セット更新記録';
   const UNREGISTERED = '(未登録)';
 
   const VOCAB_HEADERS = [
@@ -27,6 +29,11 @@ const UserDriveModule = (function () {
   ];
 
   const SESSION_LOG_HEADERS = ['タイムスタンプ', '学習セット名', 'モード', '正答率', '解答時間', '詳細'];
+
+  const SET_CACHE_LOG_HEADERS = [
+    'Set_ID', 'Set_Name', 'Kind', 'Cache_Loaded_At', 'Source_Modified_At',
+    'Fingerprint', 'Word_Count', 'Last_Studied_At'
+  ];
 
   const MEANING_KEYS = [
     '意味＠名詞', '意味＠動詞', '意味＠形容詞', '意味＠副詞',
@@ -489,6 +496,7 @@ const UserDriveModule = (function () {
       await sheetsValuesUpdate_(bookId, SESSION_LOG_SHEET + '!A1:F1', [SESSION_LOG_HEADERS]);
     }
     await ensureItemStateSheet_(bookId);
+    await ensureSetCacheLogSheet_(bookId);
   }
 
   async function ensureItemStateSheet_(bookId) {
@@ -500,6 +508,19 @@ const UserDriveModule = (function () {
     const header = await sheetsValuesGet_(bookId, ITEM_STATE_SHEET + '!A1:K1');
     if (!header.length || !header[0].length) {
       await sheetsValuesUpdate_(bookId, ITEM_STATE_SHEET + '!A1:K1', [ITEM_STATE_HEADERS]);
+    }
+  }
+
+  async function ensureSetCacheLogSheet_(bookId) {
+    const ss = await sheetsGet_(bookId);
+    const exists = (ss.sheets || []).some(function (s) { return s.properties.title === SET_CACHE_LOG_SHEET; });
+    if (!exists) {
+      await sheetsBatchUpdate_(bookId, [{ addSheet: { properties: { title: SET_CACHE_LOG_SHEET } } }]);
+    }
+    const header = await sheetsValuesGet_(bookId, SET_CACHE_LOG_SHEET + '!A1:H1');
+    const row = header[0] || [];
+    if (!row.length || row.indexOf('Set_ID') < 0) {
+      await sheetsValuesUpdate_(bookId, SET_CACHE_LOG_SHEET + '!A1:H1', [SET_CACHE_LOG_HEADERS]);
     }
   }
 
@@ -515,10 +536,13 @@ const UserDriveModule = (function () {
 
   async function ensureLogBookReady_(bookId) {
     const ss = await sheetsGet_(bookId);
-    const hasSheet = (ss.sheets || []).some(function (s) {
-      return s.properties.title === SESSION_LOG_SHEET;
-    });
-    if (!hasSheet) await setupLogBook_(bookId);
+    const titles = {};
+    (ss.sheets || []).forEach(function (s) { titles[s.properties.title] = true; });
+    if (!titles[SESSION_LOG_SHEET] || !titles[ITEM_STATE_SHEET] || !titles[SET_CACHE_LOG_SHEET]) {
+      await setupLogBook_(bookId);
+    } else {
+      await ensureSetCacheLogSheet_(bookId);
+    }
   }
 
   /**
@@ -641,14 +665,133 @@ const UserDriveModule = (function () {
     return String(bookName || UNREGISTERED) + '|' + String(sheetName || UNREGISTERED) + '|' + String(serialNo || UNREGISTERED);
   }
 
-  async function opGetVocabCatalog_() {
+  function buildSetId_(sheetName) {
+    return 'vocab:' + VOCAB_BOOK_NAME + '/' + String(sheetName || '');
+  }
+
+  function fingerprintFromSerialColumn_(colA) {
+    let count = 0;
+    let maxSerial = 0;
+    let sum = 0;
+    for (let i = 1; i < (colA || []).length; i++) {
+      const raw = colA[i] && colA[i][0] != null ? String(colA[i][0]).trim() : '';
+      if (!raw) continue;
+      count++;
+      const n = parseInt(raw, 10);
+      if (!isNaN(n)) {
+        if (n > maxSerial) maxSerial = n;
+        sum += n;
+      }
+    }
+    return count + ':' + maxSerial + ':' + sum;
+  }
+
+  async function opGetVocabBookMeta_() {
+    const bookId = await getVocabBookId_();
+    const meta = await driveGet_(bookId, 'id,name,modifiedTime,trashed');
+    const ss = await sheetsGet_(bookId);
+    const sheets = (ss.sheets || []).map(function (s) {
+      return { sheetName: s.properties.title, sheetId: s.properties.sheetId };
+    });
+    return {
+      status: 'success',
+      data: {
+        bookId: bookId,
+        bookName: VOCAB_BOOK_NAME,
+        bookUrl: sheetUrl_(bookId),
+        modifiedTime: meta && meta.modifiedTime ? meta.modifiedTime : '',
+        sheets: sheets
+      }
+    };
+  }
+
+  async function opGetVocabSheetFingerprint_(payload) {
+    const sheetName = payload.sheetName;
+    if (!sheetName) throw new Error('sheetName は必須です。');
+    const bookId = await getVocabBookId_();
+    const colA = await sheetsValuesGet_(bookId, sheetName + '!A:A');
+    const fp = fingerprintFromSerialColumn_(colA);
+    const wordCount = parseInt(String(fp).split(':')[0], 10) || 0;
+    return {
+      status: 'success',
+      data: { sheetName: sheetName, fingerprint: fp, wordCount: wordCount }
+    };
+  }
+
+  async function opGetSetCacheLog_() {
+    const bookId = await getLogBookId_();
+    await ensureLogBookReady_(bookId);
+    const values = await sheetsValuesGet_(bookId, SET_CACHE_LOG_SHEET + '!A:H');
+    if (values.length <= 1) return { status: 'success', data: [] };
+    const headers = values[0];
+    const rows = [];
+    for (let i = 1; i < values.length; i++) {
+      const obj = rowToObj_(headers, values[i]);
+      if (!obj.Set_ID) continue;
+      rows.push({
+        Set_ID: obj.Set_ID || '',
+        Set_Name: obj.Set_Name || '',
+        Kind: obj.Kind || 'user_vocab',
+        Cache_Loaded_At: obj.Cache_Loaded_At || '',
+        Source_Modified_At: obj.Source_Modified_At || '',
+        Fingerprint: obj.Fingerprint || '',
+        Word_Count: obj.Word_Count || '',
+        Last_Studied_At: obj.Last_Studied_At || ''
+      });
+    }
+    return { status: 'success', data: rows };
+  }
+
+  async function opUpsertSetCacheLog_(payload) {
+    const entry = payload || {};
+    const setId = entry.Set_ID || buildSetId_(entry.sheetName);
+    if (!setId) throw new Error('Set_ID は必須です。');
+    const bookId = await getLogBookId_();
+    await ensureSetCacheLogSheet_(bookId);
+    const values = await sheetsValuesGet_(bookId, SET_CACHE_LOG_SHEET + '!A:H');
+    const headers = values.length ? values[0] : SET_CACHE_LOG_HEADERS;
+    const idCol = headers.indexOf('Set_ID');
+    let existingRow = -1;
+    let existing = {};
+    for (let r = 1; r < values.length; r++) {
+      if (String(values[r][idCol] || '') === String(setId)) {
+        existingRow = r + 1;
+        existing = rowToObj_(headers, values[r]);
+        break;
+      }
+    }
+    const merged = {
+      Set_ID: setId,
+      Set_Name: entry.Set_Name || existing.Set_Name || entry.sheetName || '',
+      Kind: entry.Kind || existing.Kind || 'user_vocab',
+      Cache_Loaded_At: entry.Cache_Loaded_At != null ? entry.Cache_Loaded_At : (existing.Cache_Loaded_At || ''),
+      Source_Modified_At: entry.Source_Modified_At != null ? entry.Source_Modified_At : (existing.Source_Modified_At || ''),
+      Fingerprint: entry.Fingerprint != null ? entry.Fingerprint : (existing.Fingerprint || ''),
+      Word_Count: entry.Word_Count != null ? entry.Word_Count : (existing.Word_Count || ''),
+      Last_Studied_At: entry.Last_Studied_At != null ? entry.Last_Studied_At : (existing.Last_Studied_At || '')
+    };
+    const row = SET_CACHE_LOG_HEADERS.map(function (h) { return merged[h] != null ? merged[h] : ''; });
+    if (existingRow > 0) {
+      await sheetsValuesUpdate_(bookId, SET_CACHE_LOG_SHEET + '!A' + existingRow + ':H' + existingRow, [row]);
+    } else {
+      await sheetsValuesAppend_(bookId, SET_CACHE_LOG_SHEET + '!A:H', [row]);
+    }
+    return { status: 'success', data: merged };
+  }
+
+  async function opGetVocabCatalog_(payload) {
+    const light = !!(payload && payload.light);
     const bookId = await getVocabBookId_();
     const ss = await sheetsGet_(bookId);
     const sheetInfos = [];
     for (let i = 0; i < (ss.sheets || []).length; i++) {
       const name = ss.sheets[i].properties.title;
-      const values = await sheetsValuesGet_(bookId, name + '!A:V');
-      sheetInfos.push(buildSheetInfo_(name, values));
+      if (light) {
+        sheetInfos.push({ sheetName: name, wordCount: null, divisions: { dai: [], chu: [], sho: [] }, light: true });
+      } else {
+        const values = await sheetsValuesGet_(bookId, name + '!A:V');
+        sheetInfos.push(buildSheetInfo_(name, values));
+      }
     }
     return {
       status: 'success',
@@ -921,7 +1064,7 @@ const UserDriveModule = (function () {
   async function dispatch_(op, payload) {
     try {
       switch (op) {
-        case 'getVocabCatalog': return await opGetVocabCatalog_();
+        case 'getVocabCatalog': return await opGetVocabCatalog_(payload || {});
         case 'getVocabWords': return await opGetVocabWords_(payload || {});
         case 'registerVocabWords': return await opRegisterVocabWords_(payload || {});
         case 'getLearningLogs': return await opGetLearningLogs_();
@@ -930,6 +1073,10 @@ const UserDriveModule = (function () {
         case 'saveSessionLog': return await opSaveSessionLog_(payload || {});
         case 'startSession': return await opStartSession_(payload || {});
         case 'countSessionAttempts': return await opCountSessionAttempts_(payload || {});
+        case 'getVocabBookMeta': return await opGetVocabBookMeta_();
+        case 'getVocabSheetFingerprint': return await opGetVocabSheetFingerprint_(payload || {});
+        case 'getSetCacheLog': return await opGetSetCacheLog_();
+        case 'upsertSetCacheLog': return await opUpsertSetCacheLog_(payload || {});
         default: return { status: 'error', message: '未対応の op: ' + op };
       }
     } catch (e) {

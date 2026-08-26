@@ -6,29 +6,29 @@ alwaysApply: false
 
 # ユーザーデータ聖域
 
-詳細契約: `docs/USER_DATA_SANCTUARY.md`
+詳細契約: `docs/USER_DATA_SANCTUARY.md`（§0 動作確認 / **§4-b マイ単語帳キャッシュ**）
 
 ## 現行アーキテクチャ（固定）
 
 - **ログイン**: GAS① → `AuthGateService`（authToken のみ）
 - **ユーザー Drive 操作**: `UserBridge` → `UserDriveModule` → GCP OAuth + Drive/Sheets REST API
-- **GAS 経由のユーザー Drive 操作は禁止**（`queueUserOp` / iframe UserBridge を復活させない）
-- GAS① が怪しく見えても、マイフォルダ作成を GAS① に戻さない（調査は Pages Console / OAuth / meta）
+- **GAS 経由のユーザー Drive 操作は禁止**
+- マイ単語帳の学習開始は **ローカルキャッシュのみ**（Drive フル読込は「キャッシュ更新」＋指紋判定）
 
 ## 保存先（変更禁止）
 
-マイドライブ直下 `DigitalDrill_MyData/` → `マイ単語帳` / `DigitalDrill学習記録`
+マイドライブ直下 `DigitalDrill_MyData/` → `マイ単語帳` / `DigitalDrill学習記録`（含: `学習セット更新記録`）
 
-## 変更時の必須事項
+## 効いている設定（壊したら戻す）
 
-1. `UserBridge.queueOp` と `dispatch_` は例外を `{ status: 'error', message }` で返す（throw のみにしない）
-2. OAuth トークンはアカウント別キー + `migrateLegacyToken_()` を維持
-3. `ensureAuthorized_()` はサイレント更新失敗時に `consent` 再取得
-4. ログイン後はキャッシュ済みトークンなら環境準備。無ければ「Drive を接続」ボタン（ユーザー操作）で `ensureUserDataEnvironment`
-5. フォルダ／ファイル存在確認は `files.get`（`q=id=` は使わない）
-6. 書込 op は `USER_BRIDGE_WRITE_OPS` に登録
-7. `VOCAB_HEADERS` / 列契約変更時は `docs/gem_system_prompt.md` も同期
+1. 存在確認は **`files.get`**（`q=id=` 禁止）
+2. 「Drive を接続」ボタン（ページ読込直後の自動 OAuth 禁止）
+3. `ensureAuthorized_({ interactive })`
+4. アカウント別 OAuth／meta + migrate
+5. マイ単語帳: 開始=キャッシュ / 更新=modifiedTime→A列指紋→必要時のみフル読込
+6. `USER_BRIDGE_WRITE_OPS` に `upsertSetCacheLog` を含める
+7. `VOCAB_HEADERS` 変更時は生成プロンプト同期
 
 ## 触る前に確認
 
-単語登録・学習記憶まわりをリファクタする場合、先に `docs/USER_DATA_SANCTUARY.md` §7–§8 を読むこと。Form 集約成功と Drive 失敗は別経路。GAS① にユーザー Drive 操作を戻さない。
+`docs/USER_DATA_SANCTUARY.md` §0・§4-b・§7–§8。
