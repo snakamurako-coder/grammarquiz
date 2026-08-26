@@ -231,11 +231,30 @@ const UserDriveModule = (function () {
     });
   }
 
-  async function ensureAuthorized_() {
+  function hasCachedToken_() {
+    migrateLegacyToken_();
+    const token = localStorage.getItem(tokenStorageKey_());
+    const exp = parseInt(localStorage.getItem(tokenExpStorageKey_()) || '0', 10);
+    return !!(token && Date.now() < exp);
+  }
+
+  /**
+   * @param {{interactive?: boolean}} opts
+   * interactive=false のときはポップアップを出さず、キャッシュが無ければ失敗する。
+   * GAS① リダイレクト復帰など「ユーザー操作なし」の経路では interactive:false を使うこと。
+   */
+  async function ensureAuthorized_(opts) {
+    opts = opts || {};
+    const interactive = opts.interactive !== false;
     migrateLegacyToken_();
     const token = localStorage.getItem(tokenStorageKey_());
     const exp = parseInt(localStorage.getItem(tokenExpStorageKey_()) || '0', 10);
     if (token && Date.now() < exp) return token;
+    if (!interactive) {
+      const err = new Error('Drive へのアクセスが許可されていません。画面の「Drive を接続」を押してください。');
+      err.code = 'drive_auth_required';
+      throw err;
+    }
     if (authPromise) return authPromise;
     authPromise = (async function () {
       try {
@@ -259,9 +278,19 @@ const UserDriveModule = (function () {
   async function driveList_(query) {
     const q = encodeURIComponent(query);
     const data = await apiFetch_(
-      'https://www.googleapis.com/drive/v3/files?q=' + q + '&fields=files(id,name,mimeType)&pageSize=20'
+      'https://www.googleapis.com/drive/v3/files?q=' + q
+        + '&spaces=drive&pageSize=50'
+        + '&fields=files(id,name,mimeType,parents,trashed)'
     );
     return data.files || [];
+  }
+
+  /** Drive API の q には id 検索が無いので files.get を使う */
+  async function driveGet_(fileId, fields) {
+    return apiFetch_(
+      'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(fileId)
+        + '?fields=' + encodeURIComponent(fields || 'id,name,mimeType,trashed,parents')
+    );
   }
 
   async function driveCreateFolder_(name, parentId) {
@@ -291,22 +320,10 @@ const UserDriveModule = (function () {
   }
 
   async function driveVerifyFolder_(folderId) {
+    if (!folderId) return false;
     try {
-      const files = await driveList_(
-        "id='" + String(folderId).replace(/'/g, "\\'") + "' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-      );
-      return files.length > 0;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  async function driveVerifyOwnedRootFolder_(folderId) {
-    try {
-      const files = await driveList_(
-        "id='" + String(folderId).replace(/'/g, "\\'") + "' and mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false"
-      );
-      return files.length > 0;
+      const f = await driveGet_(folderId, 'id,mimeType,trashed');
+      return !!(f && f.id && !f.trashed && f.mimeType === 'application/vnd.google-apps.folder');
     } catch (e) {
       return false;
     }
@@ -325,11 +342,11 @@ const UserDriveModule = (function () {
   }
 
   async function driveVerifyOwnedInFolder_(fileId, folderId) {
+    if (!fileId || !folderId) return false;
     try {
-      const files = await driveList_(
-        "id='" + String(fileId).replace(/'/g, "\\'") + "' and '" + String(folderId).replace(/'/g, "\\'") + "' in parents and trashed=false"
-      );
-      return files.length > 0;
+      const f = await driveGet_(fileId, 'id,trashed,parents');
+      if (!f || f.trashed) return false;
+      return (f.parents || []).indexOf(folderId) >= 0;
     } catch (e) {
       return false;
     }
@@ -504,16 +521,19 @@ const UserDriveModule = (function () {
     if (!hasSheet) await setupLogBook_(bookId);
   }
 
-  /** ログイン後: フォルダ・マイ単語帳・学習記録ブックをなければ作成 */
-  async function ensureUserDataEnvironment_() {
-    await ensureAuthorized_();
+  /**
+   * フォルダ・マイ単語帳・学習記録ブックをなければ作成。
+   * @param {{interactive?: boolean}} opts interactive 省略時は true（ボタン押下など）
+   */
+  async function ensureUserDataEnvironment_(opts) {
+    await ensureAuthorized_(opts || {});
     await getVocabBookId_();
     await getLogBookId_();
   }
 
   async function retryAuthorization_() {
     clearAuth_();
-    return ensureAuthorized_();
+    return ensureAuthorized_({ interactive: true });
   }
 
   function buildSheetInfo_(sheetName, values) {
@@ -919,6 +939,7 @@ const UserDriveModule = (function () {
 
   return {
     isEnabled: isEnabled_,
+    hasCachedToken: hasCachedToken_,
     ensureAuthorized: ensureAuthorized_,
     ensureUserDataEnvironment: ensureUserDataEnvironment_,
     retryAuthorization: retryAuthorization_,

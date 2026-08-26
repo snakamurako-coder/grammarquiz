@@ -6,13 +6,14 @@ alwaysApply: false
 
 # フォーム集約聖域
 
-詳細契約: `docs/FORM_AGGREGATION_SANCTUARY.md`
+詳細契約: `docs/FORM_AGGREGATION_SANCTUARY.md`（**§0 が動作確認済みスナップショット**）
 
-## 現行経路（固定）
+## 現行経路（固定・2026-08-26 確認済み / f370d43）
 
-Pages → GAS② `submitFormSummary` → viewform で fbzx 取得 → formResponse POST → 集計 SS
+Pages → `submitFormSummary`（**GAS② 優先、認証トークン無効時のみ GAS①**）→ viewform で fbzx → formResponse POST → 集計 SS
 
-**ブラウザから formResponse へ直接 POST 禁止**（fbzx 欠落で SS に載らない）
+- **ブラウザから formResponse へ直接 POST 禁止**（fbzx 欠落で SS に載らない）
+- **Form は Drive 保存より先に起動**（Drive 待ちにしない・成否を連動させない）
 
 ## 送信対象
 
@@ -22,10 +23,11 @@ Pages → GAS② `submitFormSummary` → viewform で fbzx 取得 → formRespon
 ## 変更時の必須事項
 
 1. `GOOGLE_FORM_ENTRIES`（code.gs）と `config.js` ENTRIES を**同時更新**
-2. GAS② 変更後は **`clasp deploy -i`（GAS②）** — push だけでは不効
+2. GAS 変更後は **`clasp deploy -i` を GAS①・GAS② の両方** — push だけでは不効
 3. `submitSessionSummary_` を `saveSessionResultsUnified` から切り離さない
 4. Drive 保存成否と Form 送信を連動させない（別経路）
+5. GAS① フォールバックを安易に削除しない（authToken はデプロイ単位 Cache）
 
 ## 触る前に確認
 
-Form 集約をリファクタする場合、先に `docs/FORM_AGGREGATION_SANCTUARY.md` §7–§9 を読むこと。
+Form 集約をリファクタする場合、先に `docs/FORM_AGGREGATION_SANCTUARY.md` §0・§7–§9 を読むこと。

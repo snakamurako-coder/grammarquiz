@@ -12,15 +12,17 @@
 
 ```text
 Pages（学習UI）
-  ├─ fetch → GAS②（プリセット読取・認証）
-  ├─ no-cors POST → Google フォーム（プリセット学習概要のみ）
+  ├─ fetch → GAS②（プリセット読取・認証 login）
+  ├─ POST → GAS submitFormSummary → Google フォーム（プリセット概要のみ）
   └─ GCP OAuth → Drive/Sheets API（UserDriveModule：マイ単語帳・学習記憶）
 
-GAS① 管理者ダッシュボード（管理者のみ）
-  └─ フォーム回答シート・whitelist 閲覧
+GAS①（ユーザー権限）
+  ├─ 認証ゲート（?action=auth → Pages）
+  └─ 管理者ダッシュボード（フォーム回答・whitelist）
 ```
 
-> マイ単語帳・学習記憶の設計契約は [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) を参照。
+> マイ単語帳・学習記憶: [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md)  
+> Google Form 集約: [FORM_AGGREGATION_SANCTUARY.md](FORM_AGGREGATION_SANCTUARY.md) §0（2026-08-26 動作確認済み）
 
 ---
 
@@ -157,8 +159,9 @@ Forms が自動付与する「タイムスタンプ」に加え、短答質問�
 User_ID, Mode, Set_ID, Set_Name, Attempt_No, Correct, Total, Score, Duration_Sec, Started_At, Ended_At
 
 - **送信対象**: 管理者プリセットの文法・単語学習のみ（マイ単語帳・音読は送らない）
-- **書き込み**: Pages → GAS② `submitFormSummary` → Google フォーム `formResponse`（fbzx トークン付き）。GAS 同時実行上限を回避しつつ確実に到達
+- **書き込み**: Pages → GAS `submitFormSummary`（**GAS② 優先、トークン無効時は GAS①**）→ Google フォーム `formResponse`（fbzx トークン付き）。Drive 保存とは独立
 - **反映**: フォーム回答先 SS に即時追記（バッチ・トリガー不要）
+- **動作確認**: 2026-08-26 / コミット `f370d43` で Form 記載成功。留意点は [FORM_AGGREGATION_SANCTUARY.md](FORM_AGGREGATION_SANCTUARY.md) §0
 - **閲覧**: GAS① 管理者ダッシュボード、または SS を直接開く（制限付き共有）
 
 > 変更時の注意・禁止事項: [FORM_AGGREGATION_SANCTUARY.md](FORM_AGGREGATION_SANCTUARY.md)
@@ -221,7 +224,7 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 | 箇所 | 挙動 |
 |---|---|
 | Pages → GAS②（版チェック・プリセット取得・認証） | HTTP 429 / 5xx とネットワークエラーに限り、指数バックオフで最大4回リトライ（約1s / 2s / 4s + ジッター） |
-| Pages → Google フォーム（プリセット概要） | `no-cors` POST。ネットワークエラー以外は成功扱い。GAS 同時実行を消費しない |
+| Pages → Google フォーム（プリセット概要） | GAS `submitFormSummary`（fbzx）。Drive とは独立。詳細は FORM_AGGREGATION_SANCTUARY |
 | 教材の配布 | 通常は Pages の `manifest.json`（CDN）とローカルキャッシュで完結し、GAS② には版チェックの 1 リクエストしか出さない |
 | 学習状態の Drive 同期 | 送信に失敗した Item_ID は dirty のまま残り、次のセッション終了時に再送 |
 
@@ -230,6 +233,7 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 ## トラブルシューティング
 
 - **単語登録・学習記憶が保存されない**: [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §9 を参照。Drive OAuth 未許可が最多。`GOOGLE_CLIENT_ID` が Pages に反映されているか確認
-- **セッション集約が空**: フォーム回答先 SS に行が入っているか、`config.js` の `GOOGLE_FORM` が正しいか確認。**GAS② を再デプロイ**（`submitFormSummary` 必須）。プリセット学習（マイ単語帳以外）で終了しているか
+- **セッション集約が空**: フォーム回答先 SS に行が入っているか、`config.js` の `GOOGLE_FORM` が正しいか確認。**GAS①・GAS② を再デプロイ**（`submitFormSummary` 必須）。プリセット学習（マイ単語帳以外）で終了しているか。詳細は [FORM_AGGREGATION_SANCTUARY.md](FORM_AGGREGATION_SANCTUARY.md)
+- **マイページ／マイ単語帳が空**: ユーザー Drive は Pages の `UserDriveModule`（GAS① ではない）。[USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md)・HANDOVER「未解決: ユーザー Drive」
 - **教材の更新が反映されない**: サーバー側の版キャッシュ（120秒）が切れるのを待つか「キャッシュ更新」ボタン
 - **初回表示が遅い**: `docs/data/manifest.json` が未生成。`scripts/export-static.ps1` を実行

@@ -17,10 +17,12 @@ window.DIGITALDRILL_CONFIG = {
   STATIC_MANIFEST_URL: 'data/manifest.json',
   /**
    * プリセット学習の概要集約用 Google フォーム。
-   * 送信は GAS② の submitFormSummary 経由（fbzx トークン付き POST）。
-   * 設計契約: docs/FORM_AGGREGATION_SANCTUARY.md
+   * 送信は GAS の submitFormSummary 経由（fbzx トークン付き POST）。
+   * GAS②（API_URL）優先、認証トークン無効時は GAS①（DASHBOARD_URL）へフォールバック。
+   * Drive 保存とは独立に起動する。設計契約: docs/FORM_AGGREGATION_SANCTUARY.md §0
    * ACTION_URL が空のときは送信をスキップする。
-   * フォーム作成後、ページソースの entry ID と formResponse URL をここに設定する。
+   * フォーム作成後、ページソースの entry ID と formResponse URL をここに設定する
+   * （code.gs の GOOGLE_FORM_ENTRIES と同時更新）。
    */
   GOOGLE_FORM: {
     ACTION_URL: 'https://docs.google.com/forms/d/e/1FAIpQLSfI7mmZPNniyB602utDUnie6W79DQaZgWJghOKTz8TZeiwMPA/formResponse',

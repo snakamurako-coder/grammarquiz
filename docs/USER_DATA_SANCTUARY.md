@@ -38,7 +38,7 @@
 | **アプリログイン** | `digitaldrill_auth_token` 等 | ホワイトリスト・UI 表示 | GAS① 認証 |
 | **Drive OAuth** | `dd_google_access_token:<account>` 等 | マイドライブ読み書き | GIS `initTokenClient` |
 
-ログイン成功 ≠ Drive 権限済み。`onLoginSuccess` で `UserDriveModule.ensureUserDataEnvironment()` を呼び、Drive 許可後にフォルダ・マイ単語帳・学習記録を自動作成する。失敗時はトーストで Drive 許可を促す。
+ログイン成功 ≠ Drive 権限済み。`onLoginSuccess` ではキャッシュ済み OAuth があれば `ensureUserDataEnvironment({ interactive: false })`、無ければプロフィール下の **「Drive を接続」** を表示する（GAS① リダイレクト後は自動ポップアップがブラウザにブロックされやすい）。ユーザーがボタンを押してからフォルダ・マイ単語帳・学習記録を作成する。
 
 ---
 
@@ -161,7 +161,9 @@ VocabRegisterModule.submitCard_
 | `dispatch_` が throw のみ（status 返却なし） | UI が「登録失敗」の詳細を失う |
 | 保存先をマイドライブ以外に変更 | 既存ユーザーのデータが見えなくなる |
 | `onLoginSuccess` で `ensureUserDataEnvironment` をスキップ | 初回登録前にフォルダ/ブックが存在しない |
-| `driveVerifyOwnedRootFolder_` で `parents` に `'root'` 文字列のみ判定 | 検証が常に失敗し meta が毎回消える |
+| `driveVerifyOwnedRootFolder_` で `parents` に `'root'` 文字列のみ判定 | （旧）検証失敗。現行は `files.get` で parents を見る |
+| `files.list` の `q=id='…'` で存在確認 | Drive API は id クエリ非対応 → 常に失敗。`files.get` を使う |
+| ページ読込直後に OAuth ポップアップを自動表示 | GAS① 復帰後にブロックされる。ユーザー操作の「Drive を接続」を使う |
 | `code.gs` にユーザー Drive 操作を再実装 | 聖域の二重化 |
 
 ---
@@ -190,10 +192,12 @@ VocabRegisterModule.submitCard_
 
 | 症状 | 第一疑い | 確認 |
 |---|---|---|
-| ログインはできるが登録できない | Drive OAuth 未許可 | Console / 「登録エラー:」全文。`drive_auth_required` |
+| ログインはできるが登録できない | Drive OAuth 未許可 | プロフィール下「Drive を接続」。Console / `drive_auth_required` |
 | 以前動いていたのに突然不可 | トークンキー変更 | DevTools → Application → localStorage の `dd_google_*` |
 | 登録成功だが単語が見えない | 別フォルダに保存 | Drive で `DigitalDrill_MyData` の場所を確認 |
 | `Drive API が未設定` | config 未反映 | `GOOGLE_CLIENT_ID` が Pages にデプロイされているか |
+| フォルダ／学習記録が作れない・読めない | OAuth 未接続 | GAS① に戻さない。「Drive を接続」後に `DigitalDrill_MyData` を確認 |
+| Form は届くがマイページが空 | Drive 経路のみ失敗 | Form 成功 ≠ Drive 成功。`getLearningLogs` / 「Drive を接続」 |
 
 ---
 
@@ -212,3 +216,5 @@ VocabRegisterModule.submitCard_
 | 日付 | 内容 |
 |---|---|
 | 2026-08-23 | ensureUserDataEnvironment・フォルダ検証修正・setupVocabBook 堅牢化 |
+| 2026-08-26 | ユーザー Drive 未解決メモを HANDOVER / トラブル表に追記。Form 成功と Drive 失敗は別経路 |
+| 2026-08-26 | Drive 検証を files.get に修正。GAS① 復帰後は「Drive を接続」ボタンで OAuth（自動ポップアップ廃止） |

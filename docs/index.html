@@ -1824,15 +1824,18 @@ const UserBridge = {
       return { status: 'error', message: 'Drive API が未設定です（config.js の GOOGLE_CLIENT_ID）' };
     }
     try {
-      await UserDriveModule.ensureAuthorized();
+      await UserDriveModule.ensureAuthorized({ interactive: true });
       return await UserDriveModule.dispatch(op, payload || {});
     } catch (e) {
       const msg = String(e.message || e);
-      if (/access_denied|popup_closed|user_cancelled/i.test(msg)) {
+      const code = e && e.code === 'drive_auth_required' ? 'drive_auth_required'
+        : (/access_denied|popup_closed|user_cancelled|drive_auth_required/i.test(msg) ? 'drive_auth_required' : 'drive_api_failed');
+      if (code === 'drive_auth_required') {
+        if (typeof showDriveConnectBanner_ === 'function') showDriveConnectBanner_();
         return {
           status: 'error',
           code: 'drive_auth_required',
-          message: 'Drive へのアクセスが許可されていません。Google サインインで Drive 権限を許可してください。'
+          message: 'Drive へのアクセスが許可されていません。「Drive を接続」ボタンを押して許可してください。'
         };
       }
       return { status: 'error', code: 'drive_api_failed', message: 'マイドライブへの接続に失敗しました: ' + msg };
@@ -1865,15 +1868,37 @@ window.UserBridge = UserBridge;
 function formatUserBridgeError_(res) {
   if (!res) return '不明なエラー';
   if (res.code === 'drive_auth_required') {
-    return 'Drive へのアクセスが許可されていません。ログアウト後に再ログインし、Drive 権限を許可してください。';
+    return 'Drive へのアクセスが許可されていません。「Drive を接続」を押して許可してください。';
   }
   return res.message || 'マイドライブへの接続に失敗しました';
 }
 
-function renderUserLogsError_(message) {
-  const html = '<p style="color:#c62828;">' + escapeHtml_(message) + '</p>';
-  const el = document.getElementById('user-logs-list');
-  if (el) el.innerHTML = html;
+function showDriveConnectBanner_() {
+  let el = document.getElementById('drive-connect-banner');
+  if (!el) {
+    const profile = document.getElementById('profile-container');
+    if (!profile) return;
+    el = document.createElement('div');
+    el.id = 'drive-connect-banner';
+    el.style.cssText = 'margin-top:12px;padding:12px;border:1px solid #ffcc80;background:#fff8e1;border-radius:8px;text-align:left;';
+    el.innerHTML = ''
+      + '<p style="margin:0 0 8px;font-size:0.92em;color:#e65100;font-weight:bold;">マイ単語帳・学習記録のため、Google Drive の接続が必要です</p>'
+      + '<p style="margin:0 0 10px;font-size:0.85em;color:#666;">GAS 経由ログイン後は、ブラウザが自動ポップアップを止めることがあります。下のボタンを押して許可してください（組織の権限不足ではありません）。</p>'
+      + '<button type="button" id="drive-connect-btn" class="btn-primary" style="width:auto;min-width:160px;padding:10px 16px;">Drive を接続</button>';
+    profile.appendChild(el);
+    const btn = document.getElementById('drive-connect-btn');
+    if (btn) {
+      btn.addEventListener('click', function () {
+        BusyButton.run(btn, function () { return retryDriveAccess_(); }, '接続中…');
+      });
+    }
+  }
+  el.style.display = 'block';
+}
+
+function hideDriveConnectBanner_() {
+  const el = document.getElementById('drive-connect-banner');
+  if (el) el.style.display = 'none';
 }
 
 async function retryDriveAccess_() {
@@ -1883,16 +1908,49 @@ async function retryDriveAccess_() {
   }
   try {
     await UserDriveModule.retryAuthorization();
-    await UserDriveModule.ensureUserDataEnvironment();
+    await UserDriveModule.ensureUserDataEnvironment({ interactive: true });
+    hideDriveConnectBanner_();
     await refreshUserDataAfterLogin_();
-    showToast_('Drive へのアクセスを再取得しました');
+    showToast_('Drive に接続し、マイフォルダを用意しました');
     return true;
   } catch (e) {
+    showDriveConnectBanner_();
     showToast_('Drive 権限の取得に失敗しました: ' + (e.message || e));
     return false;
   }
 }
 window.retryDriveAccess_ = retryDriveAccess_;
+window.showDriveConnectBanner_ = showDriveConnectBanner_;
+
+/** ログイン後: キャッシュ済みトークンがあれば環境準備。無ければバナーでユーザー操作を待つ（ポップアップ阻止対策） */
+function prepareDriveAfterLogin_() {
+  if (!window.UserDriveModule || !UserDriveModule.isEnabled()) {
+    return refreshUserDataAfterLogin_();
+  }
+  if (UserDriveModule.hasCachedToken && UserDriveModule.hasCachedToken()) {
+    return UserDriveModule.ensureUserDataEnvironment({ interactive: false }).then(function () {
+      hideDriveConnectBanner_();
+      return refreshUserDataAfterLogin_();
+    }).catch(function (e) {
+      console.warn('Drive 環境の準備:', e.message || e);
+      showDriveConnectBanner_();
+      return refreshUserDataAfterLogin_().catch(function (err) {
+        console.warn('ログイン後データ読込:', err.message || err);
+      });
+    });
+  }
+  showDriveConnectBanner_();
+  return refreshUserDataAfterLogin_().catch(function (e) {
+    console.warn('ログイン後データ読込:', e.message || e);
+  });
+}
+
+function renderUserLogsError_(message) {
+  const html = '<p style="color:#c62828;">' + escapeHtml_(message) + '</p>';
+  const el = document.getElementById('user-logs-list');
+  if (el) el.innerHTML = html;
+  if (/Drive|drive_auth/i.test(String(message || ''))) showDriveConnectBanner_();
+}
 
 async function flushSendOutbox_() {
   if (!AuthGateService.isValid()) return;
@@ -7913,17 +7971,7 @@ window.onLoginSuccess = function(user) {
   try { sessionStorage.removeItem('dd_my_vocab_book_url'); } catch (e) {}
   initVocabModules();
   if (window.UserDriveModule && UserDriveModule.isEnabled()) {
-    UserDriveModule.ensureUserDataEnvironment().then(function () {
-      return refreshUserDataAfterLogin_();
-    }).catch(function (e) {
-      console.warn('Drive 環境の準備:', e.message || e);
-      refreshUserDataAfterLogin_().catch(function (err) {
-        console.warn('ログイン後データ読込:', err.message || err);
-      });
-      if (typeof showToast_ === 'function') {
-        showToast_('マイ単語帳・学習記録を使うには Google の Drive 権限が必要です。再ログイン時に許可してください。');
-      }
-    });
+    prepareDriveAfterLogin_();
   } else {
     refreshUserDataAfterLogin_().catch(function (e) {
       console.warn('ログイン後データ読込:', e.message || e);
@@ -8077,8 +8125,20 @@ async function fetchUserLogs() {
   if (!AuthGateService.isValid()) return;
   try {
     if (window.UserDriveModule && UserDriveModule.isEnabled()) {
-      try { await UserDriveModule.ensureUserDataEnvironment(); } catch (e) {
+      if (UserDriveModule.hasCachedToken && !UserDriveModule.hasCachedToken()) {
+        showDriveConnectBanner_();
+        renderUserLogsError_('Drive 未接続です。「Drive を接続」を押してください。');
+        renderMyPage([]).catch(function (e) { console.error('renderMyPage error:', e); });
+        return;
+      }
+      try {
+        await UserDriveModule.ensureUserDataEnvironment({ interactive: false });
+      } catch (e) {
         console.warn('学習記録ブックの準備:', e.message || e);
+        showDriveConnectBanner_();
+        renderUserLogsError_(e.message || String(e));
+        renderMyPage([]).catch(function (err) { console.error('renderMyPage error:', err); });
+        return;
       }
     }
     const data = await UserBridge.call('getLearningLogs', {});
@@ -8087,6 +8147,7 @@ async function fetchUserLogs() {
       renderMyPage([]).catch(function (e) { console.error('renderMyPage error:', e); });
       return;
     }
+    hideDriveConnectBanner_();
     renderUserLogsList_(data.data);
     renderMyPage(data.data).catch(function (e) {
       console.error('renderMyPage error:', e);

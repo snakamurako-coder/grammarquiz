@@ -13,6 +13,7 @@ alwaysApply: false
 - **ログイン**: GAS① → `AuthGateService`（authToken のみ）
 - **ユーザー Drive 操作**: `UserBridge` → `UserDriveModule` → GCP OAuth + Drive/Sheets REST API
 - **GAS 経由のユーザー Drive 操作は禁止**（`queueUserOp` / iframe UserBridge を復活させない）
+- GAS① が怪しく見えても、マイフォルダ作成を GAS① に戻さない（調査は Pages Console / OAuth / meta）
 
 ## 保存先（変更禁止）
 
@@ -23,10 +24,11 @@ alwaysApply: false
 1. `UserBridge.queueOp` と `dispatch_` は例外を `{ status: 'error', message }` で返す（throw のみにしない）
 2. OAuth トークンはアカウント別キー + `migrateLegacyToken_()` を維持
 3. `ensureAuthorized_()` はサイレント更新失敗時に `consent` 再取得
-4. ログイン後は `ensureUserDataEnvironment()` でフォルダ・両 SS を先行作成
-5. 書込 op は `USER_BRIDGE_WRITE_OPS` に登録
-5. `VOCAB_HEADERS` / 列契約変更時は `docs/gem_system_prompt.md` も同期
+4. ログイン後はキャッシュ済みトークンなら環境準備。無ければ「Drive を接続」ボタン（ユーザー操作）で `ensureUserDataEnvironment`
+5. フォルダ／ファイル存在確認は `files.get`（`q=id=` は使わない）
+6. 書込 op は `USER_BRIDGE_WRITE_OPS` に登録
+7. `VOCAB_HEADERS` / 列契約変更時は `docs/gem_system_prompt.md` も同期
 
 ## 触る前に確認
 
-単語登録・学習記憶まわりをリファクタする場合、先に `docs/USER_DATA_SANCTUARY.md` §7–§8 のチェックリストを読むこと。
+単語登録・学習記憶まわりをリファクタする場合、先に `docs/USER_DATA_SANCTUARY.md` §7–§8 を読むこと。Form 集約成功と Drive 失敗は別経路。GAS① にユーザー Drive 操作を戻さない。

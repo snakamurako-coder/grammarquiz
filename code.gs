@@ -1731,7 +1731,7 @@ function fetchVocabCatalogFromDrive_() {
     });
   }
 
-  /** 学習者のマイ単語帳は GAS② では返さない（OAuth / GAS① ユーザードライブのみ） */
+  /** 学習者のマイ単語帳は GAS では返さない（Pages の UserDriveModule / OAuth のみ） */
   return { presets: presets, userBooks: [] };
 }
 
