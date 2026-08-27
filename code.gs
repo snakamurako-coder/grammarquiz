@@ -6,6 +6,8 @@ const APP_NAME = 'DigitalDrill（デジドリ）';
 /** スクリプトプロパティキー */
 const PROP = {
   CLIENT_ID: 'CLIENT_ID',
+  /** OAuth トークン交換用（Pages に置かず Script Properties のみ） */
+  CLIENT_SECRET: 'CLIENT_SECRET',
   SPREADSHEET_ID: 'SPREADSHEET_ID',
   MATERIALS_FOLDER_ID: 'MATERIALS_FOLDER_ID',
   VOCABULARY_FOLDER_ID: 'VOCABULARY_FOLDER_ID',
@@ -477,6 +479,14 @@ function doPost(e) {
     const requestData = JSON.parse(e.postData.contents);
     const action = requestData.action;
 
+    // OAuth トークン交換は Drive 初期化不要（CLIENT_SECRET は Script Properties）
+    if (action === 'exchangeOAuthCode') {
+      return handleExchangeOAuthCode_(requestData);
+    }
+    if (action === 'refreshOAuthToken') {
+      return handleRefreshOAuthToken_(requestData);
+    }
+
     if (action === "login") {
       ensureEnvironment();
       return handleLogin_(requestData);
@@ -496,6 +506,112 @@ function doPost(e) {
   } catch (error) {
     return sendResponse({ status: "error", message: error.toString() });
   }
+}
+
+/**
+ * Pages（PKCE）からの認可コード交換。
+ * Web クライアントは client_secret 必須のため GAS② のみが秘密を持つ。
+ */
+function handleExchangeOAuthCode_(requestData) {
+  const code = String(requestData.code || '');
+  const codeVerifier = String(requestData.codeVerifier || requestData.code_verifier || '');
+  const redirectUri = String(requestData.redirectUri || requestData.redirect_uri || '');
+  if (!code || !codeVerifier || !redirectUri) {
+    return sendResponse({ status: 'error', message: 'code / codeVerifier / redirectUri が必要です' });
+  }
+  const props = PropertiesService.getScriptProperties();
+  const clientId = props.getProperty(PROP.CLIENT_ID) || DEFAULT_CLIENT_ID;
+  const clientSecret = String(props.getProperty(PROP.CLIENT_SECRET) || '').trim();
+  if (!clientSecret) {
+    return sendResponse({
+      status: 'error',
+      code: 'client_secret_missing',
+      message: 'Script Properties に CLIENT_SECRET が未設定です（GCP OAuth クライアントのシークレットを GAS①② 両方に登録）'
+    });
+  }
+  const body = {
+    client_id: clientId,
+    client_secret: clientSecret,
+    code: code,
+    code_verifier: codeVerifier,
+    grant_type: 'authorization_code',
+    redirect_uri: redirectUri
+  };
+  const res = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    payload: Object.keys(body).map(function (k) {
+      return encodeURIComponent(k) + '=' + encodeURIComponent(body[k]);
+    }).join('&'),
+    muteHttpExceptions: true
+  });
+  const text = res.getContentText();
+  let data = {};
+  try { data = JSON.parse(text); } catch (e) {}
+  if (res.getResponseCode() < 200 || res.getResponseCode() >= 300) {
+    return sendResponse({
+      status: 'error',
+      message: data.error_description || data.error || ('token exchange failed: ' + res.getResponseCode())
+    });
+  }
+  return sendResponse({
+    status: 'success',
+    access_token: data.access_token || '',
+    refresh_token: data.refresh_token || '',
+    expires_in: data.expires_in || 3600,
+    id_token: data.id_token || '',
+    token_type: data.token_type || 'Bearer',
+    scope: data.scope || ''
+  });
+}
+
+/** refresh_token から access_token を更新（client_secret は GAS 側のみ） */
+function handleRefreshOAuthToken_(requestData) {
+  const refreshToken = String(requestData.refreshToken || requestData.refresh_token || '');
+  if (!refreshToken) {
+    return sendResponse({ status: 'error', message: 'refreshToken が必要です' });
+  }
+  const props = PropertiesService.getScriptProperties();
+  const clientId = props.getProperty(PROP.CLIENT_ID) || DEFAULT_CLIENT_ID;
+  const clientSecret = String(props.getProperty(PROP.CLIENT_SECRET) || '').trim();
+  if (!clientSecret) {
+    return sendResponse({
+      status: 'error',
+      code: 'client_secret_missing',
+      message: 'Script Properties に CLIENT_SECRET が未設定です'
+    });
+  }
+  const body = {
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: refreshToken,
+    grant_type: 'refresh_token'
+  };
+  const res = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    payload: Object.keys(body).map(function (k) {
+      return encodeURIComponent(k) + '=' + encodeURIComponent(body[k]);
+    }).join('&'),
+    muteHttpExceptions: true
+  });
+  const text = res.getContentText();
+  let data = {};
+  try { data = JSON.parse(text); } catch (e) {}
+  if (res.getResponseCode() < 200 || res.getResponseCode() >= 300) {
+    return sendResponse({
+      status: 'error',
+      message: data.error_description || data.error || ('refresh failed: ' + res.getResponseCode())
+    });
+  }
+  return sendResponse({
+    status: 'success',
+    access_token: data.access_token || '',
+    refresh_token: data.refresh_token || '',
+    expires_in: data.expires_in || 3600,
+    token_type: data.token_type || 'Bearer',
+    scope: data.scope || ''
+  });
 }
 
 // =========================================================

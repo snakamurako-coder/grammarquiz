@@ -206,9 +206,10 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 1. ログイン成功 ≠ Drive 許可。キャッシュ（access / refresh）が無ければプロフィール下 **「Drive を接続」** を表示（自動 OAuth・ポップアップは使わない）
 2. ボタン押下で **同タブ・リダイレクト（PKCE・offline）** → 復帰後に `refresh_token` を保存。以降はサイレント refresh（目標: 再同意なしで約1ヶ月以上。同意画面が「テスト」だと Google 側で refresh が7日失効）
 3. GCP OAuth クライアントに Pages の **承認済みのリダイレクト URI** を登録（`config.js` の `GOOGLE_OAUTH_REDIRECT_URI` または実際の `origin+pathname`）
-4. 許可後、`ensureUserDataEnvironment` が **フォルダ `DigitalDrill_MyData`・`マイ単語帳`・`DigitalDrill学習記録`** をなければ作成
-5. フォルダ／ファイルの存在確認は **`files.get`**（`files.list` の `q=id=` は使わない）
-6. トークンは `dd_google_access_token:<account>` / `dd_google_refresh_token:<account>` に保存（アカウント別）
+4. **GAS①・GAS② の Script Properties に `CLIENT_SECRET`**（GCP OAuth クライアントのシークレット）を登録。トークン交換は Pages から Google 直叩きせず GAS② の `exchangeOAuthCode` / `refreshOAuthToken` 経由（Pages に secret を置かない）
+5. 許可後、`ensureUserDataEnvironment` が **フォルダ `DigitalDrill_MyData`・`マイ単語帳`・`DigitalDrill学習記録`** をなければ作成
+6. フォルダ／ファイルの存在確認は **`files.get`**（`files.list` の `q=id=` は使わない）
+7. トークンは `dd_google_access_token:<account>` / `dd_google_refresh_token:<account>` に保存（アカウント別）
 
 **ログイン成功だけでは単語登録・学習記録の読み書きはできない。** Drive 権限の許可が別途必要。
 
@@ -238,6 +239,7 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 
 ## トラブルシューティング
 
+- **`client_secret missing` / ログイン直後にトークン交換失敗**: GAS①② の Script Properties に `CLIENT_SECRET` が無い、または未デプロイ。GCP コンソールの OAuth クライアントからシークレットをコピーし、両プロジェクトに登録 → Deploy All
 - **単語登録・学習記憶が保存されない**: [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §0・§9。「Drive を接続」→ `DigitalDrill_MyData`。`GOOGLE_CLIENT_ID` が Pages に反映されているか
 - **セッション集約が空**: フォーム回答先 SS に行が入っているか、`config.js` の `GOOGLE_FORM` が正しいか確認。**GAS①・GAS② を再デプロイ**（`submitFormSummary` 必須）。プリセット学習（マイ単語帳以外）で終了しているか。詳細は [FORM_AGGREGATION_SANCTUARY.md](FORM_AGGREGATION_SANCTUARY.md)
 - **マイページ／マイ単語帳が空**: ユーザー Drive は Pages の `UserDriveModule`（GAS① ではない）。[USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §0・HANDOVER「ユーザー Drive — 動作確認済み」

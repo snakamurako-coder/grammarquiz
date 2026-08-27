@@ -479,23 +479,43 @@ const UserDriveModule = (function () {
     } catch (e) {}
   }
 
-  async function exchangeCodeForTokens_(code, redirectUri, verifier) {
-    const body = new URLSearchParams({
-      client_id: getClientId_(),
-      code: code,
-      code_verifier: verifier,
-      grant_type: 'authorization_code',
-      redirect_uri: redirectUri
-    });
-    const res = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString()
-    });
-    const data = await res.json().catch(function () { return {}; });
-    if (!res.ok) {
-      throw new Error(data.error_description || data.error || ('token exchange failed: ' + res.status));
+  /**
+   * Web クライアントは client_secret 必須のため、トークン交換は GAS② 経由
+   *（秘密は Script Properties の CLIENT_SECRET。Pages には置かない）。
+   */
+  async function postGasOAuth_(payload) {
+    const apiUrl = (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.API_URL)
+      || window.API_URL || '';
+    if (!apiUrl) {
+      throw new Error('API_URL が設定されていません（config.js）');
     }
+    const res = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      redirect: 'follow',
+      credentials: 'omit'
+    });
+    const text = await res.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch (e) {
+      throw new Error('サーバー応答の解析に失敗しました');
+    }
+    if (!res.ok || data.status === 'error') {
+      const err = new Error(data.message || ('OAuth token request failed: ' + res.status));
+      if (data.code) err.code = data.code;
+      throw err;
+    }
+    return data;
+  }
+
+  async function exchangeCodeForTokens_(code, redirectUri, verifier) {
+    const data = await postGasOAuth_({
+      action: 'exchangeOAuthCode',
+      code: code,
+      codeVerifier: verifier,
+      redirectUri: redirectUri
+    });
     persistTokenResponse_(data);
     if (!data.refresh_token && !getRefreshToken_()) {
       console.warn('Drive OAuth: refresh_token が返りませんでした。再同意が必要になることがあります。');
@@ -510,21 +530,16 @@ const UserDriveModule = (function () {
       err.code = 'drive_auth_required';
       throw err;
     }
-    const body = new URLSearchParams({
-      client_id: getClientId_(),
-      refresh_token: refresh,
-      grant_type: 'refresh_token'
-    });
-    const res = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString()
-    });
-    const data = await res.json().catch(function () { return {}; });
-    if (!res.ok) {
+    let data;
+    try {
+      data = await postGasOAuth_({
+        action: 'refreshOAuthToken',
+        refreshToken: refresh
+      });
+    } catch (e) {
       clearAuth_();
-      const err = new Error(data.error_description || data.error || 'refresh_token が無効です。再接続してください。');
-      err.code = 'drive_auth_required';
+      const err = new Error(e.message || 'refresh_token が無効です。再接続してください。');
+      err.code = e.code === 'client_secret_missing' ? e.code : 'drive_auth_required';
       throw err;
     }
     persistTokenResponse_(data);

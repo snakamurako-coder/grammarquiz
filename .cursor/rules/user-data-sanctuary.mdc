@@ -10,9 +10,9 @@ alwaysApply: false
 
 ## 現行アーキテクチャ（固定）
 
-- **ログイン**: GAS① → `AuthGateService`（authToken のみ）
-- **ユーザー Drive 操作**: `UserBridge` → `UserDriveModule` → GCP OAuth + Drive/Sheets REST API
-- **GAS 経由のユーザー Drive 操作は禁止**
+- **ログイン**: 統一ログイン（openid+Drive リダイレクト）→ GAS whitelist。GAS① 経由は予備
+- **ユーザー Drive 操作**: `UserBridge` → `UserDriveModule` → Drive/Sheets REST API
+- **GAS 経由のフォルダ操作は禁止**。例外: トークン交換／refresh のみ GAS②（`CLIENT_SECRET`、Pages に置かない）
 - マイ単語帳の学習開始は **ローカルキャッシュのみ**（Drive フル読込は「キャッシュ更新」＋指紋判定）
 
 ## 保存先（変更禁止）
@@ -26,10 +26,11 @@ alwaysApply: false
 3. **自動経路は interactive:false** — `UserBridge` / ログイン直後同期は Google へ飛ばない（無限ループ禁止）。明示ボタンだけ true
 4. `ensureAuthorized_({ interactive })` / `apiFetch_` は非対話。起動時 `consumeOAuthRedirect` + OAuth 再突入ガード
 5. アカウント別 OAuth／meta + pending + migrate（access / refresh）
-6. マイ単語帳: 開始=キャッシュ / 更新=modifiedTime→A列指紋→必要時のみフル読込
-7. `USER_BRIDGE_WRITE_OPS` に `upsertSetCacheLog` を含める
-8. `VOCAB_HEADERS` 変更時は生成プロンプト同期
-9. 1ヶ月以上の再同意なしには OAuth 同意画面の **本番** 化が必要（テストは refresh 7日）
+6. コード交換／refresh は GAS② `exchangeOAuthCode` / `refreshOAuthToken`（Script Properties `CLIENT_SECRET`）
+7. マイ単語帳: 開始=キャッシュ / 更新=modifiedTime→A列指紋→必要時のみフル読込
+8. `USER_BRIDGE_WRITE_OPS` に `upsertSetCacheLog` を含める
+9. `VOCAB_HEADERS` 変更時は生成プロンプト同期
+10. 1ヶ月以上の再同意なしには OAuth 同意画面の **本番** 化が必要（テストは refresh 7日）
 
 ## 触る前に確認
 

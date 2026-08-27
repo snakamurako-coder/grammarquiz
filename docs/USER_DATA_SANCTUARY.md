@@ -23,7 +23,7 @@
    - なし → 「Drive を接続」バナーのみ（ユーザー操作でリダイレクト）
 4. **`ensureAuthorized_({ interactive })` の既定は false** — `true` は「Drive を接続」ボタンのみ。`UserBridge.call` も既定非対話（ログイン直後の同期で Google へ飛ばない＝無限ループ防止）。
 5. **メタ／トークンはアカウント別キー** — `dd_user_drive_meta:<account>` / `dd_google_access_token:<account>` / `dd_google_refresh_token:<account>` + pending キー + migrate。
-6. **GAS①・GAS② にユーザー Drive 操作を書かない** — トークン交換も Pages（PKCE）で完結。フォルダ作成を GAS に戻さない。
+6. **GAS①・GAS② にユーザー Drive のフォルダ操作を書かない** — 作成・読み書きは Pages の REST のみ。**例外**: Web OAuth は `client_secret` 必須のため、認可コード交換／refresh だけは GAS②（Script Properties の `CLIENT_SECRET`）経由。秘密は Pages に置かない。
 7. **GCP リダイレクト URI** — `GOOGLE_OAUTH_REDIRECT_URI` または `origin+pathname` を「承認済みのリダイレクト URI」に登録。
 8. **約1ヶ月の再同意なし** — `refresh_token` で access を更新。OAuth 同意画面が **テスト** のままだと Google 側で refresh が **7日** で失効する。1ヶ月以上狙うなら同意画面を **本番** にする。
 9. **OAuth 再突入ガード** — リダイレクト開始〜復帰直後は自動の対話 OAuth を拒否（無限ループ防止）。
@@ -31,12 +31,13 @@
 ### 運用時の確認手順（デプロイ後）
 
 1. GCP に Pages のリダイレクト URI を登録
-2. Pages をハードリロード
-3. ログイン（GAS① 経由でも可）
-4. プロフィール下 **「Drive を接続」** → 同じタブで Google の Drive/Sheets 許可 → Pages に戻る
-5. マイドライブに `DigitalDrill_MyData` / `マイ単語帳` / `DigitalDrill学習記録` がある
-6. マイページに学習記録が出る／単語の「マイ単語帳」が選べる
-7. ブラウザを閉じたあと再度開いても、バナーなしで Drive が使える（refresh 有効時）
+2. **GAS①② の Script Properties に `CLIENT_SECRET`**（GCP OAuth クライアントのシークレット）を登録し、Deploy All
+3. Pages をハードリロード
+4. ログイン（統一ログインまたは GAS① 経由）
+5. 未接続時のみプロフィール下 **「Drive を接続」** → 同じタブで Google の Drive/Sheets 許可 → Pages に戻る
+6. マイドライブに `DigitalDrill_MyData` / `マイ単語帳` / `DigitalDrill学習記録` がある
+7. マイページに学習記録が出る／単語の「マイ単語帳」が選べる
+8. ブラウザを閉じたあと再度開いても、バナーなしで Drive が使える（refresh 有効時）
 
 ### よくある切り分け
 
@@ -308,6 +309,7 @@ VocabRegisterModule.submitCard_
 
 | 日付 | 内容 |
 |---|---|
+| 2026-08-27 | Web OAuth の client_secret 必須に対応。トークン交換／refresh を GAS②（Script Properties `CLIENT_SECRET`）経由に変更 |
 | 2026-08-23 | ensureUserDataEnvironment・フォルダ検証修正・setupVocabBook 堅牢化 |
 | 2026-08-27 | ログインと Drive 許可を1回のリダイレクト（openid+Drive）に一本化。GIS ボタン廃止。Drive バナーは再接続用 |
 | 2026-08-27 | **致命修正**: UserBridge 既定を非対話化。ログイン直後の自動同期が Google へ飛ばす無限ループを解消。PKCE二重保管・pendingトークン・OAuth再突入ガード |
