@@ -704,27 +704,30 @@ body.pool-match-active .game-footer {
     
     <!-- 新設：マイページ（学習記録サマリー） -->
     <div class="setting-section" id="mypage-container" style="display: none;">
-      <div class="section-title">📊 マイページ（学習記録）</div>
+      <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <span>📊 マイページ（学習記録）</span>
+        <button type="button" id="mypage-refresh-btn" class="btn-small" style="font-weight:normal;">更新</button>
+      </div>
       <div class="dashboard-grid">
         <!-- 弱点分析 -->
         <div class="dashboard-card weakness-card">
           <div class="card-title">🚨 優先して復習すべきセット</div>
-          <div id="weakness-list" class="dashboard-content">読込中...</div>
+          <div id="weakness-list" class="dashboard-content">タブを開くと読み込みます</div>
         </div>
         <!-- 最近の学習履歴 -->
         <div class="dashboard-card recent-card">
           <div class="card-title">🕒 最近の学習履歴 (直近5回)</div>
-          <div id="recent-history-list" class="dashboard-content">読込中...</div>
+          <div id="recent-history-list" class="dashboard-content">タブを開くと読み込みます</div>
         </div>
         <!-- 教材（シート）別進捗 -->
         <div class="dashboard-card progress-card">
           <div class="card-title">📈 教材（シート）別の進捗</div>
-          <div id="set-progress-list" class="dashboard-content">読込中...</div>
+          <div id="set-progress-list" class="dashboard-content">タブを開くと読み込みます</div>
         </div>
         <!-- ターゲット文法領域別理解度 -->
         <div class="dashboard-card grammar-area-card">
           <div class="card-title">📚 ターゲット文法領域別の理解度</div>
-          <div id="grammar-area-progress-list" class="dashboard-content">読込中...</div>
+          <div id="grammar-area-progress-list" class="dashboard-content">タブを開くと読み込みます</div>
         </div>
       </div>
     </div>
@@ -7118,6 +7121,9 @@ let currentSessionIsPreset = true;
 let currentSessionSettings = null;
 /** fetchUserLogs の直近結果（再現ボタン用） */
 let lastFetchedLearningLogs_ = [];
+/** マイページ学習記録の取得中 Promise（重複起動防止） */
+let fetchUserLogsInFlight_ = null;
+let fetchUserLogsGen_ = 0;
 
 // UI要素
 const screens = {
@@ -8122,9 +8128,7 @@ const SessionSave = (function () {
       .finally(function () {
         activePromise = null;
         BackendSyncStatus.refresh();
-        if (AuthGateService.isValid()) {
-          fetchUserLogs().catch(function () {});
-        }
+        // マイページはタブ切替／更新ボタンでのみ再取得（自動再描画しない）
       });
     return activePromise;
   }
@@ -8339,9 +8343,7 @@ document.getElementById('return-settings-btn').addEventListener('click', () => {
     sessionAnswerLog = [];
   }
   BackendSyncStatus.refresh();
-  if (AuthGateService.isValid() && !SessionSave.isSaving()) {
-    fetchUserLogs();
-  }
+  // 学習記録の自動再取得はしない（マイページタブ／更新ボタンのみ）
 });
 
 // ======= 認証ゲート連携 =======
@@ -8383,6 +8385,7 @@ function enterAppAsGuest() {
 function initModeTabs() {
   if (initModeTabs._done) return;
   initModeTabs._done = true;
+  bindMyPageRefreshButton_();
   const tabs = document.querySelectorAll('.mode-tab:not(.manage-sub-tab)');
   const grammarPanel = document.getElementById('grammar-settings-panel');
   const vocabPanel = document.getElementById('vocab-settings-panel');
@@ -8410,7 +8413,7 @@ function initModeTabs() {
       applyModePanels_(mode);
       if (mode === 'manage') {
         loadManagePanel_();
-        fetchUserLogs().catch(function (e) { console.warn('マイページ学習記録:', e); });
+        fetchUserLogs({ reason: 'tab' }).catch(function (e) { console.warn('マイページ学習記録:', e); });
       }
     });
   });
@@ -8429,7 +8432,7 @@ function initModeTabs() {
       const settingsPanel = document.getElementById('manage-settings-panel');
       if (settingsPanel) settingsPanel.style.display = name === 'settings' ? 'block' : 'none';
       if (name === 'register' && window.VocabRegisterModule) window.VocabRegisterModule.init();
-      if (name === 'logs') fetchUserLogs();
+      // 学習記録サブタブはキャッシュ表示のみ（再取得はマイページ切替／更新ボタン）
       if (name === 'settings') {
         if (window.TtsModule) TtsModule.refreshSettingsUi();
         if (window.SttSettings) SttSettings.refreshSettingsUi();
@@ -8607,7 +8610,7 @@ async function initVocabModules() {
 
 async function refreshUserDataAfterLogin_() {
   await initVocabModules();
-  await fetchUserLogs();
+  // マイページ学習記録はタブ表示時／更新ボタンでのみ取得（ログイン直後の自動再描画をしない）
   ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
   await flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
 }
@@ -9018,43 +9021,83 @@ function bindUserLogsReproduceClicks_() {
   });
 }
 
+function setMyPageLoadingPlaceholders_() {
+  const ids = ['weakness-list', 'recent-history-list', 'set-progress-list', 'grammar-area-progress-list'];
+  ids.forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '読込中...';
+  });
+  const logsEl = document.getElementById('user-logs-list');
+  if (logsEl) logsEl.innerHTML = '<p>読込中...</p>';
+}
+
+function bindMyPageRefreshButton_() {
+  const btn = document.getElementById('mypage-refresh-btn');
+  if (!btn || btn._mypageRefreshBound) return;
+  btn._mypageRefreshBound = true;
+  btn.addEventListener('click', function () {
+    BusyButton.run(btn, function () {
+      return fetchUserLogs({ reason: 'button', force: true });
+    }, '更新中…');
+  });
+}
+
 // ログ取得とマイページ描画
-async function fetchUserLogs() {
+/**
+ * マイページ学習記録の取得。
+ * 自動ポーリングはしない。呼び出し元は「マイページタブ切替」または「更新ボタン」のみ。
+ * @param {{reason?: string, force?: boolean}} opts
+ */
+async function fetchUserLogs(opts) {
+  opts = opts || {};
   if (!AuthGateService.isValid()) return;
-  try {
-    if (window.UserDriveModule && UserDriveModule.isEnabled()) {
-      if (UserDriveModule.hasCachedToken && !UserDriveModule.hasCachedToken()) {
-        showDriveConnectBanner_();
-        renderUserLogsError_('Drive 未接続です。「Drive を接続」を押してください。');
-        renderMyPage([]).catch(function (e) { console.error('renderMyPage error:', e); });
-        return;
-      }
-      try {
-        await UserDriveModule.ensureUserDataEnvironment({ interactive: false });
-      } catch (e) {
-        console.warn('学習記録ブックの準備:', e.message || e);
-        showDriveConnectBanner_();
-        renderUserLogsError_(e.message || String(e));
-        renderMyPage([]).catch(function (err) { console.error('renderMyPage error:', err); });
-        return;
-      }
-    }
-    const data = await UserBridge.call('getLearningLogs', {});
-    if (data.status !== 'success') {
-      renderUserLogsError_(formatUserBridgeError_(data));
-      renderMyPage([]).catch(function (e) { console.error('renderMyPage error:', e); });
-      return;
-    }
-    hideDriveConnectBanner_();
-    renderUserLogsList_(data.data);
-    renderMyPage(data.data).catch(function (e) {
-      console.error('renderMyPage error:', e);
-    });
-  } catch (e) {
-    console.error('fetchUserLogs error:', e);
-    renderUserLogsError_('学習記録の取得に失敗しました: ' + (e.message || e));
-    renderMyPage([]).catch(function (err) { console.error('renderMyPage error:', err); });
+  if (fetchUserLogsInFlight_ && !opts.force) {
+    return fetchUserLogsInFlight_;
   }
+  const gen = ++fetchUserLogsGen_;
+  const run = (async function () {
+    setMyPageLoadingPlaceholders_();
+    try {
+      if (window.UserDriveModule && UserDriveModule.isEnabled()) {
+        if (UserDriveModule.hasCachedToken && !UserDriveModule.hasCachedToken()) {
+          if (gen !== fetchUserLogsGen_) return;
+          showDriveConnectBanner_();
+          renderUserLogsError_('Drive 未接続です。「Drive を接続」を押してください。');
+          await renderMyPage([]);
+          return;
+        }
+        try {
+          await UserDriveModule.ensureUserDataEnvironment({ interactive: false });
+        } catch (e) {
+          if (gen !== fetchUserLogsGen_) return;
+          console.warn('学習記録ブックの準備:', e.message || e);
+          showDriveConnectBanner_();
+          renderUserLogsError_(e.message || String(e));
+          await renderMyPage([]);
+          return;
+        }
+      }
+      const data = await UserBridge.call('getLearningLogs', {});
+      if (gen !== fetchUserLogsGen_) return;
+      if (data.status !== 'success') {
+        renderUserLogsError_(formatUserBridgeError_(data));
+        await renderMyPage([]);
+        return;
+      }
+      hideDriveConnectBanner_();
+      renderUserLogsList_(data.data);
+      await renderMyPage(data.data, { syncItemStates: !!opts.force });
+    } catch (e) {
+      if (gen !== fetchUserLogsGen_) return;
+      console.error('fetchUserLogs error:', e);
+      renderUserLogsError_('学習記録の取得に失敗しました: ' + (e.message || e));
+      await renderMyPage([]);
+    } finally {
+      if (gen === fetchUserLogsGen_) fetchUserLogsInFlight_ = null;
+    }
+  })();
+  fetchUserLogsInFlight_ = run;
+  return run;
 }
 
 function renderUserLogsList_(logs) {
@@ -9261,15 +9304,13 @@ function renderGrammarAreaProgress_(areaMap) {
   el.innerHTML = html;
 }
 
-async function renderMyPage(logs) {
+async function renderMyPage(logs, renderOpts) {
+  renderOpts = renderOpts || {};
   const container = document.getElementById('mypage-container');
   const manageActive = document.querySelector('.mode-tab.active:not(.manage-sub-tab)');
   if (container) {
     container.style.display = (manageActive && manageActive.dataset.mode === 'manage') ? 'block' : 'none';
   }
-
-  const areaEl = document.getElementById('grammar-area-progress-list');
-  if (areaEl) areaEl.innerHTML = '読込中...';
 
   if (!logs || logs.length === 0) {
     document.getElementById('recent-history-list').innerHTML = "<p>まだ学習記録がありません。</p>";
@@ -9348,8 +9389,13 @@ async function renderMyPage(logs) {
   document.getElementById('weakness-list').innerHTML = weaknessHtml;
   }
 
+  const areaEl = document.getElementById('grammar-area-progress-list');
+  if (areaEl) areaEl.innerHTML = '読込中...';
+
   try {
-    if (AuthGateService.isValid()) {
+    // 文法領域集計: 更新ボタン時は Drive 再同期。通常はローカルがあればそれを使う
+    if (AuthGateService.isValid()
+        && (renderOpts.syncItemStates || !Object.keys(ItemStateModule.loadLocal()).length)) {
       await ItemStateModule.syncFromServer('');
     }
     const areaMap = await buildGrammarAreaStats_();
