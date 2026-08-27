@@ -8,11 +8,20 @@ const UserDriveModule = (function () {
   const TOKEN_EXP_KEY = 'dd_google_token_expiry';
   const REFRESH_KEY = 'dd_google_refresh_token';
   const REFRESH_OBTAINED_KEY = 'dd_google_refresh_obtained';
-  /** PKCE リダイレクト往復用（sessionStorage） */
+  /** PKCE リダイレクト往復用（sessionStorage + localStorage 二重保管で復帰失敗を防ぐ） */
   const PKCE_VERIFIER_SS = 'dd_oauth_pkce_verifier';
   const PKCE_STATE_SS = 'dd_oauth_state';
   const PKCE_REDIRECT_SS = 'dd_oauth_redirect_uri';
   const PKCE_TOAST_SS = 'dd_oauth_pending_toast';
+  const PKCE_BUNDLE_LS = 'dd_oauth_pkce_bundle';
+  /** OAuth 復帰直後にアカウント未確定でもトークンを落とさない暫定キー */
+  const PENDING_TOKEN_KEY = 'dd_google_access_token:__pending__';
+  const PENDING_TOKEN_EXP_KEY = 'dd_google_token_expiry:__pending__';
+  const PENDING_REFRESH_KEY = 'dd_google_refresh_token:__pending__';
+  const PENDING_REFRESH_OBTAINED_KEY = 'dd_google_refresh_obtained:__pending__';
+  /** 同一タブでの OAuth 再突入防止（無限ループ対策） */
+  const OAUTH_GUARD_SS = 'dd_oauth_redirect_guard';
+  const OAUTH_GUARD_MS = 90 * 1000;
   const FOLDER_NAME = 'DigitalDrill_MyData';
   const VOCAB_BOOK_NAME = 'マイ単語帳';
   const LOG_BOOK_NAME = 'DigitalDrill学習記録';
@@ -274,24 +283,83 @@ const UserDriveModule = (function () {
     if (!data || !data.access_token) {
       throw new Error('トークン応答に access_token がありません');
     }
-    localStorage.setItem(tokenStorageKey_(), data.access_token);
     const expiresIn = parseInt(data.expires_in, 10) || 3600;
-    localStorage.setItem(tokenExpStorageKey_(), String(Date.now() + (expiresIn - 60) * 1000));
+    const expVal = String(Date.now() + (expiresIn - 60) * 1000);
+    const suffix = accountSuffix_();
+    // アカウント確定前でも落ちないよう pending にも書く。確定後は account キーへ。
+    const accessKey = suffix ? TOKEN_KEY + ':' + suffix : PENDING_TOKEN_KEY;
+    const expKey = suffix ? TOKEN_EXP_KEY + ':' + suffix : PENDING_TOKEN_EXP_KEY;
+    const refreshKey = suffix ? REFRESH_KEY + ':' + suffix : PENDING_REFRESH_KEY;
+    const obtainedKey = suffix ? REFRESH_OBTAINED_KEY + ':' + suffix : PENDING_REFRESH_OBTAINED_KEY;
+    localStorage.setItem(accessKey, data.access_token);
+    localStorage.setItem(expKey, expVal);
+    // 後方互換のグローバルキーにも残す（旧 migrate 経路）
+    localStorage.setItem(TOKEN_KEY, data.access_token);
+    localStorage.setItem(TOKEN_EXP_KEY, expVal);
     if (data.refresh_token) {
-      localStorage.setItem(refreshStorageKey_(), data.refresh_token);
-      localStorage.setItem(refreshObtainedStorageKey_(), String(Date.now()));
+      localStorage.setItem(refreshKey, data.refresh_token);
+      localStorage.setItem(obtainedKey, String(Date.now()));
+      localStorage.setItem(REFRESH_KEY, data.refresh_token);
+      localStorage.setItem(REFRESH_OBTAINED_KEY, String(Date.now()));
     }
+    if (suffix) {
+      // pending から昇格済みなら掃除
+      localStorage.removeItem(PENDING_TOKEN_KEY);
+      localStorage.removeItem(PENDING_TOKEN_EXP_KEY);
+      localStorage.removeItem(PENDING_REFRESH_KEY);
+      localStorage.removeItem(PENDING_REFRESH_OBTAINED_KEY);
+    }
+  }
+
+  function promotePendingTokens_() {
+    const suffix = accountSuffix_();
+    if (!suffix) return;
+    const accessKey = TOKEN_KEY + ':' + suffix;
+    const refreshKey = REFRESH_KEY + ':' + suffix;
+    if (!localStorage.getItem(accessKey)) {
+      const pending = localStorage.getItem(PENDING_TOKEN_KEY);
+      if (pending) {
+        localStorage.setItem(accessKey, pending);
+        const pendingExp = localStorage.getItem(PENDING_TOKEN_EXP_KEY);
+        if (pendingExp) localStorage.setItem(TOKEN_EXP_KEY + ':' + suffix, pendingExp);
+      }
+    }
+    if (!localStorage.getItem(refreshKey)) {
+      const pendingRefresh = localStorage.getItem(PENDING_REFRESH_KEY);
+      if (pendingRefresh) {
+        localStorage.setItem(refreshKey, pendingRefresh);
+        const pendingObtained = localStorage.getItem(PENDING_REFRESH_OBTAINED_KEY);
+        if (pendingObtained) localStorage.setItem(REFRESH_OBTAINED_KEY + ':' + suffix, pendingObtained);
+      }
+    }
+    localStorage.removeItem(PENDING_TOKEN_KEY);
+    localStorage.removeItem(PENDING_TOKEN_EXP_KEY);
+    localStorage.removeItem(PENDING_REFRESH_KEY);
+    localStorage.removeItem(PENDING_REFRESH_OBTAINED_KEY);
   }
 
   function getRefreshToken_() {
     migrateLegacyToken_();
-    return localStorage.getItem(refreshStorageKey_()) || '';
+    promotePendingTokens_();
+    return localStorage.getItem(refreshStorageKey_())
+      || localStorage.getItem(PENDING_REFRESH_KEY)
+      || localStorage.getItem(REFRESH_KEY)
+      || '';
   }
 
   function hasValidAccessToken_() {
     migrateLegacyToken_();
-    const token = localStorage.getItem(tokenStorageKey_());
-    const exp = parseInt(localStorage.getItem(tokenExpStorageKey_()) || '0', 10);
+    promotePendingTokens_();
+    const token = localStorage.getItem(tokenStorageKey_())
+      || localStorage.getItem(PENDING_TOKEN_KEY)
+      || localStorage.getItem(TOKEN_KEY);
+    const exp = parseInt(
+      localStorage.getItem(tokenExpStorageKey_())
+        || localStorage.getItem(PENDING_TOKEN_EXP_KEY)
+        || localStorage.getItem(TOKEN_EXP_KEY)
+        || '0',
+      10
+    );
     return !!(token && Date.now() < exp);
   }
 
@@ -299,6 +367,94 @@ const UserDriveModule = (function () {
   function hasCachedToken_() {
     if (hasValidAccessToken_()) return true;
     return !!getRefreshToken_();
+  }
+
+  function storePkceBundle_(bundle) {
+    try {
+      sessionStorage.setItem(PKCE_VERIFIER_SS, bundle.verifier);
+      sessionStorage.setItem(PKCE_STATE_SS, bundle.state);
+      sessionStorage.setItem(PKCE_REDIRECT_SS, bundle.redirectUri);
+      sessionStorage.setItem(PKCE_TOAST_SS, '1');
+    } catch (e) {}
+    try {
+      localStorage.setItem(PKCE_BUNDLE_LS, JSON.stringify({
+        verifier: bundle.verifier,
+        state: bundle.state,
+        redirectUri: bundle.redirectUri,
+        toast: '1',
+        savedAt: Date.now()
+      }));
+    } catch (e) {}
+  }
+
+  function loadPkceBundle_() {
+    let verifier = '';
+    let state = '';
+    let redirectUri = '';
+    let wantToast = false;
+    try {
+      verifier = sessionStorage.getItem(PKCE_VERIFIER_SS) || '';
+      state = sessionStorage.getItem(PKCE_STATE_SS) || '';
+      redirectUri = sessionStorage.getItem(PKCE_REDIRECT_SS) || '';
+      wantToast = sessionStorage.getItem(PKCE_TOAST_SS) === '1';
+    } catch (e) {}
+    if (!verifier || !state) {
+      try {
+        const raw = localStorage.getItem(PKCE_BUNDLE_LS);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.verifier && parsed.state) {
+            // 30分以内のみ有効
+            if (!parsed.savedAt || Date.now() - parsed.savedAt < 30 * 60 * 1000) {
+              verifier = verifier || parsed.verifier;
+              state = state || parsed.state;
+              redirectUri = redirectUri || parsed.redirectUri || '';
+              wantToast = wantToast || parsed.toast === '1';
+            }
+          }
+        }
+      } catch (e) {}
+    }
+    return {
+      verifier: verifier,
+      state: state,
+      redirectUri: redirectUri || getRedirectUri_(),
+      wantToast: wantToast
+    };
+  }
+
+  function clearPkceBundle_() {
+    try {
+      sessionStorage.removeItem(PKCE_STATE_SS);
+      sessionStorage.removeItem(PKCE_VERIFIER_SS);
+      sessionStorage.removeItem(PKCE_REDIRECT_SS);
+      sessionStorage.removeItem(PKCE_TOAST_SS);
+    } catch (e) {}
+    try { localStorage.removeItem(PKCE_BUNDLE_LS); } catch (e) {}
+  }
+
+  function isOAuthGuardActive_() {
+    try {
+      const raw = sessionStorage.getItem(OAUTH_GUARD_SS);
+      if (!raw) return false;
+      const ts = parseInt(raw, 10);
+      if (!ts) return false;
+      if (Date.now() - ts > OAUTH_GUARD_MS) {
+        sessionStorage.removeItem(OAUTH_GUARD_SS);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function armOAuthGuard_() {
+    try { sessionStorage.setItem(OAUTH_GUARD_SS, String(Date.now())); } catch (e) {}
+  }
+
+  function clearOAuthGuard_() {
+    try { sessionStorage.removeItem(OAUTH_GUARD_SS); } catch (e) {}
   }
 
   function stripOAuthParamsFromUrl_() {
@@ -369,6 +525,11 @@ const UserDriveModule = (function () {
    * ページはアンロードされるため、呼び出し元の Promise は通常完了しない。
    */
   async function beginRedirectAuth_() {
+    if (isOAuthGuardActive_()) {
+      const err = new Error('Drive 接続の処理中です。完了するまで待つか、画面の「Drive を接続」を押してください。');
+      err.code = 'drive_auth_required';
+      throw err;
+    }
     const clientId = getClientId_();
     if (!clientId) throw new Error('GOOGLE_CLIENT_ID が未設定です');
     if (!window.crypto || !crypto.subtle) {
@@ -378,14 +539,8 @@ const UserDriveModule = (function () {
     const challenge = await pkceChallenge_(verifier);
     const state = 'dddrv.' + randomUrlSafe_(16);
     const redirectUri = getRedirectUri_();
-    try {
-      sessionStorage.setItem(PKCE_VERIFIER_SS, verifier);
-      sessionStorage.setItem(PKCE_STATE_SS, state);
-      sessionStorage.setItem(PKCE_REDIRECT_SS, redirectUri);
-      sessionStorage.setItem(PKCE_TOAST_SS, '1');
-    } catch (e) {
-      throw new Error('sessionStorage に書き込めません。ブラウザ設定を確認してください。');
-    }
+    storePkceBundle_({ verifier: verifier, state: state, redirectUri: redirectUri });
+    armOAuthGuard_();
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
@@ -419,14 +574,10 @@ const UserDriveModule = (function () {
     if (!state || state.indexOf('dddrv.') !== 0) return { handled: false };
     if (!code && !oauthError) return { handled: false };
 
-    const expectedState = sessionStorage.getItem(PKCE_STATE_SS) || '';
-    const verifier = sessionStorage.getItem(PKCE_VERIFIER_SS) || '';
-    const redirectUri = sessionStorage.getItem(PKCE_REDIRECT_SS) || getRedirectUri_();
-    const wantToast = sessionStorage.getItem(PKCE_TOAST_SS) === '1';
-    sessionStorage.removeItem(PKCE_STATE_SS);
-    sessionStorage.removeItem(PKCE_VERIFIER_SS);
-    sessionStorage.removeItem(PKCE_REDIRECT_SS);
-    sessionStorage.removeItem(PKCE_TOAST_SS);
+    const bundle = loadPkceBundle_();
+    clearPkceBundle_();
+    // 復帰処理に入ったらガードを延長せず解除（成功/失敗どちらでも再自動遷移させない）
+    clearOAuthGuard_();
     stripOAuthParamsFromUrl_();
 
     if (oauthError) {
@@ -436,15 +587,18 @@ const UserDriveModule = (function () {
         error: params.get('error_description') || oauthError
       };
     }
-    if (!expectedState || state !== expectedState) {
+    if (!bundle.state || state !== bundle.state) {
       return { handled: true, ok: false, error: 'OAuth state が一致しません。もう一度「Drive を接続」してください。' };
     }
-    if (!verifier) {
+    if (!bundle.verifier) {
       return { handled: true, ok: false, error: 'OAuth 検証情報が見つかりません。もう一度接続してください。' };
     }
     try {
-      await exchangeCodeForTokens_(code, redirectUri, verifier);
-      return { handled: true, ok: true, justConnected: wantToast };
+      await exchangeCodeForTokens_(code, bundle.redirectUri, bundle.verifier);
+      promotePendingTokens_();
+      // 成功直後の自動再リダイレクトを短時間ブロック
+      armOAuthGuard_();
+      return { handled: true, ok: true, justConnected: bundle.wantToast };
     } catch (e) {
       return { handled: true, ok: false, error: String(e.message || e) };
     }
@@ -453,14 +607,17 @@ const UserDriveModule = (function () {
   /**
    * @param {{interactive?: boolean}} opts
    * interactive=false のときはリダイレクトせず、キャッシュ／refresh が無ければ失敗する。
-   * GAS① 復帰など「ユーザー操作なし」の経路では interactive:false を使うこと。
+   * 自動同期・ログイン復帰では必ず false。明示の「Drive を接続」だけ true。
    */
   async function ensureAuthorized_(opts) {
     opts = opts || {};
-    const interactive = opts.interactive !== false;
+    const interactive = opts.interactive === true;
     migrateLegacyToken_();
+    promotePendingTokens_();
     if (hasValidAccessToken_()) {
-      return localStorage.getItem(tokenStorageKey_());
+      return localStorage.getItem(tokenStorageKey_())
+        || localStorage.getItem(PENDING_TOKEN_KEY)
+        || localStorage.getItem(TOKEN_KEY);
     }
     if (authPromise) return authPromise;
     authPromise = (async function () {
@@ -473,6 +630,11 @@ const UserDriveModule = (function () {
       }
       if (!interactive) {
         const err = new Error('Drive へのアクセスが許可されていません。画面の「Drive を接続」を押してください。');
+        err.code = 'drive_auth_required';
+        throw err;
+      }
+      if (isOAuthGuardActive_()) {
+        const err = new Error('Drive 接続の処理中です。画面の「Drive を接続」から再試行してください。');
         err.code = 'drive_auth_required';
         throw err;
       }
@@ -493,6 +655,10 @@ const UserDriveModule = (function () {
     localStorage.removeItem(TOKEN_EXP_KEY);
     localStorage.removeItem(REFRESH_KEY);
     localStorage.removeItem(REFRESH_OBTAINED_KEY);
+    localStorage.removeItem(PENDING_TOKEN_KEY);
+    localStorage.removeItem(PENDING_TOKEN_EXP_KEY);
+    localStorage.removeItem(PENDING_REFRESH_KEY);
+    localStorage.removeItem(PENDING_REFRESH_OBTAINED_KEY);
   }
 
   function getRefreshSoftTtlMs_() {
@@ -767,12 +933,16 @@ const UserDriveModule = (function () {
    * @param {{interactive?: boolean}} opts interactive 省略時は true（ボタン押下など）
    */
   async function ensureUserDataEnvironment_(opts) {
-    await ensureAuthorized_(opts || {});
+    opts = opts || {};
+    // 既定は非対話。明示指定が無い自動呼び出しで Google へ飛ばさない。
+    if (opts.interactive == null) opts.interactive = false;
+    await ensureAuthorized_(opts);
     await getVocabBookId_();
     await getLogBookId_();
   }
 
   async function retryAuthorization_() {
+    clearOAuthGuard_();
     clearAuth_();
     return ensureAuthorized_({ interactive: true });
   }

@@ -1843,15 +1843,24 @@ const USER_BRIDGE_WRITE_OPS = {
 const UserBridge = {
   _chain: Promise.resolve(),
 
-  async queueOp(op, payload) {
+  /**
+   * @param {string} op
+   * @param {object} payload
+   * @param {{interactive?: boolean}} authOpts
+   * interactive の既定は false（自動同期で Google へ飛ばさない）。
+   * 「Drive を接続」など明示操作だけ true にする。
+   */
+  async queueOp(op, payload, authOpts) {
     if (!AuthGateService.isValid()) {
       return { status: 'error', message: 'ログインが必要です' };
     }
     if (!window.UserDriveModule || !UserDriveModule.isEnabled()) {
       return { status: 'error', message: 'Drive API が未設定です（config.js の GOOGLE_CLIENT_ID）' };
     }
+    authOpts = authOpts || {};
+    const interactive = authOpts.interactive === true;
     try {
-      await UserDriveModule.ensureAuthorized({ interactive: true });
+      await UserDriveModule.ensureAuthorized({ interactive: interactive });
       return await UserDriveModule.dispatch(op, payload || {});
     } catch (e) {
       const msg = String(e.message || e);
@@ -1873,11 +1882,12 @@ const UserBridge = {
     var self = this;
     opts = opts || {};
     var outboxId = opts.outboxId || null;
+    var interactive = opts.interactive === true;
     if (!opts.skipOutbox && USER_BRIDGE_WRITE_OPS[op]) {
       outboxId = SendOutbox.add(op, payload);
     }
     var run = self._chain.then(function () {
-      var opPromise = self.queueOp(op, payload).then(function (res) {
+      var opPromise = self.queueOp(op, payload, { interactive: interactive }).then(function (res) {
         if (outboxId && res && res.status === 'success') SendOutbox.remove(outboxId);
         return res;
       });
@@ -1934,6 +1944,7 @@ async function retryDriveAccess_() {
     return false;
   }
   try {
+    // ユーザー明示操作のみ interactive。ここでだけ Google へ遷移してよい。
     await UserDriveModule.retryAuthorization();
     await UserDriveModule.ensureUserDataEnvironment({ interactive: true });
     hideDriveConnectBanner_();
@@ -1941,6 +1952,12 @@ async function retryDriveAccess_() {
     showToast_('Drive に接続し、マイフォルダを用意しました');
     return true;
   } catch (e) {
+    // リダイレクト開始後はページが遷移するため通常ここには来ない
+    if (e && e.code === 'drive_auth_required') {
+      showDriveConnectBanner_();
+      showToast_(e.message || 'Drive への接続が必要です');
+      return false;
+    }
     showDriveConnectBanner_();
     showToast_('Drive 権限の取得に失敗しました: ' + (e.message || e));
     return false;
@@ -9384,13 +9401,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (window.ReadingSessionModule) ReadingSessionModule.bindEvents();
 
   const params = new URLSearchParams(window.location.search);
+  let oauthJustConnected = false;
   if (window.UserDriveModule && UserDriveModule.consumeOAuthRedirect) {
     try {
       const oauthRes = await UserDriveModule.consumeOAuthRedirect();
       if (oauthRes && oauthRes.handled && oauthRes.ok === false) {
         showToast_('Drive 接続に失敗しました: ' + (oauthRes.error || '不明なエラー'));
-      } else if (oauthRes && oauthRes.handled && oauthRes.ok && oauthRes.justConnected) {
-        showToast_('Drive に接続しました。マイフォルダを準備します…');
+        if (typeof showDriveConnectBanner_ === 'function') showDriveConnectBanner_();
+      } else if (oauthRes && oauthRes.handled && oauthRes.ok) {
+        oauthJustConnected = true;
+        if (oauthRes.justConnected) {
+          showToast_('Drive に接続しました。マイフォルダを準備します…');
+        }
       }
     } catch (e) {
       console.warn('Drive OAuth 復帰処理:', e.message || e);
@@ -9403,6 +9425,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!restored) {
     screens.login.style.display = 'block';
     screens.settings.style.display = 'none';
+  } else if (oauthJustConnected && window.UserDriveModule) {
+    // 復帰直後は interactive 禁止のまま環境準備（再リダイレクトしない）
+    UserDriveModule.ensureUserDataEnvironment({ interactive: false }).then(function () {
+      hideDriveConnectBanner_();
+      return refreshUserDataAfterLogin_();
+    }).catch(function (e) {
+      console.warn('Drive 環境の準備:', e.message || e);
+      showDriveConnectBanner_();
+    });
   }
   BackendSyncStatus.refresh();
 });

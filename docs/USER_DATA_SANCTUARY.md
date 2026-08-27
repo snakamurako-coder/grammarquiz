@@ -21,11 +21,12 @@
 3. **ポップアップ禁止・自動 OAuth 禁止** — Drive 許可は **同タブ・リダイレクト**（PKCE）。`prepareDriveAfterLogin_()` は:
    - access 有効 or refresh あり → `ensureUserDataEnvironment({ interactive: false })`（サイレント refresh）
    - なし → 「Drive を接続」バナーのみ（ユーザー操作でリダイレクト）
-4. **`ensureAuthorized_({ interactive })`** — `interactive: false` のときはリダイレクトせず失敗する。ユーザー操作経路だけ `true`。`apiFetch_` は常に非対話。
-5. **メタ／トークンはアカウント別キー** — `dd_user_drive_meta:<account>` / `dd_google_access_token:<account>` / `dd_google_refresh_token:<account>` + migrate。
+4. **`ensureAuthorized_({ interactive })` の既定は false** — `true` は「Drive を接続」ボタンのみ。`UserBridge.call` も既定非対話（ログイン直後の同期で Google へ飛ばない＝無限ループ防止）。
+5. **メタ／トークンはアカウント別キー** — `dd_user_drive_meta:<account>` / `dd_google_access_token:<account>` / `dd_google_refresh_token:<account>` + pending キー + migrate。
 6. **GAS①・GAS② にユーザー Drive 操作を書かない** — トークン交換も Pages（PKCE）で完結。フォルダ作成を GAS に戻さない。
 7. **GCP リダイレクト URI** — `GOOGLE_OAUTH_REDIRECT_URI` または `origin+pathname` を「承認済みのリダイレクト URI」に登録。
 8. **約1ヶ月の再同意なし** — `refresh_token` で access を更新。OAuth 同意画面が **テスト** のままだと Google 側で refresh が **7日** で失効する。1ヶ月以上狙うなら同意画面を **本番** にする。
+9. **OAuth 再突入ガード** — リダイレクト開始〜復帰直後は自動の対話 OAuth を拒否（無限ループ防止）。
 
 ### 運用時の確認手順（デプロイ後）
 
@@ -314,6 +315,7 @@ VocabRegisterModule.submitCard_
 | 日付 | 内容 |
 |---|---|
 | 2026-08-23 | ensureUserDataEnvironment・フォルダ検証修正・setupVocabBook 堅牢化 |
+| 2026-08-27 | **致命修正**: UserBridge 既定を非対話化。ログイン直後の自動同期が Google へ飛ばす無限ループを解消。PKCE二重保管・pendingトークン・OAuth再突入ガード |
 | 2026-08-27 | Drive OAuth を同タブ・リダイレクト + PKCE + refresh_token に変更（ポップアップ廃止・約1ヶ月再同意目標） |
 | 2026-08-26 | Drive 検証を files.get に修正。「Drive を接続」ボタン。§0 動作確認済みを追記（修復成功） |
 | 2026-08-26 | マイ単語帳ローカルキャッシュ・学習セット更新記録シート（§4-b）。開始はキャッシュのみ |
