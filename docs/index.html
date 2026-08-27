@@ -661,13 +661,14 @@ body.pool-match-active .game-footer {
     <div class="header-title">DigitalDrill（デジドリ） ログイン</div>
     <div class="setting-section" style="text-align: center; padding: 40px 10px;">
       <p style="margin-bottom: 20px; font-size: 1.1em; color: #555;">システムを利用するには Google アカウントで認証が必要です。</p>
-      <p style="margin-bottom: 20px; font-size: 0.9em; color: #777;">どちらかの方法でサインインしてください。ホワイトリスト照合後に学習画面へ進みます。</p>
-      <p style="margin: 0 auto 8px; max-width: 320px; font-size: 0.85em; font-weight: bold; color: #455a64; text-align: left;">Googleでサインイン</p>
-      <div id="google-signin-container" style="display:flex;justify-content:center;margin:0 auto 4px;"></div>
-      <p style="margin: 0 auto 18px; max-width: 320px; font-size: 0.8em; color: #888; text-align: left;">このページ上でログインします。マイ単語帳・学習記録を使うときは、ログイン後に「Drive を接続」で Google の許可画面へ進みます（ポップアップではなく同じタブで開きます）。</p>
+      <p style="margin-bottom: 20px; font-size: 0.9em; color: #777;">下のボタン1回で、ログインとマイドライブ（単語帳・学習記録）の許可まで完了します。</p>
+      <p style="margin: 0 auto 8px; max-width: 320px; font-size: 0.85em; font-weight: bold; color: #455a64; text-align: left;">Googleでログイン</p>
+      <button type="button" id="login-unified-btn" class="btn-primary" style="max-width:320px;margin:0 auto 8px;display:block;">Googleでログイン（Drive含む）</button>
+      <p style="margin: 0 auto 18px; max-width: 320px; font-size: 0.8em; color: #888; text-align: left;">同じタブで Google の許可画面を開きます。ホワイトリスト照合後、すぐ学習画面へ進みます。</p>
+      <div id="google-signin-container" style="display:none;" aria-hidden="true"></div>
       <p style="margin: 0 auto 8px; max-width: 320px; font-size: 0.85em; font-weight: bold; color: #455a64; text-align: left;">Googleアカウントでログイン（GAS経由）</p>
       <button type="button" id="login-via-gas-btn" class="btn-primary" style="max-width:320px;margin:0 auto;display:block;">GAS経由でログイン</button>
-      <p style="margin: 8px auto 0; max-width: 320px; font-size: 0.8em; color: #888; text-align: left;">学校アカウントで上のボタンが出ない場合はこちらです。</p>
+      <p style="margin: 8px auto 0; max-width: 320px; font-size: 0.8em; color: #888; text-align: left;">学校アカウントで上のボタンが使えない場合の予備経路です。この場合はログイン後に「Drive を接続」が必要になることがあります。</p>
       <div id="login-msg" style="margin-top: 15px; color: #f44336; font-weight: bold;"></div>
     </div>
   </div>
@@ -1920,7 +1921,7 @@ function showDriveConnectBanner_() {
     el.style.cssText = 'margin-top:12px;padding:12px;border:1px solid #ffcc80;background:#fff8e1;border-radius:8px;text-align:left;';
     el.innerHTML = ''
       + '<p style="margin:0 0 8px;font-size:0.92em;color:#e65100;font-weight:bold;">マイ単語帳・学習記録のため、Google Drive の接続が必要です</p>'
-      + '<p style="margin:0 0 10px;font-size:0.85em;color:#666;">下のボタンで Google の許可画面へ進みます（同じタブで開くため、ポップアップブロックの影響を受けません）。一度許可すると、しばらくは再接続なしで利用できます。</p>'
+      + '<p style="margin:0 0 10px;font-size:0.85em;color:#666;">通常はログイン時にまとめて許可されます。GAS経由ログインや許可の期限切れのときだけ、下のボタンで再接続してください。</p>'
       + '<button type="button" id="drive-connect-btn" class="btn-primary" style="width:auto;min-width:160px;padding:10px 16px;">Drive を接続</button>';
     profile.appendChild(el);
     const btn = document.getElementById('drive-connect-btn');
@@ -8735,52 +8736,31 @@ async function handleGoogleCredential_(credential) {
   }
 }
 
-function initGoogleLogin_() {
+function initUnifiedLoginButton_() {
   var clientId = getGoogleClientId_();
-  var container = document.getElementById('google-signin-container');
+  var btn = document.getElementById('login-unified-btn');
   var msgEl = document.getElementById('login-msg');
-
+  if (!btn) return;
   if (!clientId) {
+    btn.disabled = true;
     if (msgEl) msgEl.textContent = 'GOOGLE_CLIENT_ID が設定されていません（config.js）。GAS経由でログインしてください。';
     return;
   }
-
-  var attempts = 0;
-  function tryInit_() {
-    if (!window.google || !google.accounts || !google.accounts.id) {
-      attempts += 1;
-      if (attempts < 50) {
-        setTimeout(tryInit_, 100);
-        return;
-      }
-      if (msgEl) msgEl.textContent = 'Google でサインインの読み込みに失敗しました。GAS経由でログインするか、ページを再読み込みしてください。';
+  btn.addEventListener('click', function () {
+    if (!window.UserDriveModule || !UserDriveModule.beginUnifiedLoginRedirect) {
+      if (msgEl) msgEl.textContent = 'ログインモジュールが読み込まれていません。ページを再読み込みしてください。';
       return;
     }
-    google.accounts.id.initialize({
-      client_id: clientId,
-      callback: function (response) {
-        handleGoogleCredential_(response.credential);
-      },
-      auto_select: false,
-      cancel_on_tap_outside: true
+    BusyButton.run(btn, function () {
+      return UserDriveModule.beginUnifiedLoginRedirect();
+    }, 'Googleへ移動中…').catch(function (e) {
+      if (msgEl) msgEl.textContent = 'ログイン開始に失敗しました: ' + (e && e.message ? e.message : e);
     });
-    if (container) {
-      google.accounts.id.renderButton(container, {
-        type: 'standard',
-        theme: 'outline',
-        size: 'large',
-        text: 'signin_with',
-        shape: 'rectangular',
-        logo_alignment: 'left',
-        width: 320
-      });
-    }
-  }
-  tryInit_();
+  });
 }
 
 function bindLoginScreen_() {
-  initGoogleLogin_();
+  initUnifiedLoginButton_();
   var btn = document.getElementById('login-via-gas-btn');
   if (!btn) return;
   btn.addEventListener('click', function () {
@@ -9402,38 +9382,64 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const params = new URLSearchParams(window.location.search);
   let oauthJustConnected = false;
+  let enteredViaUnifiedLogin = false;
+  const loginMsgEl = document.getElementById('login-msg');
+
   if (window.UserDriveModule && UserDriveModule.consumeOAuthRedirect) {
     try {
       const oauthRes = await UserDriveModule.consumeOAuthRedirect();
-      if (oauthRes && oauthRes.handled && oauthRes.ok === false) {
-        showToast_('Drive 接続に失敗しました: ' + (oauthRes.error || '不明なエラー'));
-        if (typeof showDriveConnectBanner_ === 'function') showDriveConnectBanner_();
-      } else if (oauthRes && oauthRes.handled && oauthRes.ok) {
-        oauthJustConnected = true;
-        if (oauthRes.justConnected) {
-          showToast_('Drive に接続しました。マイフォルダを準備します…');
+      if (oauthRes && oauthRes.handled) {
+        if (oauthRes.ok === false) {
+          const errText = oauthRes.error || '不明なエラー';
+          if (oauthRes.purpose === 'login') {
+            if (loginMsgEl) loginMsgEl.textContent = 'ログインに失敗しました: ' + errText;
+            screens.login.style.display = 'block';
+            screens.settings.style.display = 'none';
+          } else {
+            showToast_('Drive 接続に失敗しました: ' + errText);
+            if (typeof showDriveConnectBanner_ === 'function') showDriveConnectBanner_();
+          }
+        } else if (oauthRes.purpose === 'login') {
+          if (!oauthRes.idToken) {
+            if (loginMsgEl) {
+              loginMsgEl.textContent = 'ログイン用 ID トークンを取得できませんでした。もう一度「Googleでログイン」を押してください。';
+            }
+            screens.login.style.display = 'block';
+            screens.settings.style.display = 'none';
+          } else {
+            await handleGoogleCredential_(oauthRes.idToken);
+            enteredViaUnifiedLogin = true;
+            showToast_('ログインしました。学習データを準備しています…');
+          }
+        } else {
+          oauthJustConnected = true;
+          if (oauthRes.justConnected) {
+            showToast_('Drive に接続しました。マイフォルダを準備します…');
+          }
         }
       }
     } catch (e) {
-      console.warn('Drive OAuth 復帰処理:', e.message || e);
+      console.warn('OAuth 復帰処理:', e.message || e);
+      if (loginMsgEl) loginMsgEl.textContent = '認証の復帰処理でエラー: ' + (e.message || e);
     }
   }
   captureAuthFromUrl_(params);
   VocabLaunchConfig.captureFromUrl_(params);
 
-  const restored = await tryRestoreAuthSession_();
-  if (!restored) {
-    screens.login.style.display = 'block';
-    screens.settings.style.display = 'none';
-  } else if (oauthJustConnected && window.UserDriveModule) {
-    // 復帰直後は interactive 禁止のまま環境準備（再リダイレクトしない）
-    UserDriveModule.ensureUserDataEnvironment({ interactive: false }).then(function () {
-      hideDriveConnectBanner_();
-      return refreshUserDataAfterLogin_();
-    }).catch(function (e) {
-      console.warn('Drive 環境の準備:', e.message || e);
-      showDriveConnectBanner_();
-    });
+  if (!enteredViaUnifiedLogin) {
+    const restored = await tryRestoreAuthSession_();
+    if (!restored) {
+      screens.login.style.display = 'block';
+      screens.settings.style.display = 'none';
+    } else if (oauthJustConnected && window.UserDriveModule) {
+      UserDriveModule.ensureUserDataEnvironment({ interactive: false }).then(function () {
+        hideDriveConnectBanner_();
+        return refreshUserDataAfterLogin_();
+      }).catch(function (e) {
+        console.warn('Drive 環境の準備:', e.message || e);
+        showDriveConnectBanner_();
+      });
+    }
   }
   BackendSyncStatus.refresh();
 });

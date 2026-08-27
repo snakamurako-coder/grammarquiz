@@ -9,10 +9,10 @@
 
 | 項目 | 値 |
 |---|---|
-| **確認** | Drive OAuth を **同タブ・リダイレクト + PKCE + refresh_token** に変更（ポップアップ廃止）。旧 Token Client 経路からの移行は「Drive を接続」1回 |
-| 実装の正 | Pages → `UserBridge` → `UserDriveModule` → GCP OAuth（認可コード）→ Drive/Sheets REST |
+| **確認** | ログインと Drive 許可を **1回のリダイレクト OAuth（openid + Drive）** に一本化。GAS経由は予備。Drive バナーは再接続用 |
+| 実装の正 | Pages → 統一ログイン（PKCE）→ id_token で GAS whitelist → Drive tokens → UserBridge → Drive/Sheets REST |
 | 保存先 | マイドライブ直下 `DigitalDrill_MyData/` → `マイ単語帳` / `DigitalDrill学習記録` |
-| 初回接続 UI | プロフィール下の **「Drive を接続」**（`#drive-connect-banner`）→ 同タブで Google 許可画面 |
+| 初回接続 UI | ログイン画面 **「Googleでログイン（Drive含む）」**。失敗・GAS経由時のみマイページに「Drive を接続」 |
 
 ### 効いている設定・実装要点（壊したら戻す）
 
@@ -65,29 +65,23 @@
 ## 2. あるべきアーキテクチャ（現行・固定）
 
 ```text
-【ログイン】Pages → GAS①（?action=auth）→ AuthGateService（authToken のみ）
+【ログイン（推奨）】Pages「Googleでログイン（Drive含む）」
+  → 同タブ OAuth（openid + Drive、PKCE・offline）
+  → id_token で GAS② login（whitelist）→ AuthGateService
+  → Drive access/refresh 保存 → ensureUserDataEnvironment
 
-【Drive 初回】プロフィール「Drive を接続」→ 同タブ OAuth リダイレクト（PKCE・offline）
-           → consumeOAuthRedirect → refresh_token 保存
-           → ensureUserDataEnvironment({ interactive: false })
-           → DigitalDrill_MyData + 両スプレッドシート作成
+【ログイン（予備）】Pages → GAS①（?action=auth）→ AuthGateService
+  → Drive 未接続なら「Drive を接続」（同タブ・リダイレクト）
 
 【ユーザー操作】Pages → UserBridge → UserDriveModule → access/refresh → Drive/Sheets API
-  ├─ 単語登録     registerVocabWords
-  ├─ 学習状態     getItemStates / upsertItemStates
-  ├─ セッションログ saveSessionLog / startSession / countSessionAttempts
-  └─ 単語読取     getVocabCatalog / getVocabWords / getLearningLogs
-
-【プリセット教材】manifest / GAS② API（ユーザー Drive とは無関係）
-【管理者集約】Google Form（ユーザー Drive とは無関係）— FORM_AGGREGATION_SANCTUARY.md
 ```
 
 ### 二つの認証を混同しない
 
 | 種類 | 保存キー | 用途 | 取得方法 |
 |---|---|---|---|
-| **アプリログイン** | `digitaldrill_auth_token` 等 | ホワイトリスト・UI 表示 | GAS① 認証（約90分） |
-| **Drive OAuth** | `dd_google_access_token:<account>` / `dd_google_refresh_token:<account>` | マイドライブ読み書き | 同タブ・リダイレクト（PKCE）。以降は refresh で更新 |
+| **アプリログイン** | `digitaldrill_auth_token` 等 | ホワイトリスト・UI 表示 | 統一ログインの id_token → GAS、または GAS① |
+| **Drive OAuth** | `dd_google_*` | マイドライブ読み書き | 統一ログインで同時取得。切れ時は「Drive を接続」 |
 
 ログイン成功 ≠ Drive 権限済み。詳細は §0。
 
@@ -315,6 +309,7 @@ VocabRegisterModule.submitCard_
 | 日付 | 内容 |
 |---|---|
 | 2026-08-23 | ensureUserDataEnvironment・フォルダ検証修正・setupVocabBook 堅牢化 |
+| 2026-08-27 | ログインと Drive 許可を1回のリダイレクト（openid+Drive）に一本化。GIS ボタン廃止。Drive バナーは再接続用 |
 | 2026-08-27 | **致命修正**: UserBridge 既定を非対話化。ログイン直後の自動同期が Google へ飛ばす無限ループを解消。PKCE二重保管・pendingトークン・OAuth再突入ガード |
 | 2026-08-27 | Drive OAuth を同タブ・リダイレクト + PKCE + refresh_token に変更（ポップアップ廃止・約1ヶ月再同意目標） |
 | 2026-08-26 | Drive 検証を files.get に修正。「Drive を接続」ボタン。§0 動作確認済みを追記（修復成功） |

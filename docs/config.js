@@ -11,9 +11,12 @@ window.DIGITALDRILL_CONFIG = {
    * 未設定時は location.origin + pathname を使うが、/ と /index.html の揺れを避けるため明示推奨。
    */
   GOOGLE_OAUTH_REDIRECT_URI: 'https://snakamurako-coder.github.io/grammarquiz/',
-  /** ユーザー Drive 操作用 OAuth スコープ（GCP で Drive API / Sheets API を有効化し、同意画面に登録） */
+  /** ユーザー Drive／ログイン一本化用 OAuth スコープ（Drive API / Sheets API を有効化し、同意画面に登録） */
   GOOGLE_DRIVE_SCOPES: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive',
   /**
+   * ログイン一本化時は上記に加えて openid email profile を付与（user-drive.js）。
+   * GCP 同意画面のスコープに Drive / Sheets を含めること。
+   */  /**
    * 静的プリセット manifest（Pages 相対パス）。
    * 教材の取得は「キャッシュ → この manifest → GAS② API」のハイブリッド。
    * manifest が未生成でも API 経由で動くが、初回表示を速くするため

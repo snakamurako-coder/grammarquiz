@@ -69,6 +69,12 @@ const UserDriveModule = (function () {
       || 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive';
   }
 
+  /** ログイン一本化用: openid で id_token を得て GAS whitelist、同時に Drive 権限 */
+  function getUnifiedLoginScopes_() {
+    const drive = getScopes_();
+    return ('openid email profile ' + drive).replace(/\s+/g, ' ').trim();
+  }
+
   function isEnabled_() {
     return !!getClientId_();
   }
@@ -381,6 +387,7 @@ const UserDriveModule = (function () {
         verifier: bundle.verifier,
         state: bundle.state,
         redirectUri: bundle.redirectUri,
+        purpose: bundle.purpose || 'drive',
         toast: '1',
         savedAt: Date.now()
       }));
@@ -392,6 +399,7 @@ const UserDriveModule = (function () {
     let state = '';
     let redirectUri = '';
     let wantToast = false;
+    let purpose = 'drive';
     try {
       verifier = sessionStorage.getItem(PKCE_VERIFIER_SS) || '';
       state = sessionStorage.getItem(PKCE_STATE_SS) || '';
@@ -404,22 +412,25 @@ const UserDriveModule = (function () {
         if (raw) {
           const parsed = JSON.parse(raw);
           if (parsed && parsed.verifier && parsed.state) {
-            // 30分以内のみ有効
             if (!parsed.savedAt || Date.now() - parsed.savedAt < 30 * 60 * 1000) {
               verifier = verifier || parsed.verifier;
               state = state || parsed.state;
               redirectUri = redirectUri || parsed.redirectUri || '';
               wantToast = wantToast || parsed.toast === '1';
+              purpose = parsed.purpose || purpose;
             }
           }
         }
       } catch (e) {}
     }
+    if (state.indexOf('ddlogin.') === 0) purpose = 'login';
+    else if (state.indexOf('dddrv.') === 0) purpose = 'drive';
     return {
       verifier: verifier,
       state: state,
       redirectUri: redirectUri || getRedirectUri_(),
-      wantToast: wantToast
+      wantToast: wantToast,
+      purpose: purpose
     };
   }
 
@@ -489,7 +500,7 @@ const UserDriveModule = (function () {
     if (!data.refresh_token && !getRefreshToken_()) {
       console.warn('Drive OAuth: refresh_token が返りませんでした。再同意が必要になることがあります。');
     }
-    return data.access_token;
+    return data;
   }
 
   async function refreshAccessToken_() {
@@ -522,11 +533,17 @@ const UserDriveModule = (function () {
 
   /**
    * 同タブを Google 認可画面へ遷移（ポップアップなし）。
-   * ページはアンロードされるため、呼び出し元の Promise は通常完了しない。
+   * @param {{purpose?: 'login'|'drive'}} opts
+   * purpose=login … アプリ入場＋Drive を1回で（openid + Drive）
+   * purpose=drive … Drive 再接続のみ
    */
-  async function beginRedirectAuth_() {
+  async function beginRedirectAuth_(opts) {
+    opts = opts || {};
+    const purpose = opts.purpose === 'login' ? 'login' : 'drive';
     if (isOAuthGuardActive_()) {
-      const err = new Error('Drive 接続の処理中です。完了するまで待つか、画面の「Drive を接続」を押してください。');
+      const err = new Error(purpose === 'login'
+        ? 'ログイン処理中です。完了するまでお待ちください。'
+        : 'Drive 接続の処理中です。完了するまで待つか、画面の「Drive を接続」を押してください。');
       err.code = 'drive_auth_required';
       throw err;
     }
@@ -537,15 +554,20 @@ const UserDriveModule = (function () {
     }
     const verifier = randomUrlSafe_(32);
     const challenge = await pkceChallenge_(verifier);
-    const state = 'dddrv.' + randomUrlSafe_(16);
+    const state = (purpose === 'login' ? 'ddlogin.' : 'dddrv.') + randomUrlSafe_(16);
     const redirectUri = getRedirectUri_();
-    storePkceBundle_({ verifier: verifier, state: state, redirectUri: redirectUri });
+    storePkceBundle_({
+      verifier: verifier,
+      state: state,
+      redirectUri: redirectUri,
+      purpose: purpose
+    });
     armOAuthGuard_();
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
-      scope: getScopes_(),
+      scope: purpose === 'login' ? getUnifiedLoginScopes_() : getScopes_(),
       state: state,
       access_type: 'offline',
       include_granted_scopes: 'true',
@@ -557,9 +579,14 @@ const UserDriveModule = (function () {
     return new Promise(function () {});
   }
 
+  /** ログイン画面用: 身分確認＋Drive 許可を1回のリダイレクトで取る */
+  async function beginUnifiedLoginRedirect_() {
+    return beginRedirectAuth_({ purpose: 'login' });
+  }
+
   /**
    * 認可リダイレクト復帰時の ?code= / ?error= を処理する。
-   * @returns {Promise<{handled:boolean, ok?:boolean, justConnected?:boolean, error?:string}>}
+   * @returns {Promise<{handled:boolean, ok?:boolean, purpose?:string, idToken?:string, justConnected?:boolean, error?:string}>}
    */
   async function consumeOAuthRedirect_() {
     let params;
@@ -571,12 +598,14 @@ const UserDriveModule = (function () {
     const state = params.get('state') || '';
     const code = params.get('code');
     const oauthError = params.get('error');
-    if (!state || state.indexOf('dddrv.') !== 0) return { handled: false };
+    const isLogin = state.indexOf('ddlogin.') === 0;
+    const isDrive = state.indexOf('dddrv.') === 0;
+    if (!state || (!isLogin && !isDrive)) return { handled: false };
     if (!code && !oauthError) return { handled: false };
 
     const bundle = loadPkceBundle_();
+    const purpose = isLogin ? 'login' : (bundle.purpose || 'drive');
     clearPkceBundle_();
-    // 復帰処理に入ったらガードを延長せず解除（成功/失敗どちらでも再自動遷移させない）
     clearOAuthGuard_();
     stripOAuthParamsFromUrl_();
 
@@ -584,23 +613,38 @@ const UserDriveModule = (function () {
       return {
         handled: true,
         ok: false,
+        purpose: purpose,
         error: params.get('error_description') || oauthError
       };
     }
     if (!bundle.state || state !== bundle.state) {
-      return { handled: true, ok: false, error: 'OAuth state が一致しません。もう一度「Drive を接続」してください。' };
+      return {
+        handled: true,
+        ok: false,
+        purpose: purpose,
+        error: 'OAuth state が一致しません。もう一度ログイン（または Drive 接続）してください。'
+      };
     }
     if (!bundle.verifier) {
-      return { handled: true, ok: false, error: 'OAuth 検証情報が見つかりません。もう一度接続してください。' };
+      return {
+        handled: true,
+        ok: false,
+        purpose: purpose,
+        error: 'OAuth 検証情報が見つかりません。もう一度お試しください。'
+      };
     }
     try {
-      await exchangeCodeForTokens_(code, bundle.redirectUri, bundle.verifier);
+      const tokenData = await exchangeCodeForTokens_(code, bundle.redirectUri, bundle.verifier);
       promotePendingTokens_();
-      // 成功直後の自動再リダイレクトを短時間ブロック
-      armOAuthGuard_();
-      return { handled: true, ok: true, justConnected: bundle.wantToast };
+      return {
+        handled: true,
+        ok: true,
+        purpose: purpose,
+        idToken: tokenData && tokenData.id_token ? tokenData.id_token : '',
+        justConnected: bundle.wantToast
+      };
     } catch (e) {
-      return { handled: true, ok: false, error: String(e.message || e) };
+      return { handled: true, ok: false, purpose: purpose, error: String(e.message || e) };
     }
   }
 
@@ -638,7 +682,7 @@ const UserDriveModule = (function () {
         err.code = 'drive_auth_required';
         throw err;
       }
-      return beginRedirectAuth_();
+      return beginRedirectAuth_({ purpose: 'drive' });
     })().finally(function () {
       authPromise = null;
     });
@@ -943,8 +987,8 @@ const UserDriveModule = (function () {
 
   async function retryAuthorization_() {
     clearOAuthGuard_();
-    clearAuth_();
-    return ensureAuthorized_({ interactive: true });
+    // 既存トークンは消さない。明示の再接続は Drive 用リダイレクト。
+    return beginRedirectAuth_({ purpose: 'drive' });
   }
 
   function buildSheetInfo_(sheetName, values) {
@@ -1477,6 +1521,7 @@ const UserDriveModule = (function () {
     ensureAuthorized: ensureAuthorized_,
     ensureUserDataEnvironment: ensureUserDataEnvironment_,
     retryAuthorization: retryAuthorization_,
+    beginUnifiedLoginRedirect: beginUnifiedLoginRedirect_,
     consumeOAuthRedirect: consumeOAuthRedirect_,
     clearAuth: clearAuth_,
     getRedirectUri: getRedirectUri_,
