@@ -4712,14 +4712,6 @@ const TypingModule = (() => {
     if (statusEl) statusEl.textContent = '録音中…';
   }
 
-  document.body.addEventListener('click', (e) => {
-    if (window.KeyboardModule && document.getElementById('typing-ui').style.display === 'block') {
-      if (!e.target.closest('#typing-ui') && !e.target.closest('#keyboard-container')) {
-        window.KeyboardModule.hide();
-      }
-    }
-  });
-
   function initGame(questionData) {
     qData = questionData;
     answered = false;
@@ -4778,7 +4770,6 @@ const TypingModule = (() => {
       appendJoinedEnglishHighlighted(resultMsg, qData.answerPrefix, qData.expectedInner, qData.answerSuffix);
       if(window.onQuestionCompleted) window.onQuestionCompleted(false, answerMeta);
     }
-    if (window.KeyboardModule) window.KeyboardModule.deactivate();
     submitBtn.style.display = 'none';
     inputDisplay.onclick = null;
     stopStt_();
@@ -4813,14 +4804,6 @@ const CorrectionModule = (() => {
   let correctSentence = "";
   let finalSentence = "";
   let phase = "judge";
-
-  document.body.addEventListener('click', (e) => {
-    if (window.KeyboardModule && document.getElementById('correction-ui').style.display === 'block') {
-      if (!e.target.closest('#correction-edit-area') && !e.target.closest('#keyboard-container')) {
-        window.KeyboardModule.hide();
-      }
-    }
-  });
 
   function initGame(questionData) {
     qData = questionData;
@@ -4944,7 +4927,6 @@ const CorrectionModule = (() => {
     locateBtn.style.display = 'none';
     editArea.style.display = 'none';
     if (livePreviewWrap) livePreviewWrap.style.display = 'none';
-    if (window.KeyboardModule) window.KeyboardModule.deactivate();
 
     if (normalizeEnglish(finalSentence) === normalizeEnglish(correctSentence)) {
       setResultVerdict(resultMsg, 'ok', '⭕️ 正解！');
@@ -5671,6 +5653,7 @@ const GameSessionPlay = (() => {
     linearPos = 0;
     active = false;
     if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
+    if (window.KeyboardModule) KeyboardModule.deactivate();
   }
 
   function isActive() {
@@ -7847,14 +7830,6 @@ const SortingModule = (() => {
   let answered = false;
   let createdCard = null;
 
-  document.body.addEventListener('click', (e) => {
-    if (window.KeyboardModule && document.getElementById('sort-ui').style.display === 'block') {
-      if (!e.target.closest('#missing-word-input-area') && !e.target.closest('#keyboard-container')) {
-        window.KeyboardModule.hide();
-      }
-    }
-  });
-
   function initGame(questionData) {
     qData = questionData;
     answered = false;
@@ -7997,7 +7972,6 @@ const SortingModule = (() => {
       appendJoinedEnglishHighlighted(resultMsg, qData.answerPrefix, qData.expectedInner, qData.answerSuffix);
       if(window.onQuestionCompleted) window.onQuestionCompleted(false, answerMeta);
     }
-    if (window.KeyboardModule) window.KeyboardModule.deactivate();
   });
 
   return { initGame };
@@ -8765,6 +8739,7 @@ elements.backBtn.addEventListener('click', () => {
   if (window.TtsModule) TtsModule.stop();
   if (window.GameSessionPlay) GameSessionPlay.reset();
   if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
+  if (window.KeyboardModule) KeyboardModule.deactivate();
   screens.game.style.display = 'none';
   screens.settings.style.display = 'block';
 });
@@ -8886,8 +8861,17 @@ function updateQuestionProgressDisplay_() {
   el.textContent = '問 ' + current + ' / ' + total;
 }
 
+function formatUsesSoftKeyboard_(format) {
+  if (!format) return false;
+  if (format === 'C' || format === 'H') return true;
+  const handler = QUESTION_HANDLERS[format];
+  return !!(handler && handler.ui === 'typing-ui');
+}
+
 function loadQuestionToGame(qData) {
-  if (window.KeyboardModule) window.KeyboardModule.deactivate();
+  if (!formatUsesSoftKeyboard_(qData.format) && window.KeyboardModule) {
+    window.KeyboardModule.deactivate();
+  }
   const instructionBtn = document.getElementById('question-instruction-btn');
   const instructionEl = document.getElementById('question-instruction');
   const explanationEl = document.getElementById('question-explanation');
@@ -9341,6 +9325,7 @@ function getResultSavedMessage_(saveResult) {
 
 function showResultScreen() {
   if (window.TtsModule) TtsModule.stop();
+  if (window.KeyboardModule) KeyboardModule.deactivate();
   if (window.GameSessionPlay) GameSessionPlay.reset();
   screens.game.style.display = 'none';
   const resultScreen = document.getElementById('result-screen');
