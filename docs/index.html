@@ -423,6 +423,130 @@ body.pool-match-active .game-footer {
 .pool-hidden { display: none !important; }
 .vocab-word-display { font-size: clamp(1.4em, 5vw, 1.8em); font-weight: bold; color: #1565c0; margin-bottom: 8px; }
 .vocab-pos-hint { font-size: 0.9em; color: #666; margin-bottom: 12px; }
+
+/* 単語カードモード（Desktop index.html 由来） */
+body.vocab-card-active #settings-screen,
+body.vocab-card-active #game-screen,
+body.vocab-card-active #result-screen,
+body.vocab-card-active #reading-screen,
+body.vocab-card-active #login-screen { display: none !important; }
+body.vocab-card-active #vocab-card-screen { display: flex !important; }
+#vocab-card-screen {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: #f7fafc;
+  overflow: hidden;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+}
+.vocab-card-app {
+  width: 100%;
+  max-width: 480px;
+  height: 100%;
+  max-height: 100dvh;
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.vocab-card-top-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.vocab-card-mode-selector { display: flex; gap: 4px; flex: 1; }
+.vocab-card-mode-btn {
+  flex: 1; padding: 6px 0; font-size: 11px; font-weight: 700;
+  border: 1px solid #cbd5e0; background: #fff; color: #4a5568; border-radius: 8px; cursor: pointer;
+}
+.vocab-card-mode-btn.active { background: #3182ce; color: #fff; border-color: #3182ce; }
+.vocab-card-header-icon {
+  background: #edf2f7; border: 1px solid #cbd5e0; border-radius: 8px;
+  width: 34px; height: 34px; font-size: 16px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.vocab-card-header-icon.playing { background: #e53e3e; color: #fff; border-color: #e53e3e; }
+.vocab-card-content-selector { display: flex; background: #e2e8f0; padding: 2px; border-radius: 10px; gap: 2px; }
+.vocab-card-content-btn {
+  flex: 1; padding: 5px 0; font-size: 12px; font-weight: bold; border: none; background: transparent;
+  color: #4a5568; border-radius: 8px; cursor: pointer;
+}
+.vocab-card-content-btn.active { background: #fff; color: #2b6cb0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.vocab-card-status-bar { display: flex; justify-content: space-between; font-size: 12px; font-weight: bold; color: #718096; padding: 0 4px; }
+.vocab-card-container {
+  width: 100%; flex: 1; max-height: 380px; min-height: 200px; perspective: 1000px; cursor: pointer; position: relative;
+}
+.vocab-card-flash {
+  width: 100%; height: 100%; position: relative; transform-style: preserve-3d;
+  transition: transform 0.15s ease-out, opacity 0.15s ease-out; border-radius: 20px;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.05); will-change: transform;
+}
+.vocab-card-flash.flipped { transform: rotateY(180deg); }
+.vocab-card-flash.swipe-left { transform: translateX(-120%) rotate(-10deg); opacity: 0; }
+.vocab-card-flash.swipe-right { transform: translateX(120%) rotate(10deg); opacity: 0; }
+.vocab-card-face {
+  position: absolute; width: 100%; height: 100%; backface-visibility: hidden;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  border-radius: 20px; padding: 20px; border: 2px solid #edf2f7;
+}
+.vocab-card-front { background: #fff; color: #1a202c; }
+.vocab-card-back { background: #f0f4f8; color: #2b6cb0; transform: rotateY(180deg); }
+.vocab-card-text {
+  font-size: clamp(22px, 6vw, 36px); font-weight: 800; text-align: center;
+  word-break: break-word; line-height: 1.3; padding: 0 10px;
+}
+.vocab-card-sub-text { font-size: 12px; color: #a0aec0; margin-top: 8px; font-weight: 600; }
+.vocab-card-hint { font-size: 11px; color: #cbd5e0; position: absolute; bottom: 12px; }
+.vocab-card-hl { color: #e53e3e; font-weight: 900; }
+.vocab-card-audio-btn {
+  position: absolute; top: 12px; right: 12px; background: #edf2f7; border: none; font-size: 16px;
+  width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.vocab-card-nav-btns { display: flex; justify-content: space-between; gap: 8px; }
+.vocab-card-nav-btn {
+  flex: 1; padding: 8px; border: 1px solid #e2e8f0; background: #fff; border-radius: 8px;
+  font-weight: 600; color: #4a5568; font-size: 12px; cursor: pointer;
+}
+.vocab-card-nav-btn:disabled { opacity: 0.3; }
+.vocab-card-action-btns { display: flex; gap: 12px; width: 100%; }
+.vocab-card-action-btn {
+  flex: 1; height: 60px; border: none; border-radius: 14px; font-size: 28px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+}
+.vocab-card-action-btn:active { transform: scale(0.95); }
+.vocab-card-action-btn.unknown { background: #fff5f5; border: 2px solid #feb2b2; }
+.vocab-card-action-btn.known { background: #f0fff4; border: 2px solid #9ae6b4; }
+.vocab-card-completion {
+  text-align: center; display: none; flex-direction: column; justify-content: center; align-items: center;
+  gap: 16px; background: #fff; padding: 24px; border-radius: 20px; width: 100%; flex: 1;
+}
+.vocab-card-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none;
+  justify-content: center; align-items: center; z-index: 9100; padding: 16px;
+}
+.vocab-card-modal-content {
+  background: #fff; border-radius: 16px; width: 100%; max-width: 400px; max-height: 85dvh;
+  overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+}
+.vocab-card-modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 18px; font-weight: bold; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;
+}
+.vocab-card-setting-group { display: flex; flex-direction: column; gap: 6px; }
+.vocab-card-setting-label { font-size: 13px; font-weight: bold; color: #2d3748; }
+.vocab-card-setting-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.vocab-card-close-btn {
+  background: #3182ce; color: #fff; border: none; padding: 10px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 8px;
+}
+.vocab-card-back-settings {
+  width: 100%; padding: 10px; margin-top: 4px; border: 1px solid #cbd5e0; background: #fff;
+  border-radius: 8px; font-weight: 600; cursor: pointer;
+}
 .division-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 180px; overflow-y: auto; }
 
 /* =========================================
@@ -944,6 +1068,8 @@ body.pool-match-active .game-footer {
           <p class="filter-axis-hint" style="margin-top:6px;">和英の句to句は、チャンクの日本語訳を見て英語チャンクの ( ) に入るものを答えます。</p>
         </div>
         <div class="form-group">
+          <button type="button" id="vocab-card-start-btn" class="btn-secondary" style="width:100%;margin-bottom:10px;">単語カードで覚える</button>
+          <p class="filter-axis-hint" style="margin:0 0 10px;">フラッシュカードで語・句・例文をめくり、👍/😫 で仕分けます。一巡後に学習状態をまとめて登録します。</p>
           <label>③ 解答方法</label>
           <div class="check-list" id="vocab-axis-response">
             <label class="check-item"><input type="radio" name="vocab-response" value="choice" checked> 選択</label>
@@ -1374,6 +1500,124 @@ body.pool-match-active .game-footer {
   </div>
 
   <!-- Reading Session Screen (token-based) -->
+  <div id="vocab-card-screen" style="display: none;" aria-hidden="true">
+    <div class="vocab-card-app">
+      <div class="vocab-card-top-bar">
+        <div class="vocab-card-mode-selector">
+          <button type="button" class="vocab-card-mode-btn active" id="vc-btn-mode-all">全 (0)</button>
+          <button type="button" class="vocab-card-mode-btn" id="vc-btn-mode-unknown">😫 (0)</button>
+          <button type="button" class="vocab-card-mode-btn" id="vc-btn-mode-known">👍 (0)</button>
+        </div>
+        <button type="button" class="vocab-card-header-icon" id="vc-auto-play-btn" title="自動連続再生">▶</button>
+        <button type="button" class="vocab-card-header-icon" id="vc-settings-btn" title="詳細設定">⚙</button>
+        <button type="button" class="vocab-card-header-icon" id="vc-back-btn" title="学習設定に戻る">✕</button>
+      </div>
+      <div class="vocab-card-content-selector">
+        <button type="button" class="vocab-card-content-btn active" data-vc-type="word">単語</button>
+        <button type="button" class="vocab-card-content-btn" data-vc-type="phrase">句</button>
+        <button type="button" class="vocab-card-content-btn" data-vc-type="example">例文</button>
+      </div>
+      <div class="vocab-card-status-bar" id="vc-status-bar">
+        <span id="vc-card-progress">0 / 0</span>
+        <span id="vc-score-tracker">👍 0 | 😫 0</span>
+      </div>
+      <div class="vocab-card-container" id="vc-card-container">
+        <div class="vocab-card-flash" id="vc-flash-card">
+          <div class="vocab-card-face vocab-card-front">
+            <button type="button" class="vocab-card-audio-btn" id="vc-audio-front" aria-label="読み上げ">🔊</button>
+            <div class="vocab-card-text" id="vc-front-text"></div>
+            <div class="vocab-card-sub-text" id="vc-front-lang">英語</div>
+            <div class="vocab-card-hint">タップ / ↑↓キーでめくる</div>
+          </div>
+          <div class="vocab-card-face vocab-card-back">
+            <button type="button" class="vocab-card-audio-btn" id="vc-audio-back" aria-label="読み上げ">🔊</button>
+            <div class="vocab-card-text" id="vc-back-text"></div>
+            <div class="vocab-card-sub-text" id="vc-back-lang">日本語</div>
+            <div class="vocab-card-hint">タップ / ↑↓キーで戻る</div>
+          </div>
+        </div>
+      </div>
+      <div class="vocab-card-nav-btns" id="vc-nav-btns">
+        <button type="button" class="vocab-card-nav-btn" id="vc-prev-btn">← 前の単語</button>
+        <button type="button" class="vocab-card-nav-btn" id="vc-next-btn">次の単語 →</button>
+      </div>
+      <div class="vocab-card-action-btns" id="vc-action-btns">
+        <button type="button" class="vocab-card-action-btn unknown" id="vc-mark-unknown" title="まだ覚えていない">😫</button>
+        <button type="button" class="vocab-card-action-btn known" id="vc-mark-known" title="覚えている">👍</button>
+      </div>
+      <div class="vocab-card-completion" id="vc-completion-screen">
+        <h2 style="font-size:22px;color:#2d3748;">🎉 一巡完了！</h2>
+        <p id="vc-result-summary" style="font-size:15px;line-height:1.6;color:#4a5568;"></p>
+        <button type="button" class="vocab-card-mode-btn active" id="vc-restart-unknown" style="padding:12px;font-size:13px;width:100%;">😫 未習得のみ復習する</button>
+        <button type="button" class="vocab-card-mode-btn" id="vc-restart-all" style="padding:12px;font-size:13px;width:100%;">🔄 最初から全単語をやる</button>
+        <button type="button" class="vocab-card-back-settings" id="vc-back-settings-btn">学習設定に戻る</button>
+      </div>
+    </div>
+    <div class="vocab-card-modal-overlay" id="vc-settings-modal">
+      <div class="vocab-card-modal-content">
+        <div class="vocab-card-modal-header">
+          <span>⚙ 詳細設定</span>
+          <button type="button" id="vc-settings-close-x" style="border:none;background:none;font-size:18px;cursor:pointer;">✕</button>
+        </div>
+        <div class="vocab-card-setting-group">
+          <div class="vocab-card-setting-row">
+            <span class="vocab-card-setting-label">表示内容:</span>
+            <select id="vc-cfg-content-type"></select>
+          </div>
+        </div>
+        <div class="vocab-card-setting-group">
+          <div class="vocab-card-setting-row">
+            <span class="vocab-card-setting-label">最初に表示する面:</span>
+            <select id="vc-cfg-first-lang">
+              <option value="en">英語 (Front)</option>
+              <option value="ja">日本語 (Front)</option>
+            </select>
+          </div>
+        </div>
+        <div class="vocab-card-setting-group">
+          <div class="vocab-card-setting-row">
+            <span class="vocab-card-setting-label">単語をシャッフル:</span>
+            <input type="checkbox" id="vc-cfg-shuffle">
+          </div>
+        </div>
+        <hr style="border:0;border-top:1px solid #edf2f7;">
+        <div class="vocab-card-setting-group">
+          <div class="vocab-card-setting-row">
+            <span class="vocab-card-setting-label">英語読み上げ:</span>
+            <input type="checkbox" id="vc-cfg-speech-en" checked>
+          </div>
+          <div class="vocab-card-setting-row">
+            <span>英語速度: <b id="vc-val-rate-en">1.0</b></span>
+            <input type="range" id="vc-cfg-rate-en" min="0.5" max="1.5" step="0.1" value="1.0">
+          </div>
+        </div>
+        <div class="vocab-card-setting-group">
+          <div class="vocab-card-setting-row">
+            <span class="vocab-card-setting-label">日本語読み上げ:</span>
+            <input type="checkbox" id="vc-cfg-speech-ja" checked>
+          </div>
+          <div class="vocab-card-setting-row">
+            <span>日本語速度: <b id="vc-val-rate-ja">1.0</b></span>
+            <input type="range" id="vc-cfg-rate-ja" min="0.5" max="1.5" step="0.1" value="1.0">
+          </div>
+        </div>
+        <hr style="border:0;border-top:1px solid #edf2f7;">
+        <div class="vocab-card-setting-group">
+          <div class="vocab-card-setting-label">▶ 自動連続再生インターバル</div>
+          <div class="vocab-card-setting-row" style="margin-top:4px;">
+            <span>表面 → 裏面:</span>
+            <select id="vc-cfg-interval-fb"></select>
+          </div>
+          <div class="vocab-card-setting-row" style="margin-top:4px;">
+            <span>裏面 → 次の単語:</span>
+            <select id="vc-cfg-interval-nw"></select>
+          </div>
+        </div>
+        <button type="button" class="vocab-card-close-btn" id="vc-settings-close-btn">設定を閉じる</button>
+      </div>
+    </div>
+  </div>
+
   <div id="reading-screen" style="display: none;">
     <div class="header-title">音読練習</div>
     <div class="setting-section">
@@ -5811,6 +6055,9 @@ const VocabSettingsModule = (() => {
       }
     }
     syncVocabQuestionCountUi_();
+    if (window.VocabCardModule && VocabCardModule.syncHomeworkUi_) {
+      VocabCardModule.syncHomeworkUi_(homework);
+    }
   }
 
   function init() {
@@ -8093,6 +8340,54 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
   }, '読み込み中…');
 });
 
+const vocabCardStartBtn = document.getElementById('vocab-card-start-btn');
+if (vocabCardStartBtn) {
+  vocabCardStartBtn.addEventListener('click', async () => {
+    const options = window.VocabSettingsModule.getQuizOptions();
+    if (!options.bookName || !options.sheetName) {
+      alert('ブックと教材（シート）を選択してください。');
+      return;
+    }
+    if (options.homeworkMode) {
+      alert('宿題・小テストモードでは単語カードは利用できません。');
+      return;
+    }
+    if (!window.VocabCardModule) {
+      alert('単語カードモジュールの読み込みに失敗しました。ページを再読み込みしてください。');
+      return;
+    }
+    await BusyButton.run(vocabCardStartBtn, async function () {
+      try {
+        await VocabCardModule.loadAndStart(options);
+        BackendSyncStatus.refresh();
+      } catch (error) {
+        console.error(error);
+        alert('エラー: ' + (error.message || error));
+      }
+    }, '読み込み中…');
+  });
+}
+
+function applyVocabCardSessionGlobals_(meta) {
+  currentAppMode = 'vocab';
+  currentVocabSetName = meta.setName;
+  currentVocabBookName = meta.bookName;
+  currentVocabSheetName = meta.sheetName;
+  currentSessionIsPreset = !!meta.isPreset;
+  sessionStartTime = Date.now();
+  sessionPersistedToServer = false;
+  totalQuestionsCount = (meta.cardItems || []).length;
+  currentScore = 0;
+  currentSessionSettings = captureSessionSettingsSnapshot_('vocab');
+}
+window.applyVocabCardSessionGlobals_ = applyVocabCardSessionGlobals_;
+
+function applyVocabCardSessionScore_(known, total) {
+  currentScore = known;
+  totalQuestionsCount = total;
+}
+window.applyVocabCardSessionScore_ = applyVocabCardSessionScore_;
+
 elements.backBtn.addEventListener('click', () => {
   if (window.TtsModule) TtsModule.stop();
   if (window.GameSessionPlay) GameSessionPlay.reset();
@@ -9845,5 +10140,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   BackendSyncStatus.refresh();
 });
 </script>
+<script src="vocab-card-module.js"></script>
 </body>
 </html>
