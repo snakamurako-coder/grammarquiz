@@ -127,7 +127,13 @@ function gasRun(fnName) {
   var args = Array.prototype.slice.call(arguments, 1);
   return new Promise(function(resolve, reject) {
     google.script.run
-      .withSuccessHandler(resolve)
+      .withSuccessHandler(function(res) {
+        if (res == null) {
+          reject(new Error('サーバーから応答がありません（GAS の再デプロイが必要な場合があります）'));
+          return;
+        }
+        resolve(res);
+      })
       .withFailureHandler(function(err) {
         reject(new Error(typeof err === 'object' && err.message ? err.message : String(err)));
       })[fnName].apply(google.script.run, args);
@@ -287,7 +293,7 @@ async function loadSummaries() {
     if (result.status !== 'success') throw new Error(result.message);
     var logs = result.data || [];
     if (logs.length === 0) {
-      wrap.innerHTML = '<p>まだ集約データがありません。</p>';
+      wrap.innerHTML = '<p>' + escapeHtml(result.message || 'まだ集約データがありません。') + '</p>';
       return;
     }
     var html = '<table><thead><tr>';

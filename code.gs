@@ -2105,6 +2105,7 @@ function apiSubmitFormSummary_(requestData) {
 
 /** フォーム回答先シートを本体 SS から探す */
 function findFormResponseSheet_(ss) {
+  const skipNames = { whitelist: 1, assignments: 1, assignment_submissions: 1 };
   const configured = PropertiesService.getScriptProperties().getProperty(PROP.FORM_RESPONSE_SHEET);
   if (configured) {
     const configuredSheet = ss.getSheetByName(configured);
@@ -2119,6 +2120,8 @@ function findFormResponseSheet_(ss) {
 
   for (let i = 0; i < sheets.length; i++) {
     const sheet = sheets[i];
+    const name = sheet.getName();
+    if (skipNames[name]) continue;
     if (sheet.getLastRow() === 0) continue;
     const lastCol = sheet.getLastColumn();
     if (lastCol === 0) continue;
@@ -2129,10 +2132,20 @@ function findFormResponseSheet_(ss) {
   return null;
 }
 
+/** google.script.run 向けにセル値を JSON 化可能な型へ（Date は文字列化） */
+function serializeCellForClient_(value) {
+  if (value === null || value === undefined) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    return Utilities.formatDate(value, Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+  }
+  if (typeof value === 'object') return String(value);
+  return value;
+}
+
 function normalizeFormResponseRow_(headers, row) {
   const obj = {};
   for (let j = 0; j < headers.length; j++) {
-    if (headers[j]) obj[headers[j]] = row[j];
+    if (headers[j]) obj[headers[j]] = serializeCellForClient_(row[j]);
   }
   if (!obj.Ended_At && obj['タイムスタンプ']) obj.Ended_At = obj['タイムスタンプ'];
   if (!obj.User_ID && obj[FORM_RESPONSE_HEADER_USER_ID]) obj.User_ID = obj[FORM_RESPONSE_HEADER_USER_ID];
@@ -2146,9 +2159,14 @@ function apiAdminGetSessionSummaries(limit) {
       return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
     }
     const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
+    if (!spreadId) {
+      return { status: 'success', data: [], message: 'SPREADSHEET_ID 未設定のため集約データはありません' };
+    }
     const ss = SpreadsheetApp.openById(spreadId);
     const sheet = findFormResponseSheet_(ss);
-    if (!sheet || sheet.getLastRow() <= 1) return { status: 'success', data: [] };
+    if (!sheet || sheet.getLastRow() <= 1) {
+      return { status: 'success', data: [], message: 'フォーム回答シートが未設定またはデータがありません' };
+    }
 
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
