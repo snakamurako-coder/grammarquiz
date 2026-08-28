@@ -171,7 +171,10 @@ const AssignmentModule = (function () {
     const wrap = document.getElementById('assignment-list');
     if (!wrap) return;
     if (!rows.length) {
-      wrap.innerHTML = '<p>現在取り組める課題はありません。</p>';
+      wrap.innerHTML = '<p>現在取り組める課題はありません。</p>'
+        + '<p class="hint" style="font-size:.85em;color:#666;margin-top:8px;">'
+        + '管理者側で「公開＝有効」、期間内、配布対象（class / attribute）が一致しているか確認してください。'
+        + 'ログイン直後は「更新」を押してください。</p>';
       return;
     }
     let html = '';

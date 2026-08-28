@@ -23,7 +23,11 @@ const PROP = {
   /** フォーム回答シート名（未設定時は自動検出） */
   FORM_RESPONSE_SHEET: 'FORM_RESPONSE_SHEET',
   /** Google フォーム formResponse URL（未設定時は既定値） */
-  GOOGLE_FORM_ACTION_URL: 'GOOGLE_FORM_ACTION_URL'
+  GOOGLE_FORM_ACTION_URL: 'GOOGLE_FORM_ACTION_URL',
+  /** 双方向デプロイ間の auth トークン同期先（未設定時は DEFAULT_* から推定） */
+  PEER_WEBAPP_URL: 'PEER_WEBAPP_URL',
+  /** registerAuthToken / exportAuthToken 用（未設定時は CLIENT_SECRET） */
+  AUTH_MIRROR_SECRET: 'AUTH_MIRROR_SECRET'
 };
 
 const AUTH_CACHE_PREFIX = 'auth_';
@@ -37,6 +41,8 @@ const DEFAULT_PAGES_URL = 'https://snakamurako-coder.github.io/grammarquiz/';
 const DEFAULT_CLIENT_ID = '505252303455-84r495bnnsgiefcrv24ro2qtohlgbk2h.apps.googleusercontent.com';
 /** GAS① ユーザー権限デプロイ（config.js の DASHBOARD_URL と同一） */
 const DEFAULT_DASHBOARD_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxN9pnUp_mG6QHBKJz2WPaS-YqZlrhUaSI1XjTc3aXbmivNowfQPAi1Vi0WmpmfcDSo/exec';
+/** GAS② 作成者権限デプロイ（config.js の API_URL と同一） */
+const DEFAULT_API_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbwZlw4Q3SGI06YRHogjImWKc25jtLaKAVeEyuAwY0SCY34PvmI14W1LRpRzPxWvTgI/exec';
 
 const MATERIALS_FOLDER_NAME = 'grammarquizzes';
 const VOCABULARY_FOLDER_NAME = 'vocabulary';
@@ -494,6 +500,12 @@ function doPost(e) {
     if (action === 'refreshOAuthToken') {
       return handleRefreshOAuthToken_(requestData);
     }
+    if (action === 'registerAuthToken') {
+      return sendResponse(handleRegisterAuthToken_(requestData));
+    }
+    if (action === 'exportAuthToken') {
+      return sendResponse(handleExportAuthToken_(requestData));
+    }
 
     if (action === "login") {
       ensureEnvironment();
@@ -844,16 +856,136 @@ function issueAuthToken_(email) {
     expiresAt: now + AUTH_CACHE_TTL * 1000
   };
   CacheService.getScriptCache().put(AUTH_CACHE_PREFIX + token, JSON.stringify(payload), AUTH_CACHE_TTL);
+  mirrorAuthTokenToPeerDeployment_(token, payload);
   return token;
+}
+
+function getAuthMirrorSecret_() {
+  const props = PropertiesService.getScriptProperties();
+  return String(props.getProperty(PROP.AUTH_MIRROR_SECRET) || props.getProperty(PROP.CLIENT_SECRET) || '').trim();
+}
+
+/** GAS①↔GAS② のもう一方の exec URL（Script Properties 未設定時は既定 URL から推定） */
+function getPeerWebAppUrl_() {
+  const configured = String(PropertiesService.getScriptProperties().getProperty(PROP.PEER_WEBAPP_URL) || '').trim();
+  if (configured) return configured.split('?')[0];
+  const self = String(ScriptApp.getService().getUrl() || '').split('?')[0];
+  const dash = String(DEFAULT_DASHBOARD_WEBAPP_URL).split('?')[0];
+  const api = String(DEFAULT_API_WEBAPP_URL).split('?')[0];
+  if (self && self === dash) return api;
+  if (self && self === api) return dash;
+  return '';
+}
+
+function validateAuthMirrorSecret_(requestData) {
+  const secret = getAuthMirrorSecret_();
+  if (!secret) return false;
+  return String((requestData && requestData.secret) || '') === secret;
+}
+
+/** もう一方のデプロイの CacheService に同じ auth ペイロードを載せる */
+function mirrorAuthTokenToPeerDeployment_(token, payload) {
+  const peerUrl = getPeerWebAppUrl_();
+  const secret = getAuthMirrorSecret_();
+  if (!peerUrl || !secret || !token || !payload) return;
+  try {
+    UrlFetchApp.fetch(peerUrl, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({
+        action: 'registerAuthToken',
+        secret: secret,
+        token: token,
+        payload: payload
+      }),
+      muteHttpExceptions: true
+    });
+  } catch (e) {
+    // 非致命（片方のデプロイだけでも動作継続）
+  }
+}
+
+/** ローカル Cache に無いトークンを peer から取り込む（GAS① 発行 → GAS② 参照 等） */
+function fetchAuthTokenFromPeerDeployment_(token) {
+  const peerUrl = getPeerWebAppUrl_();
+  const secret = getAuthMirrorSecret_();
+  if (!peerUrl || !secret || !token) return null;
+  try {
+    const res = UrlFetchApp.fetch(peerUrl, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({
+        action: 'exportAuthToken',
+        secret: secret,
+        token: token
+      }),
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() !== 200) return null;
+    const data = JSON.parse(res.getContentText());
+    if (data.status !== 'success' || !data.payload) return null;
+    CacheService.getScriptCache().put(
+      AUTH_CACHE_PREFIX + token,
+      JSON.stringify(data.payload),
+      AUTH_CACHE_TTL
+    );
+    return data.payload;
+  } catch (e) {
+    return null;
+  }
+}
+
+function handleRegisterAuthToken_(requestData) {
+  if (!validateAuthMirrorSecret_(requestData)) {
+    return { status: 'error', message: 'forbidden' };
+  }
+  const token = String((requestData && requestData.token) || '');
+  const payload = requestData && requestData.payload;
+  if (!token || !payload || typeof payload !== 'object') {
+    return { status: 'error', message: 'token / payload が必要です' };
+  }
+  if (payload.expiresAt && Date.now() > payload.expiresAt) {
+    return { status: 'error', message: 'expired' };
+  }
+  CacheService.getScriptCache().put(AUTH_CACHE_PREFIX + token, JSON.stringify(payload), AUTH_CACHE_TTL);
+  return { status: 'success' };
+}
+
+function handleExportAuthToken_(requestData) {
+  if (!validateAuthMirrorSecret_(requestData)) {
+    return { status: 'error', message: 'forbidden' };
+  }
+  const token = String((requestData && requestData.token) || '');
+  if (!token) return { status: 'error', message: 'token が必要です' };
+  const raw = CacheService.getScriptCache().get(AUTH_CACHE_PREFIX + token);
+  if (!raw) return { status: 'error', message: 'not_found' };
+  try {
+    const payload = JSON.parse(raw);
+    if (payload.expiresAt && Date.now() > payload.expiresAt) {
+      return { status: 'error', message: 'expired' };
+    }
+    return { status: 'success', payload: payload };
+  } catch (e) {
+    return { status: 'error', message: 'invalid_payload' };
+  }
 }
 
 /** 認証トークンを検証（無効・期限切れなら null） */
 function validateAuthToken_(token) {
   if (!token) return null;
-  const raw = CacheService.getScriptCache().get(AUTH_CACHE_PREFIX + token);
+  let raw = CacheService.getScriptCache().get(AUTH_CACHE_PREFIX + token);
+  if (!raw) {
+    fetchAuthTokenFromPeerDeployment_(token);
+    raw = CacheService.getScriptCache().get(AUTH_CACHE_PREFIX + token);
+  }
   if (!raw) return null;
   try {
-    return JSON.parse(raw);
+    const auth = JSON.parse(raw);
+    if (auth.expiresAt && Date.now() > auth.expiresAt) {
+      invalidateAuthToken_(token);
+      return null;
+    }
+    return auth;
   } catch (e) {
     return null;
   }
@@ -872,8 +1004,20 @@ function requireAuthToken_(requestData) {
   const token = requestData.authToken;
   if (!token) return { ok: false, error: '認証トークンがありません' };
   const auth = validateAuthToken_(token);
-  if (!auth) return { ok: false, error: '認証トークンが無効または期限切れです' };
+  if (!auth) return { ok: false, error: '認証トークンが無効または期限切れです。再ログインしてください。' };
   return { ok: true, auth: auth };
+}
+
+/** 課題配布判定用: トークン保存時の profile ではなく whitelist 最新値を使う */
+function resolveAuthUserFromRequest_(authReq) {
+  const auth = authReq && authReq.auth;
+  if (!auth) return {};
+  const email = String(auth.email || (auth.user && auth.user.account) || '').trim().toLowerCase();
+  if (email) {
+    const fresh = getWhitelistUserProfile_(email);
+    if (fresh) return fresh;
+  }
+  return auth.user || {};
 }
 
 /** 認証直前に whitelist キャッシュを更新（GAS② ならシートから、GAS① なら既存キャッシュ維持） */
@@ -2291,6 +2435,26 @@ function migrateSheetHeaders_(sheet, requiredHeaders) {
   });
 }
 
+/** 1行目ヘッダ名に合わせてオブジェクトを書き込む（列追加後のずれを防ぐ） */
+function writeObjectRowByHeaders_(sheet, requiredHeaders, rowObj, existingRowNum) {
+  migrateSheetHeaders_(sheet, requiredHeaders);
+  const lastCol = Math.max(sheet.getLastColumn(), requiredHeaders.length);
+  const headerRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const headers = headerRow.map(function (h) { return String(h || '').trim(); });
+  const values = [];
+  for (let c = 0; c < lastCol; c++) {
+    const h = headers[c];
+    if (h && Object.prototype.hasOwnProperty.call(rowObj, h)) {
+      values.push(rowObj[h]);
+    } else {
+      values.push('');
+    }
+  }
+  const targetRow = existingRowNum && existingRowNum > 1 ? existingRowNum : sheet.getLastRow() + 1;
+  sheet.getRange(targetRow, 1, 1, lastCol).setValues([values]);
+  return targetRow;
+}
+
 function ensureSheetWithHeaders_(ss, name, headers) {
   let sheet = ss.getSheetByName(name);
   if (!sheet) {
@@ -2555,13 +2719,7 @@ function apiAdminUpsertAssignment_(requestData) {
     Updated_At: now
   };
   migrateSheetHeaders_(sheet, ASSIGNMENT_HEADERS);
-  const values = ASSIGNMENT_HEADERS.map(function (h) { return rowObj[h]; });
-
-  if (existing) {
-    sheet.getRange(existing._row, 1, 1, ASSIGNMENT_HEADERS.length).setValues([values]);
-  } else {
-    sheet.appendRow(values);
-  }
+  writeObjectRowByHeaders_(sheet, ASSIGNMENT_HEADERS, rowObj, existing ? existing._row : 0);
   return { status: 'success', data: normalizeAssignmentRow_(rowObj) };
 }
 
@@ -2584,7 +2742,7 @@ function apiAdminListSubmissions_(requestData) {
 function apiListMyAssignments_(requestData) {
   const authReq = requireAuthToken_(requestData || {});
   if (!authReq.ok) return { status: 'error', message: authReq.error };
-  const user = authReq.auth.user || {};
+  const user = resolveAuthUserFromRequest_(authReq);
   const account = String(authReq.auth.email || user.account || '').toLowerCase();
   const ss = openAppSpreadsheet_();
   const now = Date.now();
@@ -2644,7 +2802,7 @@ function apiStartAssignmentAttempt_(requestData) {
   if (!authReq.ok) return { status: 'error', message: authReq.error };
   const id = String(requestData.assignmentId || '').trim();
   if (!id) return { status: 'error', message: 'assignmentId が必要です' };
-  const user = authReq.auth.user || {};
+  const user = resolveAuthUserFromRequest_(authReq);
   const account = String(authReq.auth.email || user.account || '').toLowerCase();
   const ss = openAppSpreadsheet_();
   const asgSheet = ss.getSheetByName('assignments');
