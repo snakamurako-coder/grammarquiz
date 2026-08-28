@@ -2767,6 +2767,63 @@ function apiAdminListSubmissions(assignmentId, limit) {
   return apiAdminListSubmissions_({ assignmentId: assignmentId || '', limit: limit || 200 });
 }
 
+/** dashboard: 文法学習セット一覧 */
+function apiAdminGetGrammarCatalog() {
+  try {
+    const access = checkDashboardAccess_();
+    if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
+      return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
+    }
+    ensureEnvironment();
+    return { status: 'success', data: fetchCatalogFromDrive() };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+/** dashboard: 単語プリセットカタログ */
+function apiAdminGetVocabCatalog() {
+  try {
+    const access = checkDashboardAccess_();
+    if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
+      return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
+    }
+    ensureEnvironment();
+    return { status: 'success', data: fetchVocabCatalogFromDrive_() };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+/** dashboard: 選択単元の大/小/文法領域一覧（絞り込みUI用） */
+function apiAdminGetGrammarDivisions(subject, unitsCsv) {
+  try {
+    const access = checkDashboardAccess_();
+    if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
+      return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
+    }
+    ensureEnvironment();
+    const rows = fetchQuestionsFromSheet({
+      subject: String(subject || ''),
+      unit: String(unitsCsv || '')
+    });
+    const dai = {};
+    const sho = {};
+    const area = {};
+    rows.forEach(function (r) {
+      if (r.daiUnit) dai[r.daiUnit] = true;
+      if (r.shoUnit) sho[r.shoUnit] = true;
+      if (r.grammarArea) area[r.grammarArea] = true;
+    });
+    function keys(obj) {
+      return Object.keys(obj).sort(function (a, b) { return a.localeCompare(b, 'ja'); });
+    }
+    return { status: 'success', data: { dai: keys(dai), sho: keys(sho), area: keys(area), rowCount: rows.length } };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
 // =========================================================
 // ⑪ 静的プリセットエクスポート
 // =========================================================

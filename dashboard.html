@@ -27,6 +27,18 @@ th{background:#f5f5f5}
 .form-group.full{grid-column:1 / -1}
 .hint{font-size:.8em;color:#777;margin:4px 0 0}
 .section-card{border:1px solid #e0e0e0;border-radius:8px;padding:10px;margin-bottom:10px;background:#fafafa}
+.section-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.section-card-head strong{color:#37474f}
+.check-list{display:flex;flex-direction:column;gap:6px}
+.check-item{display:flex;align-items:flex-start;gap:6px;font-size:.9em;cursor:pointer}
+.check-item input{margin-top:3px;flex-shrink:0}
+.unit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;max-height:200px;overflow-y:auto}
+.unit-card{border:1px solid #cfd8dc;min-height:40px;padding:8px 10px;border-radius:8px;cursor:pointer;background:#fff;font-size:.9em;text-align:left;width:100%;font-family:inherit;color:inherit}
+.unit-card.selected{background:#e3f2fd;border-color:var(--c-primary);font-weight:bold}
+.division-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:160px;overflow-y:auto}
+.sub-panel{margin-top:8px;padding-top:8px;border-top:1px dashed #ddd}
+.points-row{display:flex;gap:10px;flex-wrap:wrap}
+.points-row .form-group{flex:1;min-width:120px;margin-bottom:0}
 @media (max-width:640px){.form-grid{grid-template-columns:1fr}}
   </style>
 </head>
@@ -40,7 +52,7 @@ th{background:#f5f5f5}
 
   <div class="setting-section">
     <div class="section-title">宿題・小テスト</div>
-    <p class="hint">最大4セクション。音読・AI英会話は未実装のため mode に指定しないでください。配布対象は class + attribute1～5（空＝制限なし、各列カンマ区切り OR、列同士 AND）。</p>
+    <p class="hint">最大4セクション。文法・語法演習／単語学習と同じUIで設定し、保存時に JSON 化してシートへ保存します。各セクションで「1問あたりの配点」を指定できます（小テストの得点計算に使用）。配布対象は class + attribute1～5（空＝制限なし）。</p>
     <div class="form-grid">
       <div class="form-group"><label>課題ID（空欄で新規）</label><input id="asg-id" type="text" placeholder="空欄＝新規作成"></div>
       <div class="form-group"><label>⓪ 課題名</label><input id="asg-title" type="text" required></div>
@@ -69,10 +81,13 @@ th{background:#f5f5f5}
         <select id="asg-active"><option value="1">有効</option><option value="0">無効</option></select>
       </div>
       <div class="form-group full">
-        <label>⑤ セクション（最大4・JSON）</label>
-        <textarea id="asg-sections" rows="12" spellcheck="false"></textarea>
-        <p class="hint">例: mode=grammar|vocab / formats / questionCount / pointsPerQuestion / subject+units または bookType+bookName+sheetName</p>
-        <button type="button" id="asg-fill-sample" class="btn-small">サンプルJSONを入れる</button>
+        <label>⑤ セクション（最大4）</label>
+        <p class="hint">文法・語法演習／単語学習と同じ操作感で設定します。保存時に自動で JSON 化されシートに記録されます。</p>
+        <div style="margin:8px 0;">
+          <button type="button" id="asg-add-section-btn" class="btn-small">＋ セクションを追加</button>
+          <span class="hint" id="asg-section-count-hint" style="margin-left:8px;"></span>
+        </div>
+        <div id="asg-sections-list"></div>
       </div>
     </div>
     <button type="button" id="asg-save-btn" class="btn-primary">課題を保存</button>
@@ -106,27 +121,569 @@ th{background:#f5f5f5}
 <script>
 const PAGES_URL = '<?= PAGES_URL ?>';
 
-const SAMPLE_SECTIONS = [
-  {
-    mode: 'grammar',
-    subject: '高校英語',
-    units: ['サンプル単元'],
-    formats: ['A', 'G'],
-    questionCount: 5,
-    pointsPerQuestion: 1,
-    filters: { dai: [], sho: [], area: [] }
-  },
-  {
-    mode: 'vocab',
-    bookType: 'preset',
-    bookName: 'サンプル単語帳',
-    sheetName: 'Sheet1',
-    formats: ['vocab-enja', 'W4'],
-    questionCount: 5,
-    pointsPerQuestion: 2,
-    filters: {}
-  }
+const GRAMMAR_FORMATS = [
+  { key: 'A', label: '和文英訳' },
+  { key: 'B', label: '空所補充【長い】' },
+  { key: 'E', label: '並び替え' },
+  { key: 'F', label: '語句補完【短い記述】' },
+  { key: 'G', label: '語句補完【選択方式】' },
+  { key: 'H', label: '正誤判断' }
 ];
+
+const AssignmentSectionBuilder = (function () {
+  var grammarCatalog = {};
+  var vocabCatalog = { presets: [] };
+  var sections = [];
+  var divisionsCache = {};
+  var pendingPayload = null;
+
+  function defaultGrammar() {
+    return {
+      mode: 'grammar', subject: '', units: [],
+      filters: { dai: [], sho: [], area: [] },
+      formatKeys: ['A'], eSortVariant: 'E', choiceCount: 4,
+      includeNone: true, includeUnknown: true,
+      questionCount: 10, pointsPerQuestion: 1
+    };
+  }
+
+  function defaultVocab() {
+    return {
+      mode: 'vocab', bookType: 'preset', bookName: '', sheetName: '',
+      filters: { dai: [], chu: [], sho: [] },
+      directions: ['jaen'], grains: ['WD'], response: 'choice', choiceStyle: 'dedicated',
+      questionCount: 5, pointsPerQuestion: 1, choiceCount: 4, poolDummyCount: 2
+    };
+  }
+
+  function vocabResolveFormats(sec) {
+    var dirs = sec.directions || [];
+    var grains = sec.grains || [];
+    var response = sec.response || 'choice';
+    var choiceStyle = sec.choiceStyle || 'dedicated';
+    var keys = [];
+    var seen = {};
+    function add(k) {
+      if (!k || seen[k]) return;
+      seen[k] = true;
+      keys.push(k);
+    }
+    dirs.forEach(function (d) {
+      grains.forEach(function (g) {
+        if (response === 'typing') {
+          if (d === 'jaen') {
+            if (g === 'WD') add('W1');
+            if (g === 'PH') add('W2');
+            if (g === 'EX') add('W3');
+          } else {
+            if (g === 'WD') add('W4');
+            if (g === 'PH') add('W5');
+            if (g === 'EX') add('W6');
+          }
+          return;
+        }
+        if (choiceStyle === 'pool') {
+          if (d === 'jaen') {
+            if (g === 'WD') add('PPW');
+            if (g === 'PH') add('PPH');
+            if (g === 'EX') add('PEX');
+          } else {
+            if (g === 'WD') add('enja-wd-pool');
+            if (g === 'PH') add('enja-ph-pool');
+            if (g === 'EX') add('enja-ex-pool');
+          }
+          return;
+        }
+        if (d === 'jaen') {
+          if (g === 'WD') add('vocab-jaen');
+          if (g === 'PH') add('C1');
+          if (g === 'EX') add('C2');
+        } else {
+          if (g === 'WD') add('vocab-enja');
+          if (g === 'PH') add('enja-ph');
+          if (g === 'EX') add('enja-ex');
+        }
+      });
+    });
+    return keys;
+  }
+
+  function grammarFormatsToKeys(sec) {
+    var out = [];
+    (sec.formatKeys || []).forEach(function (key) {
+      if (key === 'E') out.push(sec.eSortVariant || 'E');
+      else out.push(key);
+    });
+    return out.length ? out : ['A'];
+  }
+
+  function parseGrammarFromPayload(sec) {
+    var s = defaultGrammar();
+    s.subject = sec.subject || '';
+    s.units = (sec.units || []).slice();
+    s.filters = {
+      dai: (sec.filters && sec.filters.dai) || [],
+      sho: (sec.filters && sec.filters.sho) || [],
+      area: (sec.filters && sec.filters.area) || []
+    };
+    s.questionCount = sec.questionCount != null ? sec.questionCount : 10;
+    s.pointsPerQuestion = sec.pointsPerQuestion != null ? sec.pointsPerQuestion : 1;
+    s.choiceCount = sec.choiceCount || 4;
+    s.includeNone = sec.includeNone !== false;
+    s.includeUnknown = sec.includeUnknown !== false;
+    var formats = sec.formats || ['A'];
+    s.formatKeys = [];
+    s.eSortVariant = 'E';
+    formats.forEach(function (f) {
+      if (f === 'C' || f === 'D') {
+        if (s.formatKeys.indexOf('E') < 0) s.formatKeys.push('E');
+        s.eSortVariant = f;
+      } else if (s.formatKeys.indexOf(f) < 0) {
+        s.formatKeys.push(f);
+      }
+    });
+    if (!s.formatKeys.length) s.formatKeys = ['A'];
+    return s;
+  }
+
+  function parseVocabFromPayload(sec) {
+    var s = defaultVocab();
+    s.bookType = sec.bookType || 'preset';
+    s.bookName = sec.bookName || '';
+    s.sheetName = sec.sheetName || '';
+    s.filters = {
+      dai: (sec.filters && sec.filters.dai) || [],
+      chu: (sec.filters && sec.filters.chu) || [],
+      sho: (sec.filters && sec.filters.sho) || []
+    };
+    s.questionCount = sec.questionCount != null ? sec.questionCount : 5;
+    s.pointsPerQuestion = sec.pointsPerQuestion != null ? sec.pointsPerQuestion : 1;
+    s.poolDummyCount = sec.poolDummyCount != null ? sec.poolDummyCount : 2;
+    s.choiceCount = sec.choiceCount || 4;
+    if (sec.axes) {
+      s.directions = (sec.axes.directions || ['jaen']).slice();
+      s.grains = (sec.axes.grains || ['WD']).slice();
+      s.response = sec.axes.response || 'choice';
+      s.choiceStyle = sec.axes.choiceStyle || 'dedicated';
+    }
+    return s;
+  }
+
+  function grammarSubjects() {
+    return Object.keys(grammarCatalog).sort(function (a, b) { return a.localeCompare(b, 'ja'); });
+  }
+
+  function vocabBooks() {
+    return (vocabCatalog.presets || []).slice();
+  }
+
+  function vocabSheets(bookName) {
+    var book = vocabBooks().filter(function (b) { return b.bookName === bookName; })[0];
+    return book ? (book.sheets || []) : [];
+  }
+
+  function renderCheckboxList(items, selected, namePrefix) {
+    return (items || []).map(function (item) {
+      var checked = selected.indexOf(item) >= 0 ? ' checked' : '';
+      return '<label class="check-item"><input type="checkbox" data-cb="' + escapeHtml(namePrefix) + '" value="' + escapeHtml(item) + '"' + checked + '><span>' + escapeHtml(item) + '</span></label>';
+    }).join('');
+  }
+
+  function renderGrammarPanel(sec, idx) {
+    var subjects = grammarSubjects();
+    var subjectOpts = subjects.map(function (name) {
+      return '<option value="' + escapeHtml(name) + '"' + (name === sec.subject ? ' selected' : '') + '>' + escapeHtml(name) + '</option>';
+    }).join('');
+    if (!subjects.length) subjectOpts = '<option value="">（学習セットがありません）</option>';
+    var units = sec.subject ? (grammarCatalog[sec.subject] || []) : [];
+    var unitHtml = units.map(function (u) {
+      var sel = sec.units.indexOf(u) >= 0 ? ' selected' : '';
+      return '<button type="button" class="unit-card' + sel + '" data-unit="' + escapeHtml(u) + '">' + escapeHtml(u) + '</button>';
+    }).join('');
+    var divKey = sec.subject + '|' + sec.units.join(',');
+    var div = divisionsCache[divKey] || { dai: [], sho: [], area: [] };
+    var formatHtml = GRAMMAR_FORMATS.map(function (f) {
+      var checked = sec.formatKeys.indexOf(f.key) >= 0 ? ' checked' : '';
+      return '<label class="check-item"><input type="checkbox" data-fmt="1" value="' + f.key + '"' + checked + '><span>【' + f.key + '】' + escapeHtml(f.label) + '</span></label>';
+    }).join('');
+    var showE = sec.formatKeys.indexOf('E') >= 0;
+    var showG = sec.formatKeys.indexOf('G') >= 0;
+    return ''
+      + '<div class="sub-panel" data-panel="grammar">'
+      + '<div class="form-group"><label>学年・区分</label><select data-field="subject">' + subjectOpts + '</select></div>'
+      + '<div class="form-group"><label>教材（単元）</label><div class="unit-grid">' + (unitHtml || '<span class="hint">区分を選んでください</span>') + '</div></div>'
+      + '<div class="form-group"><label>絞り込み（未チェック＝制限なし）</label>'
+      + '<div style="margin-bottom:6px;"><strong style="font-size:.8em;">大単元</strong><div class="division-grid" data-div="dai">' + renderCheckboxList(div.dai, sec.filters.dai, 'dai') + '</div></div>'
+      + '<div style="margin-bottom:6px;"><strong style="font-size:.8em;">小単元</strong><div class="division-grid" data-div="sho">' + renderCheckboxList(div.sho, sec.filters.sho, 'sho') + '</div></div>'
+      + '<div><strong style="font-size:.8em;">ターゲット文法領域</strong><div class="division-grid" data-div="area">' + renderCheckboxList(div.area, sec.filters.area, 'area') + '</div></div>'
+      + '</div>'
+      + '<div class="form-group"><label>出題形式</label><div class="check-list">' + formatHtml + '</div>'
+      + '<div style="margin-top:6px;" data-e-opt' + (showE ? '' : ' style="display:none;"') + '><label style="font-size:.85em;">【形式E】語句カード</label>'
+      + '<select data-field="eSortVariant"><option value="E"' + (sec.eSortVariant === 'E' ? ' selected' : '') + '>全語句カード</option>'
+      + '<option value="C"' + (sec.eSortVariant === 'C' ? ' selected' : '') + '>不足語句追加</option>'
+      + '<option value="D"' + (sec.eSortVariant === 'D' ? ' selected' : '') + '>不要語句排除</option></select></div>'
+      + '<div style="margin-top:6px;" data-g-opt' + (showG ? '' : ' style="display:none;"') + '><label style="font-size:.85em;">【形式G】選択肢数</label>'
+      + '<select data-field="choiceCount">' + [2, 3, 4, 5, 6, 7, 8, 9].map(function (n) {
+        return '<option value="' + n + '"' + (sec.choiceCount === n ? ' selected' : '') + '>' + n + '択</option>';
+      }).join('') + '</select>'
+      + '<label class="check-item" style="margin-top:4px;"><input type="checkbox" data-field="includeNone"' + (sec.includeNone ? ' checked' : '') + '> 「この中に正答はない」を含める</label>'
+      + '<label class="check-item"><input type="checkbox" data-field="includeUnknown"' + (sec.includeUnknown ? ' checked' : '') + '> 「わからない・自信がない」を含める</label></div>'
+      + '</div>'
+      + renderPointsRow(sec)
+      + '</div>';
+  }
+
+  function renderVocabPanel(sec, idx) {
+    var books = vocabBooks();
+    var bookOpts = books.map(function (b) {
+      return '<option value="' + escapeHtml(b.bookName) + '"' + (b.bookName === sec.bookName ? ' selected' : '') + '>' + escapeHtml(b.bookName) + '</option>';
+    }).join('');
+    if (!books.length) bookOpts = '<option value="">（プリセットブックがありません）</option>';
+    var sheets = vocabSheets(sec.bookName);
+    var sheetOpts = sheets.map(function (s) {
+      return '<option value="' + escapeHtml(s.sheetName) + '"' + (s.sheetName === sec.sheetName ? ' selected' : '') + '>' + escapeHtml(s.sheetName) + ' (' + (s.wordCount || 0) + '語)</option>';
+    }).join('');
+    if (!sheets.length) sheetOpts = '<option value="">（シートを選んでください）</option>';
+    var sheet = sheets.filter(function (s) { return s.sheetName === sec.sheetName; })[0];
+    var div = sheet && sheet.divisions ? sheet.divisions : { dai: [], chu: [], sho: [] };
+    function dirChecked(v) { return sec.directions.indexOf(v) >= 0 ? ' checked' : ''; }
+    function grainChecked(v) { return sec.grains.indexOf(v) >= 0 ? ' checked' : ''; }
+    return ''
+      + '<div class="sub-panel" data-panel="vocab">'
+      + '<div class="form-group"><label>単語ブック（プリセット）</label><select data-field="bookName">' + bookOpts + '</select></div>'
+      + '<div class="form-group"><label>教材（シート）</label><select data-field="sheetName">' + sheetOpts + '</select></div>'
+      + '<div class="form-group"><label>区分で絞り込み</label>'
+      + '<div style="margin-bottom:6px;"><strong style="font-size:.8em;">大区分</strong><div class="division-grid">' + renderCheckboxList(div.dai, sec.filters.dai, 'dai') + '</div></div>'
+      + '<div style="margin-bottom:6px;"><strong style="font-size:.8em;">中区分</strong><div class="division-grid">' + renderCheckboxList(div.chu, sec.filters.chu, 'chu') + '</div></div>'
+      + '<div><strong style="font-size:.8em;">小区分</strong><div class="division-grid">' + renderCheckboxList(div.sho, sec.filters.sho, 'sho') + '</div></div>'
+      + '</div>'
+      + '<div class="form-group"><label>和英 / 英和</label><div class="check-list">'
+      + '<label class="check-item"><input type="checkbox" data-axis="dir" value="jaen"' + dirChecked('jaen') + '> 和英</label>'
+      + '<label class="check-item"><input type="checkbox" data-axis="dir" value="enja"' + dirChecked('enja') + '> 英和</label></div></div>'
+      + '<div class="form-group"><label>語 / 句 / 例文</label><div class="check-list">'
+      + '<label class="check-item"><input type="checkbox" data-axis="grain" value="WD"' + grainChecked('WD') + '> 語to語</label>'
+      + '<label class="check-item"><input type="checkbox" data-axis="grain" value="PH"' + grainChecked('PH') + '> 句to句</label>'
+      + '<label class="check-item"><input type="checkbox" data-axis="grain" value="EX"' + grainChecked('EX') + '> 例文to例文</label></div></div>'
+      + '<div class="form-group"><label>解答方法</label><div class="check-list">'
+      + '<label class="check-item"><input type="radio" name="vresp-' + idx + '" data-field="response" value="choice"' + (sec.response === 'choice' ? ' checked' : '') + '> 選択</label>'
+      + '<label class="check-item"><input type="radio" name="vresp-' + idx + '" data-field="response" value="typing"' + (sec.response === 'typing' ? ' checked' : '') + '> タイピング</label></div></div>'
+      + '<div class="form-group" data-vocab-pool-wrap' + (sec.response === 'choice' ? '' : ' style="display:none;"') + '><label>選択の出し方</label><div class="check-list">'
+      + '<label class="check-item"><input type="radio" name="vstyle-' + idx + '" data-field="choiceStyle" value="dedicated"' + (sec.choiceStyle === 'dedicated' ? ' checked' : '') + '> 各問専用選択肢</label>'
+      + '<label class="check-item"><input type="radio" name="vstyle-' + idx + '" data-field="choiceStyle" value="pool"' + (sec.choiceStyle === 'pool' ? ' checked' : '') + '> 選択肢プール</label></div></div>'
+      + renderPointsRow(sec, true)
+      + '</div>';
+  }
+
+  function renderPointsRow(sec, isVocab) {
+    return '<div class="points-row" style="margin-top:10px;">'
+      + '<div class="form-group"><label>' + (isVocab ? '各形式の出題数' : '出題数') + '</label>'
+      + '<input type="number" data-field="questionCount" min="1" max="999" value="' + escapeHtml(sec.questionCount) + '"></div>'
+      + '<div class="form-group"><label>1問あたりの配点（点）</label>'
+      + '<input type="number" data-field="pointsPerQuestion" min="0" max="100" step="0.5" value="' + escapeHtml(sec.pointsPerQuestion) + '"></div>'
+      + '</div>';
+  }
+
+  function renderOneSection(sec, idx) {
+    var modeG = sec.mode === 'grammar' ? ' selected' : '';
+    var modeV = sec.mode === 'vocab' ? ' selected' : '';
+    return '<div class="section-card" data-sec-idx="' + idx + '">'
+      + '<div class="section-card-head"><strong>セクション ' + (idx + 1) + '</strong>'
+      + '<button type="button" class="btn-small btn-danger" data-act="remove">削除</button></div>'
+      + '<div class="form-group"><label>種類</label><select data-field="mode">'
+      + '<option value="grammar"' + modeG + '>文法・語法演習</option>'
+      + '<option value="vocab"' + modeV + '>単語学習</option></select></div>'
+      + (sec.mode === 'vocab' ? renderVocabPanel(sec, idx) : renderGrammarPanel(sec, idx))
+      + '</div>';
+  }
+
+  function updateCountHint() {
+    var el = document.getElementById('asg-section-count-hint');
+    if (el) el.textContent = sections.length + ' / 4 セクション';
+    var addBtn = document.getElementById('asg-add-section-btn');
+    if (addBtn) addBtn.disabled = sections.length >= 4;
+  }
+
+  function renderAll() {
+    var wrap = document.getElementById('asg-sections-list');
+    if (!wrap) return;
+    if (!sections.length) {
+      wrap.innerHTML = '<p class="hint">「＋ セクションを追加」で課題内容を設定してください。</p>';
+    } else {
+      wrap.innerHTML = sections.map(function (sec, i) { return renderOneSection(sec, i); }).join('');
+    }
+    updateCountHint();
+  }
+
+  function readSectionFromCard(card, idx) {
+    var sec = sections[idx];
+    if (!sec) return null;
+    var modeEl = card.querySelector('[data-field="mode"]');
+    sec.mode = modeEl ? modeEl.value : sec.mode;
+    if (sec.mode === 'grammar') {
+      var subEl = card.querySelector('[data-field="subject"]');
+      sec.subject = subEl ? subEl.value : sec.subject;
+      sec.units = Array.from(card.querySelectorAll('.unit-card.selected')).map(function (b) { return b.getAttribute('data-unit'); }).filter(Boolean);
+      sec.filters.dai = checkedValues(card, 'dai');
+      sec.filters.sho = checkedValues(card, 'sho');
+      sec.filters.area = checkedValues(card, 'area');
+      sec.formatKeys = Array.from(card.querySelectorAll('input[data-fmt]:checked')).map(function (el) { return el.value; });
+      var eSort = card.querySelector('[data-field="eSortVariant"]');
+      sec.eSortVariant = eSort ? eSort.value : 'E';
+      var cc = card.querySelector('[data-field="choiceCount"]');
+      sec.choiceCount = cc ? parseInt(cc.value, 10) || 4 : 4;
+      sec.includeNone = !!(card.querySelector('[data-field="includeNone"]') || {}).checked;
+      sec.includeUnknown = !!(card.querySelector('[data-field="includeUnknown"]') || {}).checked;
+    } else {
+      sec.mode = 'vocab';
+      sec.bookType = 'preset';
+      var bn = card.querySelector('[data-field="bookName"]');
+      sec.bookName = bn ? bn.value : sec.bookName;
+      var sn = card.querySelector('[data-field="sheetName"]');
+      sec.sheetName = sn ? sn.value : sec.sheetName;
+      sec.filters.dai = checkedValues(card, 'dai');
+      sec.filters.chu = checkedValues(card, 'chu');
+      sec.filters.sho = checkedValues(card, 'sho');
+      sec.directions = Array.from(card.querySelectorAll('input[data-axis="dir"]:checked')).map(function (el) { return el.value; });
+      sec.grains = Array.from(card.querySelectorAll('input[data-axis="grain"]:checked')).map(function (el) { return el.value; });
+      var resp = card.querySelector('input[data-field="response"]:checked');
+      sec.response = resp ? resp.value : 'choice';
+      var sty = card.querySelector('input[data-field="choiceStyle"]:checked');
+      sec.choiceStyle = sty ? sty.value : 'dedicated';
+    }
+    var qc = card.querySelector('[data-field="questionCount"]');
+    sec.questionCount = qc ? parseInt(qc.value, 10) || 1 : 1;
+    var ppq = card.querySelector('[data-field="pointsPerQuestion"]');
+    sec.pointsPerQuestion = ppq ? parseFloat(ppq.value) || 0 : 0;
+    sections[idx] = sec;
+    return sec;
+  }
+
+  function checkedValues(card, prefix) {
+    return Array.from(card.querySelectorAll('input[data-cb="' + prefix + '"]:checked')).map(function (el) { return el.value; });
+  }
+
+  function syncFromDom(idx) {
+    var card = document.querySelector('.section-card[data-sec-idx="' + idx + '"]');
+    if (card) readSectionFromCard(card, idx);
+  }
+
+  async function loadDivisionsFor(idx) {
+    syncFromDom(idx);
+    var sec = sections[idx];
+    if (!sec || sec.mode !== 'grammar' || !sec.subject || !sec.units.length) return;
+    var key = sec.subject + '|' + sec.units.join(',');
+    if (divisionsCache[key]) {
+      renderAll();
+      return;
+    }
+    try {
+      var result = await gasRun('apiAdminGetGrammarDivisions', sec.subject, sec.units.join(','));
+      if (result.status !== 'success') throw new Error(result.message);
+      divisionsCache[key] = result.data || { dai: [], sho: [], area: [] };
+    } catch (e) {
+      divisionsCache[key] = { dai: [], sho: [], area: [] };
+      console.warn(e.message || e);
+    }
+    renderAll();
+  }
+
+  function buildPayloadSection(sec, idx) {
+    if (sec.mode === 'grammar') {
+      if (!sec.subject) throw new Error('セクション' + (idx + 1) + ': 学年・区分を選んでください');
+      if (!sec.units.length) throw new Error('セクション' + (idx + 1) + ': 教材（単元）を1つ以上選んでください');
+      var fmts = grammarFormatsToKeys(sec);
+      if (!fmts.length) throw new Error('セクション' + (idx + 1) + ': 出題形式を1つ以上選んでください');
+      return {
+        mode: 'grammar',
+        subject: sec.subject,
+        units: sec.units.slice(),
+        filters: { dai: sec.filters.dai.slice(), sho: sec.filters.sho.slice(), area: sec.filters.area.slice() },
+        formats: fmts,
+        questionCount: sec.questionCount,
+        pointsPerQuestion: sec.pointsPerQuestion,
+        choiceCount: sec.choiceCount,
+        includeNone: sec.includeNone,
+        includeUnknown: sec.includeUnknown
+      };
+    }
+    if (!sec.bookName || !sec.sheetName) throw new Error('セクション' + (idx + 1) + ': 単語ブックとシートを選んでください');
+    if (!sec.directions.length || !sec.grains.length) throw new Error('セクション' + (idx + 1) + ': 和英/英和と語/句/例文を選んでください');
+    var vFormats = vocabResolveFormats(sec);
+    if (!vFormats.length) throw new Error('セクション' + (idx + 1) + ': 出題形式の組み合わせが空です');
+    if (vFormats.length > 4) throw new Error('セクション' + (idx + 1) + ': 出題形式は最大4種類までです（現在' + vFormats.length + '種類）');
+    return {
+      mode: 'vocab',
+      bookType: 'preset',
+      bookName: sec.bookName,
+      sheetName: sec.sheetName,
+      filters: { dai: sec.filters.dai.slice(), chu: sec.filters.chu.slice(), sho: sec.filters.sho.slice() },
+      formats: vFormats,
+      axes: {
+        directions: sec.directions.slice(),
+        grains: sec.grains.slice(),
+        response: sec.response,
+        choiceStyle: sec.choiceStyle
+      },
+      questionCount: sec.questionCount,
+      pointsPerQuestion: sec.pointsPerQuestion,
+      poolDummyCount: sec.poolDummyCount || 2,
+      choiceCount: sec.choiceCount || 4
+    };
+  }
+
+  function collectSections() {
+    document.querySelectorAll('.section-card').forEach(function (card) {
+      var idx = parseInt(card.getAttribute('data-sec-idx'), 10);
+      readSectionFromCard(card, idx);
+    });
+    if (!sections.length) throw new Error('セクションを1つ以上追加してください');
+    if (sections.length > 4) throw new Error('セクションは最大4つです');
+    return sections.map(function (sec, i) { return buildPayloadSection(sec, i); });
+  }
+
+  function setSectionsFromPayload(list) {
+    if (!list || !list.length) {
+      sections = [];
+      divisionsCache = {};
+      renderAll();
+      return;
+    }
+    if (!Object.keys(grammarCatalog).length && !(vocabCatalog.presets || []).length) {
+      pendingPayload = list;
+      return;
+    }
+    pendingPayload = null;
+    sections = list.slice(0, 4).map(function (sec) {
+      if (String(sec.mode || '').toLowerCase() === 'vocab') return parseVocabFromPayload(sec);
+      return parseGrammarFromPayload(sec);
+    });
+    divisionsCache = {};
+    renderAll();
+    sections.forEach(function (sec, i) {
+      if (sec.mode === 'grammar' && sec.subject && sec.units.length) loadDivisionsFor(i);
+    });
+  }
+
+  function addSection() {
+    if (sections.length >= 4) return;
+    var sec = defaultGrammar();
+    var subs = grammarSubjects();
+    if (subs.length) {
+      sec.subject = subs[0];
+      sec.units = (grammarCatalog[sec.subject] || []).slice(0, 1);
+    }
+    sections.push(sec);
+    renderAll();
+    loadDivisionsFor(sections.length - 1);
+  }
+
+  function removeSection(idx) {
+    sections.splice(idx, 1);
+    renderAll();
+  }
+
+  function bindEvents() {
+    var list = document.getElementById('asg-sections-list');
+    var addBtn = document.getElementById('asg-add-section-btn');
+    if (addBtn) addBtn.addEventListener('click', addSection);
+    if (!list) return;
+    list.addEventListener('click', function (e) {
+      var card = e.target.closest('.section-card');
+      if (!card) return;
+      var idx = parseInt(card.getAttribute('data-sec-idx'), 10);
+      if (e.target.closest('[data-act="remove"]')) {
+        removeSection(idx);
+        return;
+      }
+      if (e.target.classList.contains('unit-card')) {
+        e.target.classList.toggle('selected');
+        syncFromDom(idx);
+        loadDivisionsFor(idx);
+      }
+    });
+    list.addEventListener('change', function (e) {
+      var card = e.target.closest('.section-card');
+      if (!card) return;
+      var idx = parseInt(card.getAttribute('data-sec-idx'), 10);
+      syncFromDom(idx);
+      var field = e.target.getAttribute('data-field');
+      if (field === 'mode') {
+        sections[idx] = e.target.value === 'vocab' ? defaultVocab() : defaultGrammar();
+        if (sections[idx].mode === 'grammar' && grammarSubjects().length) {
+          sections[idx].subject = grammarSubjects()[0];
+          sections[idx].units = (grammarCatalog[sections[idx].subject] || []).slice(0, 1);
+        }
+        if (sections[idx].mode === 'vocab' && vocabBooks().length) {
+          sections[idx].bookName = vocabBooks()[0].bookName;
+          var sh = vocabSheets(sections[idx].bookName);
+          if (sh.length) sections[idx].sheetName = sh[0].sheetName;
+        }
+        renderAll();
+        if (sections[idx].mode === 'grammar') loadDivisionsFor(idx);
+        return;
+      }
+      if (field === 'subject' || field === 'bookName' || field === 'sheetName') {
+        if (field === 'subject') {
+          sections[idx].units = (grammarCatalog[sections[idx].subject] || []).slice(0, 1);
+        }
+        if (field === 'bookName') {
+          var sh2 = vocabSheets(sections[idx].bookName);
+          sections[idx].sheetName = sh2.length ? sh2[0].sheetName : '';
+        }
+        renderAll();
+        if (sections[idx].mode === 'grammar') loadDivisionsFor(idx);
+        return;
+      }
+      if (field === 'response') {
+        renderAll();
+        return;
+      }
+      if (e.target.matches('input[data-fmt]')) {
+        renderAll();
+      }
+    });
+  }
+
+  async function initCatalogs() {
+    var gRes = await gasRun('apiAdminGetGrammarCatalog');
+    if (gRes.status !== 'success') throw new Error(gRes.message || '文法カタログ取得失敗');
+    grammarCatalog = gRes.data || {};
+    var vRes = await gasRun('apiAdminGetVocabCatalog');
+    if (vRes.status !== 'success') throw new Error(vRes.message || '単語カタログ取得失敗');
+    vocabCatalog = vRes.data || { presets: [] };
+  }
+
+  async function init() {
+    await initCatalogs();
+    if (pendingPayload) {
+      setSectionsFromPayload(pendingPayload);
+    } else if (!sections.length) {
+      var sec = defaultGrammar();
+      var subs = grammarSubjects();
+      if (subs.length) {
+        sec.subject = subs[0];
+        sec.units = (grammarCatalog[sec.subject] || []).slice(0, 1);
+      }
+      sections.push(sec);
+    }
+    bindEvents();
+    renderAll();
+    if (sections[0] && sections[0].mode === 'grammar' && sections[0].subject && sections[0].units.length) {
+      loadDivisionsFor(0);
+    }
+  }
+
+  return {
+    init: init,
+    collectSections: collectSections,
+    setSectionsFromPayload: setSectionsFromPayload,
+    resetToDefault: function () {
+      sections = [];
+      divisionsCache = {};
+      addSection();
+    }
+  };
+})();
 
 function gasRun(fnName) {
   var args = Array.prototype.slice.call(arguments, 1);
@@ -175,15 +732,7 @@ function formatTargetSummary_(a) {
 }
 
 function collectAssignment_() {
-  var sectionsRaw = document.getElementById('asg-sections').value.trim();
-  var sections;
-  try {
-    sections = JSON.parse(sectionsRaw || '[]');
-  } catch (e) {
-    throw new Error('セクションJSONが不正です: ' + e.message);
-  }
-  if (!Array.isArray(sections) || !sections.length) throw new Error('セクションを1つ以上入れてください');
-  if (sections.length > 4) throw new Error('セクションは最大4つです');
+  var sections = AssignmentSectionBuilder.collectSections();
   return {
     Assignment_ID: document.getElementById('asg-id').value.trim(),
     Title: document.getElementById('asg-title').value.trim(),
@@ -223,7 +772,7 @@ function fillFormFromAssignment_(a) {
   document.getElementById('asg-pass-mode').value = a.Pass_Mode || 'rate';
   document.getElementById('asg-weakness').value = String(a.Weakness_Review || 0);
   document.getElementById('asg-active').value = String(a.Active != null ? a.Active : 1);
-  document.getElementById('asg-sections').value = JSON.stringify(a.Sections || [], null, 2);
+  AssignmentSectionBuilder.setSectionsFromPayload(a.Sections || []);
 }
 
 async function loadAssignments() {
@@ -368,15 +917,14 @@ document.addEventListener('DOMContentLoaded', function() {
   var pagesLink = document.getElementById('pages-link');
   if (pagesLink && PAGES_URL) pagesLink.href = PAGES_URL;
 
-  document.getElementById('asg-sections').value = JSON.stringify(SAMPLE_SECTIONS, null, 2);
-  document.getElementById('asg-fill-sample').addEventListener('click', function () {
-    document.getElementById('asg-sections').value = JSON.stringify(SAMPLE_SECTIONS, null, 2);
-  });
   document.getElementById('asg-save-btn').addEventListener('click', saveAssignment);
   document.getElementById('asg-refresh-btn').addEventListener('click', loadAssignments);
   document.getElementById('sub-refresh-btn').addEventListener('click', loadSubmissions);
   document.getElementById('refresh-summaries-btn').addEventListener('click', loadSummaries);
 
+  AssignmentSectionBuilder.init().catch(function (e) {
+    showBanner('教材カタログの読込に失敗: ' + (e.message || e), false);
+  });
   loadAssignments();
   loadSubmissions();
   loadSummaries();
