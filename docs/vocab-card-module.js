@@ -105,17 +105,20 @@ const VocabCardModule = (() => {
     });
   }
 
-  function pickWordsForCard_(words, options) {
-    let target = words.slice();
-    if (window.SrsModule && options.bookName && options.sheetName) {
-      let limit = target.length;
-      if (options.questionCount !== 'all') {
-        limit = Math.min(parseInt(options.questionCount, 10) || target.length, target.length);
-      }
-      target = window.SrsModule.selectDueWords(target, options.bookName, options.sheetName, limit);
-    } else if (options.questionCount !== 'all') {
-      const n = parseInt(options.questionCount, 10);
-      if (n > 0 && n < target.length) target = target.slice(0, n);
+  /** 👍習得済み（Step_Index>=1）以外＝未登録・😫 */
+  function isMasteredWord_(wordObj, bookName, sheetName) {
+    if (!window.SrsModule) return false;
+    const wordId = window.SrsModule.buildWordId(bookName, sheetName, wordObj['通し番号']);
+    const state = window.SrsModule.getState(wordId);
+    return (parseInt(state.Step_Index, 10) || 0) >= 1;
+  }
+
+  function pickWordsForCard_(words, scope, bookName, sheetName) {
+    let target = (words || []).slice();
+    if (scope === 'unmastered') {
+      target = target.filter(function (w) {
+        return !isMasteredWord_(w, bookName, sheetName);
+      });
     }
     return target;
   }
@@ -606,10 +609,19 @@ const VocabCardModule = (() => {
     if (window.BackendSyncStatus) window.BackendSyncStatus.refresh();
   }
 
-  async function loadAndStart(options) {
+  async function loadAndStart(options, scope) {
+    scope = scope || 'all';
+    if (scope === 'unmastered' && window.ItemStateModule) {
+      await window.ItemStateModule.syncFromServer('').catch(function () {});
+    }
     const words = await loadWordsForCard_(options);
     if (!words.length) throw new Error('条件に合う単語がありません。');
-    const picked = pickWordsForCard_(words, options);
+    const picked = pickWordsForCard_(words, scope, options.bookName, options.sheetName);
+    if (!picked.length) {
+      throw new Error(scope === 'unmastered'
+        ? '未習得の単語がありません（👍で習得済みの語だけが対象範囲にあります）。'
+        : '条件に合う単語がありません。');
+    }
     const cardItems = buildCardItemsFromWords_(picked, options);
     if (!cardItems.length) throw new Error('カードにできる単語がありません（語・句・例文のデータを確認してください）。');
     const bookType = (document.getElementById('vocab-book-type') || {}).value;
@@ -625,11 +637,13 @@ const VocabCardModule = (() => {
   }
 
   function syncHomeworkUi_(homework) {
-    const btn = el_('vocab-card-start-btn');
-    if (!btn) return;
-    btn.disabled = !!homework;
-    btn.title = homework ? '宿題・小テストモードでは利用できません' : '';
-    btn.style.opacity = homework ? '0.5' : '';
+    ['vocab-card-start-unmastered-btn', 'vocab-card-start-all-btn'].forEach(function (id) {
+      const btn = el_(id);
+      if (!btn) return;
+      btn.disabled = !!homework;
+      btn.title = homework ? '宿題・小テストモードでは利用できません' : '';
+      btn.style.opacity = homework ? '0.5' : '';
+    });
   }
 
   return {

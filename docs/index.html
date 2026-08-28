@@ -1052,8 +1052,10 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         </div>
       </div>
       <div class="setting-section">
-        <button type="button" id="vocab-card-start-btn" class="btn-secondary" style="width:100%;margin-bottom:10px;">単語カードで覚える</button>
-        <p class="filter-axis-hint" style="margin:0;">フラッシュカードで語・句・例文をめくり、👍/😫 で仕分けます。一巡後に学習状態をまとめて登録します。</p>
+        <div class="section-title">単語カードで覚える</div>
+        <p class="filter-axis-hint" style="margin:0 0 12px;">フラッシュカードで語・句・例文をめくり、👍/😫 で仕分けます。一巡後に学習状態をまとめて登録します。</p>
+        <button type="button" id="vocab-card-start-unmastered-btn" class="btn-secondary" style="width:100%;margin-bottom:8px;">未習得語に取り組む</button>
+        <button type="button" id="vocab-card-start-all-btn" class="btn-primary" style="width:100%;">全単語に取り組む</button>
       </div>
       <div class="setting-section">
         <div class="section-title">3. 出題形式</div>
@@ -5268,9 +5270,22 @@ const VocabPoolMatchModule = (() => {
     });
   }
 
+  function firstUnansweredIndex_() {
+    for (let i = 0; i < questions.length; i++) {
+      if (!userAnswers[String(questions[i].id)]) return i;
+    }
+    return -1;
+  }
+
   function handleSubmit() {
-    const unanswered = questions.filter(function (q) { return !userAnswers[String(q.id)]; }).length;
-    if (unanswered && !confirm('未選択が ' + unanswered + ' 問あります。このまま採点しますか？')) return;
+    const unansweredIdx = firstUnansweredIndex_();
+    if (unansweredIdx >= 0) {
+      const submitAnyway = confirm('次の問題が未選択です。このまま回答を送信しますか？');
+      if (!submitAnyway) {
+        jumpToQuestion(unansweredIdx);
+        return;
+      }
+    }
     finishAndScore_();
   }
 
@@ -8487,9 +8502,12 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
   }, '読み込み中…');
 });
 
-const vocabCardStartBtn = document.getElementById('vocab-card-start-btn');
-if (vocabCardStartBtn) {
-  vocabCardStartBtn.addEventListener('click', async () => {
+const vocabCardStartUnmasteredBtn = document.getElementById('vocab-card-start-unmastered-btn');
+const vocabCardStartAllBtn = document.getElementById('vocab-card-start-all-btn');
+
+function bindVocabCardStart_(btn, scope) {
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
     const options = window.VocabSettingsModule.getQuizOptions();
     if (!options.bookName || !options.sheetName) {
       alert('ブックと教材（シート）を選択してください。');
@@ -8503,9 +8521,9 @@ if (vocabCardStartBtn) {
       alert('単語カードモジュールの読み込みに失敗しました。ページを再読み込みしてください。');
       return;
     }
-    await BusyButton.run(vocabCardStartBtn, async function () {
+    await BusyButton.run(btn, async function () {
       try {
-        await VocabCardModule.loadAndStart(options);
+        await VocabCardModule.loadAndStart(options, scope);
         BackendSyncStatus.refresh();
       } catch (error) {
         console.error(error);
@@ -8514,6 +8532,9 @@ if (vocabCardStartBtn) {
     }, '読み込み中…');
   });
 }
+
+bindVocabCardStart_(vocabCardStartUnmasteredBtn, 'unmastered');
+bindVocabCardStart_(vocabCardStartAllBtn, 'all');
 
 function applyVocabCardSessionGlobals_(meta) {
   currentAppMode = 'vocab';
