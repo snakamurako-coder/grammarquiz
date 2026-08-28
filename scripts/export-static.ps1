@@ -62,11 +62,11 @@ function New-ModeManifest {
       if ($Source.catalog) { $manifest.catalog = $Source.catalog }
       if ($Source.questions) { $manifest.questions = $Source.questions }
     }
-    { $_ -in @('vocab', 'reading') } {
+    { $_ -in @('vocab') } {
       if ($Source.vocabCatalog) { $manifest.vocabCatalog = $Source.vocabCatalog }
       if ($Source.vocabWords) { $manifest.vocabWords = $Source.vocabWords }
     }
-    'ai' { }
+    { $_ -in @('reading', 'ai') } { }
   }
 
   return $manifest

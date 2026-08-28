@@ -53,6 +53,7 @@ button:active { opacity: 0.9; }
 }
 .backend-sync-status.safe { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
 .backend-sync-status.busy { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+.backend-sync-status.info { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
 .setting-section { background: #fff; padding: 16px; border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 16px; }
 .section-title { font-size: 1.05em; font-weight: bold; color: #455a64; margin-bottom: 12px; border-bottom: 2px solid #eceff1; padding-bottom: 6px; }
 .register-manual-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid #eceff1; padding-bottom: 6px; }
@@ -1413,6 +1414,14 @@ window.DASHBOARD_URL = (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG
 const BackendSyncStatus = (() => {
   let pendingNetwork = 0;
   let el = null;
+  let temporaryTimer = null;
+  let temporaryActive = false;
+
+  const PRESET_SOURCE_LABELS = {
+    cache: '教材: ローカルキャッシュ',
+    github: '教材: GitHub（docs/data）',
+    spreadsheet: '教材: スプレッドシート'
+  };
 
   function isUnsafe_() {
     if (pendingNetwork > 0) return true;
@@ -1421,6 +1430,7 @@ const BackendSyncStatus = (() => {
   }
 
   function updateUI_() {
+    if (temporaryActive) return;
     if (!el) el = document.getElementById('backend-sync-status');
     if (!el) return;
     if (isUnsafe_()) {
@@ -1430,6 +1440,25 @@ const BackendSyncStatus = (() => {
       el.textContent = '安全';
       el.className = 'backend-sync-status safe';
     }
+  }
+
+  function showTemporaryMessage_(text, durationMs) {
+    if (!el) el = document.getElementById('backend-sync-status');
+    if (!el) return;
+    if (temporaryTimer) clearTimeout(temporaryTimer);
+    temporaryActive = true;
+    el.textContent = text;
+    el.className = 'backend-sync-status info';
+    temporaryTimer = setTimeout(function () {
+      temporaryActive = false;
+      temporaryTimer = null;
+      updateUI_();
+    }, durationMs || 3000);
+  }
+
+  function showPresetDataSource(source) {
+    const label = PRESET_SOURCE_LABELS[source];
+    if (label) showTemporaryMessage_(label, 3000);
   }
 
   function begin() {
@@ -1461,7 +1490,8 @@ const BackendSyncStatus = (() => {
     end,
     track,
     refresh,
-    isUnsafe: isUnsafe_
+    isUnsafe: isUnsafe_,
+    showPresetDataSource
   };
 })();
 window.BackendSyncStatus = BackendSyncStatus;
@@ -2254,6 +2284,12 @@ const PresetModule = (() => {
     }
   }
 
+  function notifyDataSource_(source) {
+    if (window.BackendSyncStatus && typeof BackendSyncStatus.showPresetDataSource === 'function') {
+      BackendSyncStatus.showPresetDataSource(source);
+    }
+  }
+
   /**
    * @param {string} key          キャッシュキー
    * @param {string} mode         grammar | vocab | reading | ai
@@ -2264,18 +2300,26 @@ const PresetModule = (() => {
   async function resolve_(key, mode, fromManifest, fromApi, force) {
     if (!force) {
       const cached = readCache_(key);
-      if (cached !== null) return { status: 'success', data: cached };
+      if (cached !== null) {
+        notifyDataSource_('cache');
+        return { status: 'success', data: cached, dataSource: 'cache' };
+      }
 
       const manifest = await usableManifestForMode_(mode);
       const staticData = manifest ? fromManifest(manifest) : null;
       if (staticData != null) {
         writeCache_(key, staticData);
-        return { status: 'success', data: staticData };
+        notifyDataSource_('github');
+        return { status: 'success', data: staticData, dataSource: 'github' };
       }
     }
 
     const result = await fromApi();
-    if (result.status === 'success') writeCache_(key, result.data);
+    if (result.status === 'success') {
+      writeCache_(key, result.data);
+      notifyDataSource_('spreadsheet');
+      result.dataSource = 'spreadsheet';
+    }
     return result;
   }
 

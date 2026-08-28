@@ -16,7 +16,7 @@ DigitalDrill 教材スプレッドシート → GitHub 用データエクスポ�
   docs/data/
     manifest-grammar.json          … 文法・語法演習（catalog + questions）
     manifest-vocab.json            … 単語学習（vocabCatalog + vocabWords）
-    manifest-reading.json          … 音読練習（単語ブックと同構造・例文付き単語）
+    manifest-reading.json          … 音読練習（将来用・本 GAS では未生成）
     manifest-ai-conversation.json  … AI英会話（将来用・本 GAS では未生成）
     sources/{スプレッドシートID}.json   … 元SSとの紐づけ（これがあると本体はSSを読まない）
     grammar/{ブック名}/{シート名}.json  … 文法問題配列（getQuestions と同じ）
@@ -131,7 +131,7 @@ function ddExport_downloadManifestDialog() {
 
     var note = bundle.kind === 'grammar'
       ? '<p>文法ブック → <code>manifest-grammar.json</code> を GitHub の <code>docs/data/</code> に配置してください。</p>'
-      : '<p>単語ブック → <code>manifest-vocab.json</code> と <code>manifest-reading.json</code> の2つを出力します（内容は同じ単語データ）。</p>';
+      : '<p>単語ブック → <code>manifest-vocab.json</code> を GitHub の <code>docs/data/</code> に配置してください。</p>';
 
     var payload = manifests.map(function (item) {
       return {
@@ -324,8 +324,7 @@ function ddExport_buildManifestsForBundle_(bundle) {
     }
     if (kind === 'vocab') {
       return [
-        { mode: MANIFEST_MODES.vocab, manifest: ddExport_buildManifest_('vocab', bundle) },
-        { mode: MANIFEST_MODES.reading, manifest: ddExport_buildManifest_('reading', bundle) }
+        { mode: MANIFEST_MODES.vocab, manifest: ddExport_buildManifest_('vocab', bundle) }
       ];
     }
     return [];
@@ -804,14 +803,14 @@ function ddExport_writeOrReplaceFile_(folder, fileName, blob) {
 1. 各 SS で「④ manifest.jsonをダウンロード」
 2. 同じ学習モードの manifest をマージして docs/data/ に1ファイルずつ配置
    - 文法ブック複数 → manifest-grammar.json（catalog / questions を結合）
-   - 単語ブック複数 → manifest-vocab.json と manifest-reading.json（vocabCatalog.presets / vocabWords を結合）
+   - 単語ブック複数 → manifest-vocab.json（vocabCatalog.presets / vocabWords を結合）
 3. 分割 JSON も使う場合は「② Driveに書き出し」で grammar/ vocab/ sources/ も配置
 4. version はマージ後に再計算するか、GAS② の presetVersion に揃える（本体キャッシュの無効化用）
 
 【学習モードと manifest ファイル名】
   文法・語法演習  → manifest-grammar.json
   単語学習        → manifest-vocab.json
-  音読練習        → manifest-reading.json（単語ブックと同データ・例文付き）
+  音読練習        → manifest-reading.json（将来用・export-static で空スタブのみ）
   AI英会話        → manifest-ai-conversation.json（本 GAS では未対応・将来用）
 
 【source-map の意味】
