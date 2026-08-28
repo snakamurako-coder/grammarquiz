@@ -753,17 +753,35 @@ function getWhitelistUserProfile_(email) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return null;
   if (isAdminEmail_(normalized)) {
-    return { account: normalized, name: '管理者', grade: '', class: 'admin', role: 'admin' };
+    return {
+      account: normalized, name: '管理者', grade: '', class: 'admin', role: 'admin',
+      attribute1: '', attribute2: '', attribute3: '', attribute4: '', attribute5: ''
+    };
   }
   const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
-  if (!spreadId) return { account: normalized, name: '', grade: '', class: '' };
+  if (!spreadId) {
+    return {
+      account: normalized, name: '', grade: '', class: '',
+      attribute1: '', attribute2: '', attribute3: '', attribute4: '', attribute5: ''
+    };
+  }
   try {
     const sheet = SpreadsheetApp.openById(spreadId).getSheetByName('whitelist');
-    if (!sheet) return { account: normalized, name: '', grade: '', class: '' };
+    if (!sheet) {
+      return {
+        account: normalized, name: '', grade: '', class: '',
+        attribute1: '', attribute2: '', attribute3: '', attribute4: '', attribute5: ''
+      };
+    }
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
     const accountIdx = headers.indexOf('account');
-    if (accountIdx === -1) return { account: normalized, name: '', grade: '', class: '' };
+    if (accountIdx === -1) {
+      return {
+        account: normalized, name: '', grade: '', class: '',
+        attribute1: '', attribute2: '', attribute3: '', attribute4: '', attribute5: ''
+      };
+    }
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][accountIdx] || '').trim().toLowerCase() === normalized) {
         const user = {};
@@ -779,7 +797,10 @@ function getWhitelistUserProfile_(email) {
   } catch (e) {
     // GAS① 実行文脈など
   }
-  return { account: normalized, name: '', grade: '', class: '' };
+  return {
+    account: normalized, name: '', grade: '', class: '',
+    attribute1: '', attribute2: '', attribute3: '', attribute4: '', attribute5: ''
+  };
 }
 
 /**
@@ -1217,12 +1238,7 @@ function ensureAppBookSheets_(ss) {
     whitelist = sheets[0];
     whitelist.setName('whitelist');
   }
-  if (whitelist.getLastRow() === 0 || whitelist.getRange(1, 1).getValue() === '') {
-    whitelist.clear();
-    whitelist.appendRow(['account', 'name', 'grade', 'class']);
-    whitelist.appendRow(['example@example.com', 'サンプル太郎', '1', 'A']);
-    whitelist.getRange(1, 1, 1, 4).setFontWeight('bold');
-  }
+  ensureWhitelistColumns_(whitelist);
 
   ensureAssignmentSheets_(ss);
 
@@ -1231,6 +1247,27 @@ function ensureAppBookSheets_(ss) {
   if (leftover && ss.getSheets().length > 1) {
     ss.deleteSheet(leftover);
   }
+}
+
+/** whitelist に attribute1～5 列を追加（既存行は保持） */
+function ensureWhitelistColumns_(whitelist) {
+  const required = ['account', 'name', 'grade', 'class', 'attribute1', 'attribute2', 'attribute3', 'attribute4', 'attribute5'];
+  if (whitelist.getLastRow() === 0 || String(whitelist.getRange(1, 1).getValue() || '') === '') {
+    whitelist.clear();
+    whitelist.appendRow(required);
+    whitelist.appendRow(['example@example.com', 'サンプル太郎', '1', 'A', '', '', '', '', '']);
+    whitelist.getRange(1, 1, 1, required.length).setFontWeight('bold');
+    return;
+  }
+  const lastCol = Math.max(1, whitelist.getLastColumn());
+  const headerRow = whitelist.getRange(1, 1, 1, lastCol).getValues()[0];
+  const headers = headerRow.map(function (h) { return String(h || '').trim(); });
+  required.forEach(function (col) {
+    if (headers.indexOf(col) >= 0) return;
+    const nextCol = headers.length + 1;
+    whitelist.getRange(1, nextCol).setValue(col).setFontWeight('bold');
+    headers.push(col);
+  });
 }
 
 /**
@@ -2189,7 +2226,9 @@ function apiAdminGetWhitelist() {
     }
     const emails = readWhitelistEmailsFromSheet_();
     const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
-    const sheet = SpreadsheetApp.openById(spreadId).getSheetByName('whitelist');
+    const ss = SpreadsheetApp.openById(spreadId);
+    const sheet = ss.getSheetByName('whitelist');
+    ensureWhitelistColumns_(sheet);
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
     const rows = [];
@@ -2213,7 +2252,9 @@ function apiAdminGetWhitelist() {
 const ASSIGNMENT_HEADERS = [
   'Assignment_ID', 'Title', 'Kind', 'Window_Start', 'Window_End', 'Deadline',
   'Time_Limit_Sec', 'Max_Attempts', 'Pass_Score', 'Pass_Mode', 'Weakness_Review',
-  'Target_Class', 'Sections_JSON', 'Active', 'Created_By', 'Updated_At'
+  'Target_Class',
+  'Target_attribute1', 'Target_attribute2', 'Target_attribute3', 'Target_attribute4', 'Target_attribute5',
+  'Sections_JSON', 'Active', 'Created_By', 'Updated_At'
 ];
 
 const SUBMISSION_HEADERS = [
@@ -2224,7 +2265,22 @@ const SUBMISSION_HEADERS = [
 
 function ensureAssignmentSheets_(ss) {
   ensureSheetWithHeaders_(ss, 'assignments', ASSIGNMENT_HEADERS);
+  migrateSheetHeaders_(ss.getSheetByName('assignments'), ASSIGNMENT_HEADERS);
   ensureSheetWithHeaders_(ss, 'assignment_submissions', SUBMISSION_HEADERS);
+}
+
+/** 既存シートの1行目に不足ヘッダ列を追加（データ行は保持） */
+function migrateSheetHeaders_(sheet, requiredHeaders) {
+  if (!sheet || sheet.getLastRow() === 0) return;
+  const lastCol = Math.max(1, sheet.getLastColumn());
+  const headerRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const headers = headerRow.map(function (h) { return String(h || '').trim(); });
+  requiredHeaders.forEach(function (col) {
+    if (headers.indexOf(col) >= 0) return;
+    const nextCol = headers.length + 1;
+    sheet.getRange(1, nextCol).setValue(col).setFontWeight('bold');
+    headers.push(col);
+  });
 }
 
 function ensureSheetWithHeaders_(ss, name, headers) {
@@ -2247,6 +2303,8 @@ function openAppSpreadsheet_() {
   const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
   if (!spreadId) throw new Error('SPREADSHEET_ID が未設定です');
   const ss = SpreadsheetApp.openById(spreadId);
+  const wl = ss.getSheetByName('whitelist');
+  if (wl) ensureWhitelistColumns_(wl);
   ensureAssignmentSheets_(ss);
   return ss;
 }
@@ -2291,6 +2349,11 @@ function normalizeAssignmentRow_(row) {
     Pass_Mode: String(row.Pass_Mode || 'rate') === 'points' ? 'points' : 'rate',
     Weakness_Review: String(row.Weakness_Review || '0') === '1' || row.Weakness_Review === true || row.Weakness_Review === 1 ? 1 : 0,
     Target_Class: String(row.Target_Class || ''),
+    Target_attribute1: String(row.Target_attribute1 || ''),
+    Target_attribute2: String(row.Target_attribute2 || ''),
+    Target_attribute3: String(row.Target_attribute3 || ''),
+    Target_attribute4: String(row.Target_attribute4 || ''),
+    Target_attribute5: String(row.Target_attribute5 || ''),
     Sections: parseSectionsJson_(row.Sections_JSON),
     Sections_JSON: typeof row.Sections_JSON === 'string'
       ? row.Sections_JSON
@@ -2326,13 +2389,25 @@ function isAssignmentInWindow_(asg, nowMs) {
   return true;
 }
 
-function isTargetClassMatch_(targetClass, userClass) {
-  const raw = String(targetClass || '').trim();
+function isTargetFieldMatch_(targetRaw, userValue) {
+  const raw = String(targetRaw || '').trim();
   if (!raw) return true;
-  const user = String(userClass || '').trim().toLowerCase();
+  const user = String(userValue || '').trim().toLowerCase();
   return raw.split(/[,、]/).map(function (s) {
     return String(s || '').trim().toLowerCase();
   }).filter(Boolean).indexOf(user) >= 0;
+}
+
+/** 課題の配布対象: class + attribute1～5（指定列はすべて AND、各列はカンマ区切り OR） */
+function isAssignmentTargetMatch_(asg, user) {
+  user = user || {};
+  if (!isTargetFieldMatch_(asg.Target_Class, user.class)) return false;
+  if (!isTargetFieldMatch_(asg.Target_attribute1, user.attribute1)) return false;
+  if (!isTargetFieldMatch_(asg.Target_attribute2, user.attribute2)) return false;
+  if (!isTargetFieldMatch_(asg.Target_attribute3, user.attribute3)) return false;
+  if (!isTargetFieldMatch_(asg.Target_attribute4, user.attribute4)) return false;
+  if (!isTargetFieldMatch_(asg.Target_attribute5, user.attribute5)) return false;
+  return true;
 }
 
 function requireAssignmentAdminFromRequest_(requestData) {
@@ -2409,36 +2484,38 @@ function apiAdminUpsertAssignment_(requestData) {
   }
 
   const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
-  const values = [
-    id,
-    title,
-    String(payload.Kind || 'homework') === 'quiz' ? 'quiz' : 'homework',
-    String(payload.Window_Start || ''),
-    String(payload.Window_End || ''),
-    String(payload.Deadline || ''),
-    Math.max(0, parseInt(payload.Time_Limit_Sec, 10) || 0),
-    Math.max(0, parseInt(payload.Max_Attempts, 10) || 0),
-    Math.max(0, parseInt(payload.Pass_Score, 10) || 0),
-    String(payload.Pass_Mode || 'rate') === 'points' ? 'points' : 'rate',
-    (String(payload.Weakness_Review || '0') === '1' || payload.Weakness_Review === true || payload.Weakness_Review === 1) ? 1 : 0,
-    String(payload.Target_Class || ''),
-    JSON.stringify(sections),
-    (String(payload.Active || '1') === '1' || payload.Active === true || payload.Active === 1) ? 1 : 0,
-    existing ? String(existing.Created_By || admin.email) : admin.email,
-    now
-  ];
+  const rowObj = {
+    Assignment_ID: id,
+    Title: title,
+    Kind: String(payload.Kind || 'homework') === 'quiz' ? 'quiz' : 'homework',
+    Window_Start: String(payload.Window_Start || ''),
+    Window_End: String(payload.Window_End || ''),
+    Deadline: String(payload.Deadline || ''),
+    Time_Limit_Sec: Math.max(0, parseInt(payload.Time_Limit_Sec, 10) || 0),
+    Max_Attempts: Math.max(0, parseInt(payload.Max_Attempts, 10) || 0),
+    Pass_Score: Math.max(0, parseInt(payload.Pass_Score, 10) || 0),
+    Pass_Mode: String(payload.Pass_Mode || 'rate') === 'points' ? 'points' : 'rate',
+    Weakness_Review: (String(payload.Weakness_Review || '0') === '1' || payload.Weakness_Review === true || payload.Weakness_Review === 1) ? 1 : 0,
+    Target_Class: String(payload.Target_Class || ''),
+    Target_attribute1: String(payload.Target_attribute1 || ''),
+    Target_attribute2: String(payload.Target_attribute2 || ''),
+    Target_attribute3: String(payload.Target_attribute3 || ''),
+    Target_attribute4: String(payload.Target_attribute4 || ''),
+    Target_attribute5: String(payload.Target_attribute5 || ''),
+    Sections_JSON: JSON.stringify(sections),
+    Active: (String(payload.Active || '1') === '1' || payload.Active === true || payload.Active === 1) ? 1 : 0,
+    Created_By: existing ? String(existing.Created_By || admin.email) : admin.email,
+    Updated_At: now
+  };
+  migrateSheetHeaders_(sheet, ASSIGNMENT_HEADERS);
+  const values = ASSIGNMENT_HEADERS.map(function (h) { return rowObj[h]; });
 
   if (existing) {
     sheet.getRange(existing._row, 1, 1, ASSIGNMENT_HEADERS.length).setValues([values]);
   } else {
     sheet.appendRow(values);
   }
-  return { status: 'success', data: normalizeAssignmentRow_({
-    Assignment_ID: values[0], Title: values[1], Kind: values[2], Window_Start: values[3],
-    Window_End: values[4], Deadline: values[5], Time_Limit_Sec: values[6], Max_Attempts: values[7],
-    Pass_Score: values[8], Pass_Mode: values[9], Weakness_Review: values[10], Target_Class: values[11],
-    Sections_JSON: values[12], Active: values[13], Created_By: values[14], Updated_At: values[15]
-  }) };
+  return { status: 'success', data: normalizeAssignmentRow_(rowObj) };
 }
 
 function apiAdminListSubmissions_(requestData) {
@@ -2469,7 +2546,7 @@ function apiListMyAssignments_(requestData) {
     .filter(function (a) {
       return a.Active === 1
         && isAssignmentInWindow_(a, now)
-        && isTargetClassMatch_(a.Target_Class, user.class);
+        && isAssignmentTargetMatch_(a, user);
     });
   const subs = sheetRowsToObjects_(ss.getSheetByName('assignment_submissions'))
     .filter(function (s) { return String(s.Account || '').toLowerCase() === account; });
@@ -2540,8 +2617,8 @@ function apiStartAssignmentAttempt_(requestData) {
   }
   if (!asg || asg.Active !== 1) return { status: 'error', message: '課題が無効または見つかりません' };
   if (!isAssignmentInWindow_(asg, Date.now())) return { status: 'error', message: '取り組める期間外です' };
-  if (!isTargetClassMatch_(asg.Target_Class, user.class)) {
-    return { status: 'error', message: 'この課題の対象クラスではありません' };
+  if (!isAssignmentTargetMatch_(asg, user)) {
+    return { status: 'error', message: 'この課題の配布対象ではありません' };
   }
   const subSheet = ss.getSheetByName('assignment_submissions');
   const attempts = countAttempts_(subSheet, id, account);

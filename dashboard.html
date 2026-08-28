@@ -40,14 +40,19 @@ th{background:#f5f5f5}
 
   <div class="setting-section">
     <div class="section-title">宿題・小テスト</div>
-    <p class="hint">最大4セクション。音読・AI英会話は未実装のため mode に指定しないでください。</p>
+    <p class="hint">最大4セクション。音読・AI英会話は未実装のため mode に指定しないでください。配布対象は class + attribute1～5（空＝制限なし、各列カンマ区切り OR、列同士 AND）。</p>
     <div class="form-grid">
       <div class="form-group"><label>課題ID（空欄で新規）</label><input id="asg-id" type="text" placeholder="空欄＝新規作成"></div>
       <div class="form-group"><label>⓪ 課題名</label><input id="asg-title" type="text" required></div>
       <div class="form-group"><label>種別</label>
         <select id="asg-kind"><option value="homework">A 宿題（範囲完走）</option><option value="quiz">B 小テスト</option></select>
       </div>
-      <div class="form-group"><label>対象クラス（空＝全体、カンマ区切り可）</label><input id="asg-target-class" type="text" placeholder="例: A,B"></div>
+      <div class="form-group"><label>対象クラス（空＝制限なし、カンマ区切り可）</label><input id="asg-target-class" type="text" placeholder="例: A,B"></div>
+      <div class="form-group"><label>対象 attribute1（空＝制限なし）</label><input id="asg-target-attr1" type="text" placeholder="例: 上級,中級"></div>
+      <div class="form-group"><label>対象 attribute2</label><input id="asg-target-attr2" type="text"></div>
+      <div class="form-group"><label>対象 attribute3</label><input id="asg-target-attr3" type="text"></div>
+      <div class="form-group"><label>対象 attribute4</label><input id="asg-target-attr4" type="text"></div>
+      <div class="form-group"><label>対象 attribute5</label><input id="asg-target-attr5" type="text"></div>
       <div class="form-group"><label>① 期間開始</label><input id="asg-window-start" type="datetime-local"></div>
       <div class="form-group"><label>① 期間終了</label><input id="asg-window-end" type="datetime-local"></div>
       <div class="form-group"><label>① 期限（任意）</label><input id="asg-deadline" type="datetime-local"></div>
@@ -94,7 +99,7 @@ th{background:#f5f5f5}
 
   <div class="setting-section">
     <div class="section-title">ホワイトリスト</div>
-    <p style="font-size:.85em;color:#666;">本体スプレッドシートの whitelist シートを編集してください（ここは閲覧のみ）。宿題管理は class 列に <code>admin</code> と入力したアカウントのみ。</p>
+    <p style="font-size:.85em;color:#666;">本体スプレッドシートの whitelist シートを編集してください（ここは閲覧のみ）。<code>attribute1</code>～<code>attribute5</code> は管理者が自由にラベル付け（習熟度・性別など）し、課題の配布対象に使えます。宿題管理は class 列に <code>admin</code> と入力したアカウントのみ。</p>
     <div id="whitelist-wrap" style="overflow-x:auto;margin-top:8px;">読込中...</div>
   </div>
 
@@ -159,6 +164,16 @@ function localInputToSheet_(value) {
   return String(value).replace('T', ' ') + (String(value).length === 16 ? ':00' : '');
 }
 
+function formatTargetSummary_(a) {
+  var parts = [];
+  if (a.Target_Class) parts.push('class:' + a.Target_Class);
+  for (var i = 1; i <= 5; i++) {
+    var key = 'Target_attribute' + i;
+    if (a[key]) parts.push('attr' + i + ':' + a[key]);
+  }
+  return parts.length ? parts.join(' / ') : '全体';
+}
+
 function collectAssignment_() {
   var sectionsRaw = document.getElementById('asg-sections').value.trim();
   var sections;
@@ -182,6 +197,11 @@ function collectAssignment_() {
     Pass_Mode: document.getElementById('asg-pass-mode').value,
     Weakness_Review: document.getElementById('asg-weakness').value,
     Target_Class: document.getElementById('asg-target-class').value.trim(),
+    Target_attribute1: document.getElementById('asg-target-attr1').value.trim(),
+    Target_attribute2: document.getElementById('asg-target-attr2').value.trim(),
+    Target_attribute3: document.getElementById('asg-target-attr3').value.trim(),
+    Target_attribute4: document.getElementById('asg-target-attr4').value.trim(),
+    Target_attribute5: document.getElementById('asg-target-attr5').value.trim(),
     Sections: sections,
     Active: document.getElementById('asg-active').value
   };
@@ -192,6 +212,11 @@ function fillFormFromAssignment_(a) {
   document.getElementById('asg-title').value = a.Title || '';
   document.getElementById('asg-kind').value = a.Kind || 'homework';
   document.getElementById('asg-target-class').value = a.Target_Class || '';
+  document.getElementById('asg-target-attr1').value = a.Target_attribute1 || '';
+  document.getElementById('asg-target-attr2').value = a.Target_attribute2 || '';
+  document.getElementById('asg-target-attr3').value = a.Target_attribute3 || '';
+  document.getElementById('asg-target-attr4').value = a.Target_attribute4 || '';
+  document.getElementById('asg-target-attr5').value = a.Target_attribute5 || '';
   document.getElementById('asg-time-limit').value = a.Time_Limit_Sec || 0;
   document.getElementById('asg-max-attempts').value = a.Max_Attempts || 0;
   document.getElementById('asg-pass-score').value = a.Pass_Score || 0;
@@ -211,11 +236,12 @@ async function loadAssignments() {
       wrap.innerHTML = '<p>まだ課題がありません。</p>';
       return;
     }
-    var html = '<table><thead><tr><th>名前</th><th>種別</th><th>期限/期間</th><th>制限</th><th>合格</th><th>公開</th><th></th></tr></thead><tbody>';
+    var html = '<table><thead><tr><th>名前</th><th>種別</th><th>配布対象</th><th>期限/期間</th><th>制限</th><th>合格</th><th>公開</th><th></th></tr></thead><tbody>';
     rows.forEach(function (a) {
       html += '<tr>';
       html += '<td>' + escapeHtml(a.Title) + '<div class="hint">' + escapeHtml(a.Assignment_ID) + '</div></td>';
       html += '<td>' + escapeHtml(a.Kind) + '</td>';
+      html += '<td>' + escapeHtml(formatTargetSummary_(a)) + '</td>';
       html += '<td>' + escapeHtml([a.Window_Start, a.Window_End, a.Deadline].filter(Boolean).join(' / ')) + '</td>';
       html += '<td>' + (a.Time_Limit_Sec || 0) + '秒 / ' + (a.Max_Attempts || '∞') + '回</td>';
       html += '<td>' + escapeHtml(a.Pass_Score) + (a.Pass_Mode === 'points' ? '点' : '%') + '</td>';
@@ -323,10 +349,13 @@ async function loadWhitelist() {
       wrap.innerHTML = '<p>登録ユーザーがありません。</p>';
       return;
     }
-    var html = '<table><thead><tr><th>account</th><th>name</th><th>grade</th><th>class</th></tr></thead><tbody>';
+    var html = '<table><thead><tr><th>account</th><th>name</th><th>grade</th><th>class</th><th>attribute1</th><th>attribute2</th><th>attribute3</th><th>attribute4</th><th>attribute5</th></tr></thead><tbody>';
     rows.forEach(function (r) {
       html += '<tr><td>' + escapeHtml(r.account || '') + '</td><td>' + escapeHtml(r.name || '') + '</td>';
-      html += '<td>' + escapeHtml(r.grade || '') + '</td><td>' + escapeHtml(r.class || '') + '</td></tr>';
+      html += '<td>' + escapeHtml(r.grade || '') + '</td><td>' + escapeHtml(r.class || '') + '</td>';
+      html += '<td>' + escapeHtml(r.attribute1 || '') + '</td><td>' + escapeHtml(r.attribute2 || '') + '</td>';
+      html += '<td>' + escapeHtml(r.attribute3 || '') + '</td><td>' + escapeHtml(r.attribute4 || '') + '</td>';
+      html += '<td>' + escapeHtml(r.attribute5 || '') + '</td></tr>';
     });
     html += '</tbody></table>';
     wrap.innerHTML = html;

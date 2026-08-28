@@ -241,6 +241,7 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 
 - **`client_secret missing` / ログイン直後にトークン交換失敗**: GAS①② の Script Properties に `CLIENT_SECRET` が無い、または未デプロイ。GCP コンソールの OAuth クライアントからシークレットをコピーし、両プロジェクトに登録 → Deploy All
 - **宿題・小テスト管理が開けない**: 本体 SS の `whitelist` で当該アカウントの `class` 列を `admin` にする（または `ADMIN_EMAIL`）。Deploy All 後にダッシュボードを再読込
+- **属性別の宿題が表示されない**: whitelist の `attribute1`～`attribute5` と課題の `Target_attribute1`～`Target_attribute5` が一致しているか確認（空列＝制限なし、複数値はカンマ区切り OR、列同士は AND）。属性変更後は生徒に再ログインしてもらう
 - **単語登録・学習記憶が保存されない**: [USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §0・§9。「Drive を接続」→ `DigitalDrill_MyData`。`GOOGLE_CLIENT_ID` が Pages に反映されているか
 - **セッション集約が空**: フォーム回答先 SS に行が入っているか、`config.js` の `GOOGLE_FORM` が正しいか確認。**GAS①・GAS② を再デプロイ**（`submitFormSummary` 必須）。プリセット学習（マイ単語帳以外）で終了しているか。詳細は [FORM_AGGREGATION_SANCTUARY.md](FORM_AGGREGATION_SANCTUARY.md)
 - **マイページ／マイ単語帳が空**: ユーザー Drive は Pages の `UserDriveModule`（GAS① ではない）。[USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §0・HANDOVER「ユーザー Drive — 動作確認済み」
