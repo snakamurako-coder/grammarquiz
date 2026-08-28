@@ -170,8 +170,19 @@ const AssignmentModule = (function () {
   function deriveStatus_(row, passState, local) {
     const a = row.assignment || {};
     const windowOpen = row.windowOpen !== false;
-    if (!windowOpen) {
+    const serverReported = !!(row.serverAchieved || passState.serverAchieved);
+
+    if (a.Kind === 'quiz' && serverReported) {
       return { label: '終了済み', css: 'asg-status-ended' };
+    }
+    if (a.Kind === 'homework') {
+      const latest = row.latestSubmission;
+      if (latest && String(latest.Status || '') === 'passed') {
+        return { label: '終了済み', css: 'asg-status-ended' };
+      }
+    }
+    if (!windowOpen) {
+      return { label: '期限超過', css: 'asg-status-expired' };
     }
     const clearN = passState.clearCount || 0;
     const doneN = (local.doneIds || []).length;
@@ -188,6 +199,7 @@ const AssignmentModule = (function () {
   function canReportAchievement_(row, passState) {
     const a = row.assignment || {};
     if (a.Kind !== 'quiz') return false;
+    if (row.serverAchieved || passState.serverAchieved) return false;
     const required = a.Required_Pass_Count || a.Max_Attempts || 1;
     const clearN = passState.clearCount || 0;
     return clearN >= required || !!passState.pendingAchievement;
