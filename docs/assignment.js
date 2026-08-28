@@ -6,6 +6,7 @@ const AssignmentModule = (function () {
   const PROGRESS_PREFIX = 'dd_hw_progress:';
   const PASS_PREFIX = 'dd_quiz_pass:';
   let listCache_ = [];
+  let listRefreshWarn_ = null;
   let activeSession_ = null;
   let timerId_ = null;
 
@@ -34,6 +35,22 @@ const AssignmentModule = (function () {
     return data;
   }
 
+  async function postWithRetry_(payload, retries) {
+    retries = retries == null ? 2 : retries;
+    let lastErr = null;
+    for (let i = 0; i <= retries; i++) {
+      try {
+        return await post_(payload);
+      } catch (e) {
+        lastErr = e;
+        if (i < retries) {
+          await new Promise(function (resolve) { setTimeout(resolve, 800 * (i + 1)); });
+        }
+      }
+    }
+    throw lastErr || new Error('通信に失敗しました');
+  }
+
   function progressKey_(assignmentId) {
     const user = AuthGateService.getUser() || {};
     const account = String(user.account || '').toLowerCase() || 'anon';
@@ -46,21 +63,26 @@ const AssignmentModule = (function () {
     return PASS_PREFIX + assignmentId + ':' + account;
   }
 
+  function defaultPassState_() {
+    return { clearCount: 0, clears: [], serverAchieved: false, pendingAchievement: null };
+  }
+
   function loadPassState_(assignmentId) {
     try {
       const raw = localStorage.getItem(passKey_(assignmentId));
       const parsed = raw ? JSON.parse(raw) : null;
-      return parsed && typeof parsed === 'object'
-        ? parsed
-        : { clearCount: 0, clears: [], serverAchieved: false };
+      if (!parsed || typeof parsed !== 'object') return defaultPassState_();
+      if (!parsed.clears) parsed.clears = [];
+      if (parsed.pendingAchievement === undefined) parsed.pendingAchievement = null;
+      return parsed;
     } catch (e) {
-      return { clearCount: 0, clears: [], serverAchieved: false };
+      return defaultPassState_();
     }
   }
 
   function savePassState_(assignmentId, state) {
     try {
-      localStorage.setItem(passKey_(assignmentId), JSON.stringify(state || { clearCount: 0, clears: [], serverAchieved: false }));
+      localStorage.setItem(passKey_(assignmentId), JSON.stringify(state || defaultPassState_()));
     } catch (e) {}
   }
 
@@ -145,6 +167,32 @@ const AssignmentModule = (function () {
     timerId_ = setInterval(tick, 250);
   }
 
+  function deriveStatus_(row, passState, local) {
+    const a = row.assignment || {};
+    const windowOpen = row.windowOpen !== false;
+    if (!windowOpen) {
+      return { label: '終了済み', css: 'asg-status-ended' };
+    }
+    const clearN = passState.clearCount || 0;
+    const doneN = (local.doneIds || []).length;
+    const latest = row.latestSubmission;
+    const hasProgress = clearN > 0
+      || doneN > 0
+      || !!(latest && String(latest.Status || '') !== '');
+    if (!hasProgress) {
+      return { label: '未着手', css: 'asg-status-not-started' };
+    }
+    return { label: '取組中', css: 'asg-status-in-progress' };
+  }
+
+  function canReportAchievement_(row, passState) {
+    const a = row.assignment || {};
+    if (a.Kind !== 'quiz') return false;
+    const required = a.Required_Pass_Count || a.Max_Attempts || 1;
+    const clearN = passState.clearCount || 0;
+    return clearN >= required || !!passState.pendingAchievement;
+  }
+
   async function refreshList() {
     const wrap = document.getElementById('assignment-list');
     if (!wrap) return;
@@ -154,11 +202,18 @@ const AssignmentModule = (function () {
     }
     wrap.innerHTML = '<p>読込中...</p>';
     try {
-      const res = await post_({ action: 'listMyAssignments' });
+      const res = await postWithRetry_({ action: 'listMyAssignments' }, 2);
       listCache_ = res.data || [];
+      listRefreshWarn_ = null;
       renderList_(listCache_);
     } catch (e) {
-      wrap.innerHTML = '<p style="color:#c62828;">課題の取得に失敗: ' + escapeHtml_(e.message || e) + '</p>';
+      if (listCache_.length) {
+        listRefreshWarn_ = String(e.message || e);
+        renderList_(listCache_);
+      } else {
+        wrap.innerHTML = '<p style="color:#c62828;">課題の取得に失敗: ' + escapeHtml_(e.message || e) + '</p>'
+          + '<p class="hint" style="font-size:.85em;color:#666;margin-top:8px;">通信状況を確認して「更新」を押してください。</p>';
+      }
     }
   }
 
@@ -170,14 +225,19 @@ const AssignmentModule = (function () {
   function renderList_(rows) {
     const wrap = document.getElementById('assignment-list');
     if (!wrap) return;
+    let html = '';
+    if (listRefreshWarn_) {
+      html += '<p class="asg-refresh-warn">一覧の更新に失敗しました（前回の表示）: '
+        + escapeHtml_(listRefreshWarn_) + '</p>';
+    }
     if (!rows.length) {
-      wrap.innerHTML = '<p>現在取り組める課題はありません。</p>'
+      html += '<p>表示できる課題はありません。</p>'
         + '<p class="hint" style="font-size:.85em;color:#666;margin-top:8px;">'
-        + '管理者側で「公開＝有効」、期間内、配布対象（class / attribute）が一致しているか確認してください。'
+        + '管理者側で「公開＝有効」、配布対象（class / attribute）が一致しているか確認してください。'
         + 'ログイン直後は「更新」を押してください。</p>';
+      wrap.innerHTML = html;
       return;
     }
-    let html = '';
     rows.forEach(function (row, idx) {
       const a = row.assignment || {};
       const kindLabel = a.Kind === 'quiz' ? '小テスト' : '宿題';
@@ -186,22 +246,28 @@ const AssignmentModule = (function () {
       const passState = loadPassState_(a.Assignment_ID);
       if (row.serverAchieved) {
         passState.serverAchieved = true;
+        if (passState.pendingAchievement) {
+          passState.pendingAchievement = null;
+        }
         savePassState_(a.Assignment_ID, passState);
       }
-      const serverDone = !!(row.serverAchieved || passState.serverAchieved);
-      const clearN = serverDone ? required : (passState.clearCount || 0);
-      const latest = row.latestSubmission;
-      const status = serverDone ? '達成済' : (latest ? String(latest.Status || '') : '未着手');
       const local = loadLocalProgress_(a.Assignment_ID);
+      const status = deriveStatus_(row, passState, local);
+      const windowOpen = row.windowOpen !== false;
+      const clearN = passState.clearCount || 0;
+      const serverReported = !!(row.serverAchieved || passState.serverAchieved);
       const doneN = (local.doneIds || []).length;
-      html += '<div class="log-item" style="display:block;">';
+      const showReport = canReportAchievement_(row, passState);
+
+      html += '<div class="log-item asg-list-item">';
+      html += '<div class="log-item-main">';
       html += '<div class="log-title">' + escapeHtml_(a.Title) + ' <span style="font-size:.8em;color:#666;">[' + kindLabel + ']</span></div>';
       html += '<div class="log-meta">' + escapeHtml_(limit);
       if (a.Kind === 'quiz') {
         html += ' / クリア ' + clearN + '／' + required + ' 回（ノルマ）';
-        html += ' / 状態 ' + escapeHtml_(status);
+        if (serverReported) html += ' / サーバー報告済';
+        else if (clearN >= required) html += ' / <span style="color:#c62828;">未報告の可能性</span>';
       } else {
-        html += ' / 状態 ' + escapeHtml_(status);
         html += ' / ローカル消化 ' + doneN + '問';
       }
       html += '</div>';
@@ -209,8 +275,19 @@ const AssignmentModule = (function () {
       if (a.Kind === 'quiz') html += ' / 挑戦回数無制限';
       if (a.Weakness_Review) html += ' / ニガテ復習あり';
       html += '</div>';
-      html += '<button type="button" class="btn-small assignment-start-btn" data-idx="' + idx + '" style="margin-top:8px;">'
-        + (serverDone && a.Kind === 'quiz' ? '再挑戦（記録済）' : '取り組む') + '</button>';
+      html += '<div class="asg-list-actions">';
+      if (windowOpen) {
+        html += '<button type="button" class="btn-small assignment-start-btn" data-idx="' + idx + '">取り組む</button>';
+      }
+      if (showReport) {
+        html += '<button type="button" class="btn-small assignment-report-btn" data-idx="' + idx + '">再度報告</button>';
+      }
+      html += '</div>';
+      if (showReport && !serverReported) {
+        html += '<p class="asg-report-hint">ノルマ達成済みですがサーバー未確認の場合は「再度報告」を押してください。</p>';
+      }
+      html += '</div>';
+      html += '<div class="log-item-aside"><span class="asg-status ' + status.css + '">' + escapeHtml_(status.label) + '</span></div>';
       html += '</div>';
     });
     wrap.innerHTML = html;
@@ -222,6 +299,51 @@ const AssignmentModule = (function () {
         BusyButton.run(btn, function () { return startAssignment_(row); }, '準備中…');
       });
     });
+    wrap.querySelectorAll('.assignment-report-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const idx = parseInt(btn.getAttribute('data-idx'), 10);
+        const row = listCache_[idx];
+        if (!row) return;
+        BusyButton.run(btn, function () { return reportAchievement_(row); }, '報告中…');
+      });
+    });
+  }
+
+  async function reportAchievement_(row) {
+    const a = row.assignment;
+    if (!a || a.Kind !== 'quiz') throw new Error('小テスト以外は報告できません');
+    const passState = loadPassState_(a.Assignment_ID);
+    const required = a.Required_Pass_Count || a.Max_Attempts || 1;
+    const clearCount = passState.clearCount || 0;
+    if (clearCount < required && !passState.pendingAchievement) {
+      throw new Error('ノルマ（' + required + '回クリア）に達していません（現在 ' + clearCount + ' 回）');
+    }
+    const pending = passState.pendingAchievement || {};
+    const res = await postWithRetry_({
+      action: 'reportQuizAchievement',
+      assignmentId: a.Assignment_ID,
+      clearCount: clearCount,
+      correct: pending.correct,
+      total: pending.total,
+      points: pending.points,
+      pointsMax: pending.pointsMax,
+      durationSec: pending.durationSec || 0,
+      resubmit: true,
+      detail: pending.detail || { recordType: 'achievement', resubmit: true }
+    }, 1);
+    const d = res.data || {};
+    passState.serverAchieved = !!(d.serverAchieved || d.serverRecorded || d.alreadyAchieved);
+    passState.pendingAchievement = null;
+    savePassState_(a.Assignment_ID, passState);
+    if (d.alreadyAchieved) {
+      showToast_('サーバーには既に達成記録があります');
+    } else if (d.serverRecorded) {
+      showToast_('達成をサーバーに報告しました');
+    } else {
+      showToast_('報告を受け付けました');
+    }
+    await refreshList();
+    return res;
   }
 
   async function buildQuestionsFromSections_(sections, opts) {
@@ -249,9 +371,6 @@ const AssignmentModule = (function () {
         for (let ui = 0; ui < units.length; ui++) {
           const unitRows = await fetchGrammarRows(subject, units[ui], false);
           rows = rows.concat(unitRows || []);
-        }
-        if (sec.filters && window.GrammarSettingsModule && GrammarSettingsModule.getFilteredRows) {
-          // getFilteredRows はモジュール内部状態依存のため簡易フィルタを使う
         }
         if (sec.filters) {
           const f = sec.filters;
@@ -313,20 +432,10 @@ const AssignmentModule = (function () {
           affixLen: sec.affixLen != null ? sec.affixLen : 2,
           usedKeys: usedVocabKeys
         });
-        // usedKeys 伝播（ビルダが Set を受け取らない場合は後段で除外）
         qs.forEach(function (q) {
           const key = q.wordId || q.itemId || (q.wordObj && (q.wordObj.wordId || q.wordObj['英単語・熟語の表現']));
           if (key) usedVocabKeys.add(String(key));
         });
-        if (usedVocabKeys.size) {
-          // 追加セクションで重複語を落とす
-          qs = qs.filter(function (q, i, arr) {
-            const key = String(q.wordId || q.itemId || '');
-            if (!key) return true;
-            // buildHomeworkQuestions 内で既に unique なのでセクション内はOK。横断は usedKeys で
-            return true;
-          });
-        }
       } else {
         throw new Error('セクション' + (si + 1) + ': 未対応の mode=' + mode);
       }
@@ -364,6 +473,9 @@ const AssignmentModule = (function () {
   async function startAssignment_(row, reviewWrong) {
     const a = row.assignment;
     if (!a) throw new Error('課題データがありません');
+    if (row.windowOpen === false) {
+      throw new Error('この課題は終了しています（提出期間外）');
+    }
     const sections = a.Sections || [];
     if (!sections.length) throw new Error('セクションが空です');
 
@@ -384,7 +496,6 @@ const AssignmentModule = (function () {
     const built = await buildQuestionsFromSections_(sections, buildOpts);
     if (!built.questions.length) {
       if (a.Kind === 'homework' && (local.doneIds || []).length) {
-        // 範囲完走済み → 提出
         const submit = await post_({
           action: 'submitAssignmentAttempt',
           submissionId: data.submissionId,
@@ -463,7 +574,6 @@ const AssignmentModule = (function () {
     return activeSession_;
   }
 
-  /** 解答確定時（正誤）— ItemState / SRS は呼び出し側で抑制すること */
   function onAnswered(itemId, isCorrect, pointsPerQuestion) {
     if (!activeSession_) return;
     const id = itemId || '';
@@ -527,10 +637,11 @@ const AssignmentModule = (function () {
       }
     };
 
+    let recordAchievement = false;
     if (a.Kind === 'quiz') {
       const evalResult = evaluatePassLocal_(a, correct, total, activeSession_.pointsEarned, activeSession_.pointsMax, durationSec);
       const passState = loadPassState_(a.Assignment_ID);
-      if (evalResult.pass && !passState.serverAchieved) {
+      if (evalResult.pass) {
         passState.clearCount = (passState.clearCount || 0) + 1;
         passState.clears = passState.clears || [];
         passState.clears.push({
@@ -541,18 +652,41 @@ const AssignmentModule = (function () {
       }
       const required = a.Required_Pass_Count || a.Max_Attempts || 1;
       payload.clearCount = passState.clearCount || 0;
-      payload.recordAchievement = !!(evalResult.pass
+      recordAchievement = !!(evalResult.pass
         && !passState.serverAchieved
         && passState.clearCount >= required);
+      payload.recordAchievement = recordAchievement;
       savePassState_(a.Assignment_ID, passState);
     }
 
-    const res = await post_(payload);
-    if (a.Kind === 'quiz' && res.data && res.data.serverRecorded) {
-      const passState = loadPassState_(a.Assignment_ID);
-      passState.serverAchieved = true;
-      savePassState_(a.Assignment_ID, passState);
+    let res;
+    try {
+      res = await postWithRetry_(payload, recordAchievement ? 2 : 1);
+      if (a.Kind === 'quiz') {
+        const passState = loadPassState_(a.Assignment_ID);
+        if (res.data && (res.data.serverRecorded || res.data.serverAchieved)) {
+          passState.serverAchieved = true;
+          passState.pendingAchievement = null;
+        }
+        savePassState_(a.Assignment_ID, passState);
+      }
+    } catch (e) {
+      if (a.Kind === 'quiz' && recordAchievement) {
+        const passState = loadPassState_(a.Assignment_ID);
+        passState.pendingAchievement = {
+          correct: correct,
+          total: total,
+          points: activeSession_.pointsEarned,
+          pointsMax: activeSession_.pointsMax,
+          durationSec: durationSec,
+          detail: payload.detail,
+          clearCount: passState.clearCount
+        };
+        savePassState_(a.Assignment_ID, passState);
+      }
+      throw e;
     }
+
     if (a.Kind === 'quiz' && res.data) {
       const required = a.Required_Pass_Count || a.Max_Attempts || 1;
       const ps = loadPassState_(a.Assignment_ID);
@@ -569,13 +703,12 @@ const AssignmentModule = (function () {
     const banner = document.getElementById('assignment-session-banner');
     if (banner) banner.hidden = true;
 
-    // ⑥ ニガテ復習: 初回提出後・不合格でなく wrong があり・オプションON
     if (!opts.timedOut && !sessionSnap.reviewWrong && a.Weakness_Review
         && local.wrongIds && local.wrongIds.length
         && a.Kind === 'quiz') {
       const improve = window.confirm('間違えた問題のニガテ復習に進みますか？');
       if (improve) {
-        await startAssignment_({ assignment: a }, true);
+        await startAssignment_({ assignment: a, windowOpen: true }, true);
         return res;
       }
     }
@@ -585,7 +718,6 @@ const AssignmentModule = (function () {
 
   async function forceSubmitActiveSession_() {
     if (!activeSession_) return;
-    // 現在表示中の未回答は不正解扱いせず、ここまでのスコアで提出
     showToast_('制限時間のため提出します…');
     const res = await finishActiveSession_({ timedOut: true });
     showResultScreen();
@@ -596,10 +728,14 @@ const AssignmentModule = (function () {
     await refreshList();
   }
 
-  /** 通常の結果画面フローから呼ぶ */
   async function finalizeIfActive() {
     if (!activeSession_) return null;
-    return finishActiveSession_({ timedOut: false });
+    try {
+      return await finishActiveSession_({ timedOut: false });
+    } catch (e) {
+      console.warn('課題提出:', e.message || e);
+      return { status: 'error', assignment: true, message: e.message || String(e) };
+    }
   }
 
   function bindUi() {
@@ -619,6 +755,7 @@ const AssignmentModule = (function () {
     getActive: getActive,
     onAnswered: onAnswered,
     finalizeIfActive: finalizeIfActive,
+    reportAchievement: reportAchievement_,
     persistHomeworkProgress: persistHomeworkProgress_,
     loadLocalProgress: loadLocalProgress_
   };

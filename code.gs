@@ -522,7 +522,8 @@ function doPost(e) {
       return sendResponse(apiSubmitFormSummary_(requestData));
     } else if (action === 'listMyAssignments' || action === 'getAssignment'
         || action === 'startAssignmentAttempt' || action === 'submitAssignmentAttempt'
-        || action === 'saveHomeworkProgress' || action === 'adminListAssignments'
+        || action === 'reportQuizAchievement' || action === 'saveHomeworkProgress'
+        || action === 'adminListAssignments'
         || action === 'adminUpsertAssignment' || action === 'adminListSubmissions') {
       syncWhitelistCacheIfStale_();
       return sendResponse(handleAssignmentApi_(action, requestData));
@@ -2650,6 +2651,7 @@ function handleAssignmentApi_(action, requestData) {
     if (action === 'getAssignment') return apiGetAssignment_(requestData);
     if (action === 'startAssignmentAttempt') return apiStartAssignmentAttempt_(requestData);
     if (action === 'submitAssignmentAttempt') return apiSubmitAssignmentAttempt_(requestData);
+    if (action === 'reportQuizAchievement') return apiReportQuizAchievement_(requestData);
     if (action === 'saveHomeworkProgress') return apiSaveHomeworkProgress_(requestData);
     return { status: 'error', message: '未知の課題API: ' + action };
   } catch (e) {
@@ -2746,28 +2748,37 @@ function apiListMyAssignments_(requestData) {
   const account = String(authReq.auth.email || user.account || '').toLowerCase();
   const ss = openAppSpreadsheet_();
   const now = Date.now();
+  const subs = sheetRowsToObjects_(ss.getSheetByName('assignment_submissions'));
+  const achievementByAsg = {};
+  const latestByAsg = {};
+  subs.forEach(function (s) {
+    if (String(s.Account || '').toLowerCase() !== account) return;
+    const aid = String(s.Assignment_ID);
+    if (String(s.Status || '') === 'passed') achievementByAsg[aid] = s;
+    const prev = latestByAsg[aid];
+    if (!prev || String(s.Submitted_At || '').localeCompare(String(prev.Submitted_At || '')) > 0) {
+      latestByAsg[aid] = s;
+    }
+  });
   const assignments = sheetRowsToObjects_(ss.getSheetByName('assignments'))
     .map(normalizeAssignmentRow_)
     .filter(function (a) {
-      return a.Active === 1
-        && isAssignmentInWindow_(a, now)
-        && isAssignmentTargetMatch_(a, user);
+      return a.Active === 1 && isAssignmentTargetMatch_(a, user);
     });
-  const subs = sheetRowsToObjects_(ss.getSheetByName('assignment_submissions'))
-    .filter(function (s) { return String(s.Account || '').toLowerCase() === account; });
   const data = assignments.map(function (a) {
-    const mine = subs.filter(function (s) { return String(s.Assignment_ID) === a.Assignment_ID; });
-    const achievement = hasAssignmentAchievement_(ss.getSheetByName('assignment_submissions'), a.Assignment_ID, account);
-    const latest = mine.slice().sort(function (x, y) {
-      return String(y.Submitted_At || '').localeCompare(String(x.Submitted_At || ''));
-    })[0] || null;
+    const aid = a.Assignment_ID;
     return {
       assignment: a,
-      serverAchieved: !!achievement,
-      achievementSubmission: achievement,
-      latestSubmission: latest,
+      windowOpen: isAssignmentInWindow_(a, now),
+      serverAchieved: !!achievementByAsg[aid],
+      achievementSubmission: achievementByAsg[aid] || null,
+      latestSubmission: latestByAsg[aid] || null,
       requiredPassCount: a.Required_Pass_Count
     };
+  });
+  data.sort(function (x, y) {
+    if (x.windowOpen !== y.windowOpen) return x.windowOpen ? -1 : 1;
+    return String(x.assignment.Title || '').localeCompare(String(y.assignment.Title || ''), 'ja');
   });
   return { status: 'success', data: data };
 }
@@ -2884,6 +2895,94 @@ function apiSaveHomeworkProgress_(requestData) {
   return { status: 'error', message: '提出レコードが見つかりません' };
 }
 
+function appendQuizAchievementRow_(sheet, asg, account, requestData, clearCount, now) {
+  const correct = Math.max(0, parseInt(requestData.correct, 10) || 0);
+  const total = Math.max(0, parseInt(requestData.total, 10) || 0);
+  const points = Math.max(0, parseInt(requestData.points, 10) || 0);
+  const pointsMax = Math.max(0, parseInt(requestData.pointsMax, 10) || 0);
+  const durationSec = Math.max(0, parseInt(requestData.durationSec, 10) || 0);
+  const timedOut = requestData.timedOut === true || requestData.timedOut === 1 || requestData.timedOut === '1';
+  const evalResult = evaluateQuizAttemptPass_(asg, correct, total, points, pointsMax, durationSec, timedOut);
+  const score = evalResult.score;
+  const newSubId = newId_('sub');
+  const attemptNo = countAttempts_(sheet, asg.Assignment_ID, account) + 1;
+  const detail = Object.assign({}, requestData.detail || {}, {
+    recordType: 'achievement',
+    clearCount: clearCount,
+    requiredPassCount: asg.Required_Pass_Count,
+    resubmit: requestData.resubmit === true || requestData.resubmit === 1 || requestData.resubmit === '1'
+  });
+  sheet.appendRow([
+    newSubId, asg.Assignment_ID, account, attemptNo, 'passed',
+    score, correct, total, points, pointsMax, durationSec, timedOut ? 1 : 0,
+    JSON.stringify(requestData.progress || {}),
+    JSON.stringify(detail),
+    now
+  ]);
+  return {
+    submissionId: newSubId,
+    serverRecorded: true,
+    serverAchieved: true,
+    resultStatus: 'passed',
+    score: score,
+    correct: correct,
+    total: total,
+    points: points,
+    pointsMax: pointsMax,
+    timedOut: !!timedOut,
+    passed: true,
+    clearCount: clearCount,
+    requiredPassCount: asg.Required_Pass_Count
+  };
+}
+
+function apiReportQuizAchievement_(requestData) {
+  const authReq = requireAuthToken_(requestData || {});
+  if (!authReq.ok) return { status: 'error', message: authReq.error };
+  const assignmentId = String(requestData.assignmentId || '').trim();
+  if (!assignmentId) return { status: 'error', message: 'assignmentId が必要です' };
+  const account = String(authReq.auth.email || '').toLowerCase();
+  const user = resolveAuthUserFromRequest_(authReq);
+  const ss = openAppSpreadsheet_();
+  const asgRows = sheetRowsToObjects_(ss.getSheetByName('assignments'));
+  let asg = null;
+  for (let i = 0; i < asgRows.length; i++) {
+    if (String(asgRows[i].Assignment_ID) === assignmentId) {
+      asg = normalizeAssignmentRow_(asgRows[i]);
+      break;
+    }
+  }
+  if (!asg || asg.Active !== 1) return { status: 'error', message: '課題が無効または見つかりません' };
+  if (asg.Kind !== 'quiz') return { status: 'error', message: '小テスト以外は再度報告できません' };
+  if (!isAssignmentTargetMatch_(asg, user)) {
+    return { status: 'error', message: 'この課題の配布対象ではありません' };
+  }
+  const sheet = ss.getSheetByName('assignment_submissions');
+  const existing = hasAssignmentAchievement_(sheet, assignmentId, account);
+  if (existing) {
+    return {
+      status: 'success',
+      data: {
+        serverRecorded: false,
+        serverAchieved: true,
+        alreadyAchieved: true,
+        resultStatus: 'passed',
+        message: 'サーバーには既に達成記録があります'
+      }
+    };
+  }
+  const clearCount = Math.max(0, parseInt(requestData.clearCount, 10) || 0);
+  if (clearCount < asg.Required_Pass_Count) {
+    return {
+      status: 'error',
+      message: 'ノルマ回数（' + asg.Required_Pass_Count + '回クリア）に達していません（現在' + clearCount + '回）'
+    };
+  }
+  const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+  const data = appendQuizAchievementRow_(sheet, asg, account, requestData, clearCount, now);
+  return { status: 'success', data: data };
+}
+
 function apiSubmitAssignmentAttempt_(requestData) {
   const authReq = requireAuthToken_(requestData || {});
   if (!authReq.ok) return { status: 'error', message: authReq.error };
@@ -2971,38 +3070,9 @@ function apiSubmitAssignmentAttempt_(requestData) {
         message: 'ノルマ回数（' + asg.Required_Pass_Count + '回クリア）に達していません（現在' + clearCount + '回）'
       };
     }
-    const newSubId = newId_('sub');
-    const attemptNo = countAttempts_(sheet, asg.Assignment_ID, account) + 1;
-    const detail = Object.assign({}, requestData.detail || {}, {
-      recordType: 'achievement',
-      clearCount: clearCount,
-      requiredPassCount: asg.Required_Pass_Count
-    });
-    sheet.appendRow([
-      newSubId, asg.Assignment_ID, account, attemptNo, 'passed',
-      score, correct, total, points, pointsMax, durationSec, timedOut ? 1 : 0,
-      JSON.stringify(requestData.progress || {}),
-      JSON.stringify(detail),
-      now
-    ]);
-    return {
-      status: 'success',
-      data: {
-        submissionId: newSubId,
-        serverRecorded: true,
-        serverAchieved: true,
-        resultStatus: 'passed',
-        score: score,
-        correct: correct,
-        total: total,
-        points: points,
-        pointsMax: pointsMax,
-        timedOut: !!timedOut,
-        passed: true,
-        clearCount: clearCount,
-        requiredPassCount: asg.Required_Pass_Count
-      }
-    };
+    const nowAch = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+    const achData = appendQuizAchievementRow_(sheet, asg, account, requestData, clearCount, nowAch);
+    return { status: 'success', data: achData };
   }
 
   const rows = sheetRowsToObjects_(sheet);

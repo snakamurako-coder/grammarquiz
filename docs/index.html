@@ -474,6 +474,29 @@ body.pool-match-active .game-footer {
   font-size: 0.92em;
 }
 #assignment-session-banner[hidden] { display: none !important; }
+.asg-status {
+  display: inline-block;
+  font-size: 0.82em;
+  font-weight: bold;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.asg-status-not-started { background: #ffebee; color: #c62828; }
+.asg-status-in-progress { background: #fff8e1; color: #f57f17; }
+.asg-status-ended { background: #e8f5e9; color: #2e7d32; }
+.asg-list-item { align-items: flex-start; }
+.asg-list-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.asg-refresh-warn {
+  font-size: 0.85em;
+  color: #c62828;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.asg-report-hint { font-size: 0.8em; color: #666; margin-top: 4px; }
 .answer-feedback { display: none; }
 .answer-feedback.is-visible { display: block; margin: 8px 0 14px; }
 #question-explanation { background: #fff8e1; border-left: 4px solid #ffb300; padding: 12px 14px; border-radius: 8px; margin-top: 8px; font-size: 0.9em; line-height: 1.6; color: var(--c-text); text-align: left; }
@@ -8516,6 +8539,10 @@ document.getElementById('next-btn').addEventListener('click', () => {
 
 function getResultSavedMessage_(saveResult) {
   if (saveResult && saveResult.assignment) {
+    if (saveResult.status === 'error') {
+      return '課題の提出に失敗しました: ' + (saveResult.message || '通信エラー')
+        + '　宿題・小テスト一覧の「再度報告」から達成を送れる場合があります。';
+    }
     const d = saveResult.data || saveResult;
     const st = d.resultStatus || (d.data && d.data.resultStatus) || '';
     const score = d.score != null ? d.score : (d.data && d.data.score);
@@ -8591,7 +8618,10 @@ document.getElementById('return-settings-btn').addEventListener('click', () => {
     sessionAnswerLog = [];
   }
   BackendSyncStatus.refresh();
-  // 学習記録の自動再取得はしない（マイページタブ／更新ボタンのみ）
+  const assignmentPanel = document.getElementById('assignment-panel');
+  if (assignmentPanel && assignmentPanel.style.display !== 'none' && window.AssignmentModule) {
+    AssignmentModule.refreshList().catch(function (e) { console.warn('課題一覧:', e); });
+  }
 });
 
 // ======= 認証ゲート連携 =======
