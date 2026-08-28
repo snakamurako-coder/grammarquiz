@@ -37,9 +37,39 @@ const PresetStore = (() => {
     return dbPromise;
   }
 
-  function tx_(storeNames, mode) {
+  /** トランザクション完了まで待つ（大きな manifest の put/get で必須） */
+  function runTx_(storeNames, mode, fn) {
     return openDb_().then(function (db) {
-      return db.transaction(storeNames, mode || 'readonly');
+      return new Promise(function (resolve, reject) {
+        const tx = db.transaction(storeNames, mode);
+        tx.onerror = function () { reject(tx.error || new Error('IndexedDB tx error')); };
+        tx.onabort = function () { reject(tx.error || new Error('IndexedDB tx aborted')); };
+        let settled = false;
+        function finish(val) {
+          if (settled) return;
+          settled = true;
+          resolve(val);
+        }
+        function fail(err) {
+          if (settled) return;
+          settled = true;
+          reject(err);
+        }
+        try {
+          const out = fn(tx);
+          if (out && typeof out.then === 'function') {
+            out.then(finish).catch(function (e) {
+              try { tx.abort(); } catch (x) { /* ignore */ }
+              fail(e);
+            });
+          } else {
+            tx.oncomplete = function () { finish(out); };
+          }
+        } catch (e) {
+          try { tx.abort(); } catch (x) { /* ignore */ }
+          fail(e);
+        }
+      });
     });
   }
 
@@ -52,23 +82,22 @@ const PresetStore = (() => {
 
   async function getManifestRecord_(mode, hash) {
     if (!mode || !hash) return null;
-    const tx = await tx_(['manifests'], 'readonly');
-    const store = tx.objectStore('manifests');
-    const rec = await reqPromise_(store.get(manifestKey_(mode, hash)));
-    return rec || null;
+    return runTx_(['manifests'], 'readonly', function (tx) {
+      const store = tx.objectStore('manifests');
+      return reqPromise_(store.get(manifestKey_(mode, hash)));
+    }).then(function (rec) { return rec || null; });
   }
 
   async function getMetaRecord_(key) {
-    const tx = await tx_(['meta'], 'readonly');
-    const store = tx.objectStore('meta');
-    const rec = await reqPromise_(store.get(key));
-    return rec && rec.value ? rec.value : null;
+    return runTx_(['meta'], 'readonly', function (tx) {
+      return reqPromise_(tx.objectStore('meta').get(key));
+    }).then(function (rec) { return rec && rec.value ? rec.value : null; });
   }
 
   async function putMetaRecord_(key, value) {
-    const tx = await tx_(['meta'], 'readwrite');
-    const store = tx.objectStore('meta');
-    await reqPromise_(store.put({ key: key, value: value }));
+    await runTx_(['meta'], 'readwrite', function (tx) {
+      return reqPromise_(tx.objectStore('meta').put({ key: key, value: value }));
+    });
   }
 
   async function open() {
@@ -95,8 +124,9 @@ const PresetStore = (() => {
 
   async function setPendingMeta(meta) {
     if (!meta) {
-      const tx = await tx_(['meta'], 'readwrite');
-      await reqPromise_(tx.objectStore('meta').delete('pending'));
+      await runTx_(['meta'], 'readwrite', function (tx) {
+        return reqPromise_(tx.objectStore('meta').delete('pending'));
+      });
       return;
     }
     await putMetaRecord_('pending', meta);
@@ -104,15 +134,15 @@ const PresetStore = (() => {
 
   async function putManifest(mode, hash, data) {
     if (!mode || !hash || !data) return;
-    const tx = await tx_(['manifests'], 'readwrite');
-    const store = tx.objectStore('manifests');
-    await reqPromise_(store.put({
-      id: manifestKey_(mode, hash),
-      mode: mode,
-      hash: hash,
-      data: data,
-      savedAt: Date.now()
-    }));
+    await runTx_(['manifests'], 'readwrite', function (tx) {
+      return reqPromise_(tx.objectStore('manifests').put({
+        id: manifestKey_(mode, hash),
+        mode: mode,
+        hash: hash,
+        data: data,
+        savedAt: Date.now()
+      }));
+    });
   }
 
   async function getManifest(mode, hash) {
@@ -145,13 +175,11 @@ const PresetStore = (() => {
   }
 
   async function listManifestKeys_() {
-    const tx = await tx_(['manifests'], 'readonly');
-    const store = tx.objectStore('manifests');
-    const keys = await reqPromise_(store.getAllKeys());
-    return keys || [];
+    return runTx_(['manifests'], 'readonly', function (tx) {
+      return reqPromise_(tx.objectStore('manifests').getAllKeys());
+    }).then(function (keys) { return keys || []; });
   }
 
-  /** 指定ハッシュ集合以外の manifest レコードを削除 */
   async function gcExcept(keepHashesByMode) {
     const keep = {};
     const modes = keepHashesByMode || {};
@@ -160,20 +188,24 @@ const PresetStore = (() => {
       if (hash) keep[manifestKey_(mode, hash)] = true;
     });
     const allKeys = await listManifestKeys_();
-    const tx = await tx_(['manifests'], 'readwrite');
-    const store = tx.objectStore('manifests');
-    for (let i = 0; i < allKeys.length; i++) {
-      const id = allKeys[i];
-      if (!keep[id]) {
-        await reqPromise_(store.delete(id));
+    await runTx_(['manifests'], 'readwrite', function (tx) {
+      const store = tx.objectStore('manifests');
+      const tasks = [];
+      for (let i = 0; i < allKeys.length; i++) {
+        const id = allKeys[i];
+        if (!keep[id]) tasks.push(reqPromise_(store.delete(id)));
       }
-    }
+      return Promise.all(tasks);
+    });
   }
 
   async function clearAll() {
-    const tx = await tx_(['manifests', 'meta'], 'readwrite');
-    await reqPromise_(tx.objectStore('manifests').clear());
-    await reqPromise_(tx.objectStore('meta').clear());
+    await runTx_(['manifests', 'meta'], 'readwrite', function (tx) {
+      return Promise.all([
+        reqPromise_(tx.objectStore('manifests').clear()),
+        reqPromise_(tx.objectStore('meta').clear())
+      ]);
+    });
   }
 
   function migrateFromLegacyLocalStorage() {

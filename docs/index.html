@@ -1052,6 +1052,10 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         </div>
       </div>
       <div class="setting-section">
+        <button type="button" id="vocab-card-start-btn" class="btn-secondary" style="width:100%;margin-bottom:10px;">単語カードで覚える</button>
+        <p class="filter-axis-hint" style="margin:0;">フラッシュカードで語・句・例文をめくり、👍/😫 で仕分けます。一巡後に学習状態をまとめて登録します。</p>
+      </div>
+      <div class="setting-section">
         <div class="section-title">3. 出題形式</div>
         <p id="vocab-homework-banner" class="filter-axis-hint" style="display:none;margin:0 0 10px;padding:8px 10px;background:#fff8e1;border-radius:8px;color:#6d4c00;"></p>
         <div class="form-group">
@@ -1071,8 +1075,6 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           <p class="filter-axis-hint" style="margin-top:6px;">和英の句to句は、チャンクの日本語訳を見て英語チャンクの ( ) に入るものを答えます。</p>
         </div>
         <div class="form-group">
-          <button type="button" id="vocab-card-start-btn" class="btn-secondary" style="width:100%;margin-bottom:10px;">単語カードで覚える</button>
-          <p class="filter-axis-hint" style="margin:0 0 10px;">フラッシュカードで語・句・例文をめくり、👍/😫 で仕分けます。一巡後に学習状態をまとめて登録します。</p>
           <label>③ 解答方法</label>
           <div class="check-list" id="vocab-axis-response">
             <label class="check-item"><input type="radio" name="vocab-response" value="choice" checked> 選択</label>
@@ -1666,7 +1668,9 @@ const BackendSyncStatus = (() => {
   let temporaryActive = false;
 
   const PRESET_SOURCE_LABELS = {
-    cache: '教材: ローカルキャッシュ',
+    memory: '教材: メモリ',
+    indexeddb: '教材: IndexedDB',
+    cache: '教材: IndexedDB',
     github: '教材: GitHub（docs/data）',
     spreadsheet: '教材: スプレッドシート'
   };
@@ -2394,6 +2398,8 @@ const PresetModule = (() => {
   const MODES = ['grammar', 'vocab', 'reading', 'ai'];
 
   const manifestsByMode = {};
+  const manifestHashByMode = {};
+  const lastManifestSourceByMode_ = {};
   const manifestLoadPromises = {};
   let indexCache = null;
   let indexPromise = null;
@@ -2423,7 +2429,11 @@ const PresetModule = (() => {
   }
 
   function resetMemoryCache_() {
-    MODES.forEach(function (m) { delete manifestsByMode[m]; });
+    MODES.forEach(function (m) {
+      delete manifestsByMode[m];
+      delete manifestHashByMode[m];
+      delete lastManifestSourceByMode_[m];
+    });
     Object.keys(manifestLoadPromises).forEach(function (k) { delete manifestLoadPromises[k]; });
     indexCache = null;
     indexPromise = null;
@@ -2472,33 +2482,40 @@ const PresetModule = (() => {
     return data;
   }
 
-  async function ensureManifestForMeta_(mode, meta, sourceLabel) {
-    if (!meta || !meta.modes || !meta.modes[mode]) return null;
+  async function ensureManifestForMeta_(mode, meta) {
+    if (!meta || !meta.modes || !meta.modes[mode]) return { manifest: null, source: null };
     const hash = meta.modes[mode];
-    if (manifestsByMode[mode]) return manifestsByMode[mode];
+    if (manifestsByMode[mode] && manifestHashByMode[mode] === hash) {
+      lastManifestSourceByMode_[mode] = 'memory';
+      return { manifest: manifestsByMode[mode], source: 'memory' };
+    }
 
     const cacheKey = mode + ':' + hash;
     if (!manifestLoadPromises[cacheKey]) {
       manifestLoadPromises[cacheKey] = (async function () {
-        let manifest = await PresetStore.getManifest(mode, hash);
-        if (manifest) {
-          manifestsByMode[mode] = manifest;
-          if (sourceLabel) notifyDataSource_(sourceLabel === 'github' ? 'github' : 'cache');
-          return manifest;
-        }
-
-        const index = await fetchManifestIndex_();
-        const entry = index && index.modes ? index.modes[mode] : null;
-        if (entry && entry.hash === hash && entry.path) {
-          manifest = await fetchAndStoreManifest_(mode, hash, entry.path);
+        try {
+          let manifest = await PresetStore.getManifest(mode, hash);
+          let source = null;
+          if (manifest) {
+            source = 'indexeddb';
+          } else {
+            const index = await fetchManifestIndex_();
+            const entry = index && index.modes ? index.modes[mode] : null;
+            if (entry && entry.hash === hash && entry.path) {
+              manifest = await fetchAndStoreManifest_(mode, hash, entry.path);
+              if (manifest) source = 'github';
+            }
+          }
           if (manifest) {
             manifestsByMode[mode] = manifest;
-            notifyDataSource_('github');
-            return manifest;
+            manifestHashByMode[mode] = hash;
+            if (source) lastManifestSourceByMode_[mode] = source;
           }
+          return { manifest: manifest, source: source };
+        } catch (e) {
+          delete manifestLoadPromises[cacheKey];
+          throw e;
         }
-
-        return null;
       })();
     }
     return manifestLoadPromises[cacheKey];
@@ -2508,22 +2525,27 @@ const PresetModule = (() => {
     await ensureStore_();
     const active = await PresetStore.getActiveMeta();
     if (active) {
-      const manifest = await ensureManifestForMeta_(mode, active, 'cache');
-      if (manifest) return manifest;
+      const loaded = await ensureManifestForMeta_(mode, active);
+      if (loaded.manifest) {
+        if (loaded.source) notifyDataSource_(loaded.source);
+        return loaded.manifest;
+      }
     }
 
     const index = await fetchManifestIndex_();
     if (!index) return null;
 
     const meta = metaFromIndex_(index);
-    const manifest = await ensureManifestForMeta_(mode, meta, 'github');
-    if (manifest && meta.version) {
+    const loaded = await ensureManifestForMeta_(mode, meta);
+    if (loaded.manifest && meta.version) {
       const currentActive = await PresetStore.getActiveMeta();
       if (!currentActive || currentActive.version !== meta.version) {
         await PresetStore.setActiveMeta(meta);
       }
+      if (loaded.source) notifyDataSource_(loaded.source);
+      return loaded.manifest;
     }
-    return manifest;
+    return null;
   }
 
   async function usableManifestForMode_(mode) {
@@ -2670,9 +2692,8 @@ const PresetModule = (() => {
       const manifest = await usableManifestForMode_(mode);
       const staticData = manifest ? fromManifest(manifest) : null;
       if (staticData != null) {
-        const active = await PresetStore.getActiveMeta();
-        notifyDataSource_(active ? 'cache' : 'github');
-        return { status: 'success', data: staticData, dataSource: active ? 'cache' : 'github' };
+        const dataSource = lastManifestSourceByMode_[mode] || 'indexeddb';
+        return { status: 'success', data: staticData, dataSource: dataSource };
       }
     }
 
