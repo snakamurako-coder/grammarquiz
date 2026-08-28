@@ -86,8 +86,4 @@ foreach ($item in $modeFiles) {
   Write-Host "Written: $manifestPath"
 }
 
-# 後方互換: 旧クライアント向けに統合 manifest も残す
-$legacyPath = Join-Path $outDir 'manifest.json'
-$data | ConvertTo-Json -Depth 20 -Compress | Set-Content -Path $legacyPath -Encoding UTF8
-Write-Host "Written: $legacyPath (legacy)"
 Write-Host "Version: $($data.version)"

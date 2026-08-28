@@ -2139,12 +2139,6 @@ const PresetModule = (() => {
     return MANIFEST_MODE_PATHS;
   }
 
-  function legacyManifestUrl_() {
-    return window.STATIC_MANIFEST_URL
-      || (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.STATIC_MANIFEST_URL)
-      || 'data/manifest.json';
-  }
-
   function baseUrl_() {
     return window.location.pathname.replace(/\/[^/]*$/, '/');
   }
@@ -2191,25 +2185,12 @@ const PresetModule = (() => {
     try { return await res.json(); } catch (e) { return null; }
   }
 
-  function legacyManifestMatchesMode_(legacy, mode) {
-    if (!legacy) return false;
-    if (mode === 'grammar') return !!(legacy.catalog || legacy.questions);
-    if (mode === 'vocab' || mode === 'reading') {
-      return !!(legacy.vocabCatalog || legacy.vocabWords);
-    }
-    return false;
-  }
-
   /** 学習モード別 manifest を1回だけ読む。未生成なら null */
   function loadManifestForMode_(mode) {
     if (!manifestPromisesByMode[mode]) {
       manifestPromisesByMode[mode] = (async () => {
         const paths = manifestPaths_();
-        let manifest = await fetchManifestJson_(paths[mode]);
-        if (!manifest && (mode === 'grammar' || mode === 'vocab' || mode === 'reading')) {
-          const legacy = await fetchManifestJson_(legacyManifestUrl_());
-          if (legacyManifestMatchesMode_(legacy, mode)) manifest = legacy;
-        }
+        const manifest = await fetchManifestJson_(paths[mode]);
         if (!manifest) {
           console.warn('manifest (' + mode + ') がありません。GAS② API から取得します。');
           return null;

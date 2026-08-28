@@ -28,11 +28,6 @@ window.DIGITALDRILL_CONFIG = {
     ai: 'data/manifest-ai-conversation.json'
   },
   /**
-   * 旧形式の単一 manifest（後方互換）。
-   * モード別ファイルが無いときのみ PresetModule が参照する。
-   */
-  STATIC_MANIFEST_URL: 'data/manifest.json',
-  /**
    * プリセット学習の概要集約用 Google フォーム。
    * 送信は GAS の submitFormSummary 経由（fbzx トークン付き POST）。
    * GAS②（API_URL）優先、認証トークン無効時は GAS①（DASHBOARD_URL）へフォールバック。
@@ -61,4 +56,3 @@ window.DIGITALDRILL_CONFIG = {
 
 window.API_URL = window.DIGITALDRILL_CONFIG.API_URL;
 window.DASHBOARD_URL = window.DIGITALDRILL_CONFIG.DASHBOARD_URL;
-window.STATIC_MANIFEST_URL = window.DIGITALDRILL_CONFIG.STATIC_MANIFEST_URL;
