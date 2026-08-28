@@ -4,6 +4,7 @@
  */
 const AssignmentModule = (function () {
   const PROGRESS_PREFIX = 'dd_hw_progress:';
+  const PASS_PREFIX = 'dd_quiz_pass:';
   let listCache_ = [];
   let activeSession_ = null;
   let timerId_ = null;
@@ -37,6 +38,44 @@ const AssignmentModule = (function () {
     const user = AuthGateService.getUser() || {};
     const account = String(user.account || '').toLowerCase() || 'anon';
     return PROGRESS_PREFIX + assignmentId + ':' + account;
+  }
+
+  function passKey_(assignmentId) {
+    const user = AuthGateService.getUser() || {};
+    const account = String(user.account || '').toLowerCase() || 'anon';
+    return PASS_PREFIX + assignmentId + ':' + account;
+  }
+
+  function loadPassState_(assignmentId) {
+    try {
+      const raw = localStorage.getItem(passKey_(assignmentId));
+      const parsed = raw ? JSON.parse(raw) : null;
+      return parsed && typeof parsed === 'object'
+        ? parsed
+        : { clearCount: 0, clears: [], serverAchieved: false };
+    } catch (e) {
+      return { clearCount: 0, clears: [], serverAchieved: false };
+    }
+  }
+
+  function savePassState_(assignmentId, state) {
+    try {
+      localStorage.setItem(passKey_(assignmentId), JSON.stringify(state || { clearCount: 0, clears: [], serverAchieved: false }));
+    } catch (e) {}
+  }
+
+  function evaluatePassLocal_(a, correct, total, points, pointsMax, durationSec) {
+    const score = total > 0
+      ? Math.round((correct / total) * 100)
+      : (pointsMax > 0 ? Math.round((points / pointsMax) * 100) : 0);
+    let pass = false;
+    if (a.Pass_Mode === 'points') {
+      pass = points >= a.Pass_Score;
+    } else {
+      pass = score >= a.Pass_Score;
+    }
+    if (a.Time_Limit_Sec > 0 && durationSec > a.Time_Limit_Sec + 2) pass = false;
+    return { pass: pass, score: score };
   }
 
   function loadLocalProgress_(assignmentId) {
@@ -140,21 +179,35 @@ const AssignmentModule = (function () {
       const a = row.assignment || {};
       const kindLabel = a.Kind === 'quiz' ? '小テスト' : '宿題';
       const limit = a.Time_Limit_Sec > 0 ? ('制限 ' + formatLimit_(a.Time_Limit_Sec)) : '制限なし';
-      const attempts = row.attempts || 0;
-      const remain = row.remainingAttempts == null ? '無制限' : ('残' + row.remainingAttempts + '回');
+      const required = a.Required_Pass_Count || a.Max_Attempts || 1;
+      const passState = loadPassState_(a.Assignment_ID);
+      if (row.serverAchieved) {
+        passState.serverAchieved = true;
+        savePassState_(a.Assignment_ID, passState);
+      }
+      const serverDone = !!(row.serverAchieved || passState.serverAchieved);
+      const clearN = serverDone ? required : (passState.clearCount || 0);
       const latest = row.latestSubmission;
-      const status = latest ? String(latest.Status || '') : '未着手';
+      const status = serverDone ? '達成済' : (latest ? String(latest.Status || '') : '未着手');
       const local = loadLocalProgress_(a.Assignment_ID);
       const doneN = (local.doneIds || []).length;
       html += '<div class="log-item" style="display:block;">';
       html += '<div class="log-title">' + escapeHtml_(a.Title) + ' <span style="font-size:.8em;color:#666;">[' + kindLabel + ']</span></div>';
-      html += '<div class="log-meta">' + escapeHtml_(limit) + ' / 挑戦 ' + attempts + '（' + remain + '） / 状態 ' + escapeHtml_(status);
-      if (a.Kind === 'homework') html += ' / ローカル消化 ' + doneN + '問';
+      html += '<div class="log-meta">' + escapeHtml_(limit);
+      if (a.Kind === 'quiz') {
+        html += ' / クリア ' + clearN + '／' + required + ' 回（ノルマ）';
+        html += ' / 状態 ' + escapeHtml_(status);
+      } else {
+        html += ' / 状態 ' + escapeHtml_(status);
+        html += ' / ローカル消化 ' + doneN + '問';
+      }
       html += '</div>';
-      html += '<div class="log-settings">合格: ' + escapeHtml_(a.Pass_Score) + (a.Pass_Mode === 'points' ? '点' : '%');
+      html += '<div class="log-settings">合格ライン: ' + escapeHtml_(a.Pass_Score) + (a.Pass_Mode === 'points' ? '点' : '%');
+      if (a.Kind === 'quiz') html += ' / 挑戦回数無制限';
       if (a.Weakness_Review) html += ' / ニガテ復習あり';
       html += '</div>';
-      html += '<button type="button" class="btn-small assignment-start-btn" data-idx="' + idx + '" style="margin-top:8px;">取り組む</button>';
+      html += '<button type="button" class="btn-small assignment-start-btn" data-idx="' + idx + '" style="margin-top:8px;">'
+        + (serverDone && a.Kind === 'quiz' ? '再挑戦（記録済）' : '取り組む') + '</button>';
       html += '</div>';
     });
     wrap.innerHTML = html;
@@ -244,8 +297,14 @@ const AssignmentModule = (function () {
           formats: formats,
           homeworkMode: true,
           homeworkPerSection: per,
-          includeNone: true,
+          includeNone: sec.includeNone !== false,
+          includeUnknown: sec.includeUnknown !== false,
+          choiceCount: sec.choiceCount || 4,
           poolDummyCount: sec.poolDummyCount != null ? sec.poolDummyCount : 2,
+          dummyScope: sec.dummyScope || 'sheet',
+          dummyMethod: sec.dummyMethod || 'none',
+          affixType: sec.affixType || 'prefix',
+          affixLen: sec.affixLen != null ? sec.affixLen : 2,
           usedKeys: usedVocabKeys
         });
         // usedKeys 伝播（ビルダが Set を受け取らない場合は後段で除外）
@@ -445,6 +504,7 @@ const AssignmentModule = (function () {
     const local = loadLocalProgress_(a.Assignment_ID);
     const payload = {
       action: 'submitAssignmentAttempt',
+      assignmentId: a.Assignment_ID,
       submissionId: activeSession_.submissionId,
       correct: correct,
       total: total,
@@ -460,7 +520,44 @@ const AssignmentModule = (function () {
         sessionAnswers: sessionAnswerLog
       }
     };
+
+    if (a.Kind === 'quiz') {
+      const evalResult = evaluatePassLocal_(a, correct, total, activeSession_.pointsEarned, activeSession_.pointsMax, durationSec);
+      const passState = loadPassState_(a.Assignment_ID);
+      if (evalResult.pass && !passState.serverAchieved) {
+        passState.clearCount = (passState.clearCount || 0) + 1;
+        passState.clears = passState.clears || [];
+        passState.clears.push({
+          at: new Date().toISOString(),
+          score: evalResult.score,
+          durationSec: durationSec
+        });
+      }
+      const required = a.Required_Pass_Count || a.Max_Attempts || 1;
+      payload.clearCount = passState.clearCount || 0;
+      payload.recordAchievement = !!(evalResult.pass
+        && !passState.serverAchieved
+        && passState.clearCount >= required);
+      savePassState_(a.Assignment_ID, passState);
+    }
+
     const res = await post_(payload);
+    if (a.Kind === 'quiz' && res.data && res.data.serverRecorded) {
+      const passState = loadPassState_(a.Assignment_ID);
+      passState.serverAchieved = true;
+      savePassState_(a.Assignment_ID, passState);
+    }
+    if (a.Kind === 'quiz' && res.data) {
+      const required = a.Required_Pass_Count || a.Max_Attempts || 1;
+      const ps = loadPassState_(a.Assignment_ID);
+      if (res.data.serverRecorded) {
+        showToast_('ノルマ達成！管理者シートに記録しました（' + required + '回クリア）');
+      } else if (res.data.passedThisAttempt) {
+        showToast_('今回クリア（累計 ' + (ps.clearCount || 0) + ' / ' + required + ' 回）');
+      } else if (res.data.clientOnly) {
+        showToast_('今回は未達。挑戦回数に上限はありません。');
+      }
+    }
     const sessionSnap = activeSession_;
     activeSession_ = null;
     const banner = document.getElementById('assignment-session-banner');

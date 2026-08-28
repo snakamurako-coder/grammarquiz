@@ -220,6 +220,11 @@ function doGet(e) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+/** dashboard.html から部分 HTML/JS を読み込む */
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
 const GRAMMAR_BRACKET_RE = /[(（][^)）]*[)）]/;
 
 /** "He wants (a,b,c)." → { prefix: 'He wants', inner: 'a,b,c', suffix: '.' } */
@@ -2251,7 +2256,7 @@ function apiAdminGetWhitelist() {
 
 const ASSIGNMENT_HEADERS = [
   'Assignment_ID', 'Title', 'Kind', 'Window_Start', 'Window_End', 'Deadline',
-  'Time_Limit_Sec', 'Max_Attempts', 'Pass_Score', 'Pass_Mode', 'Weakness_Review',
+  'Time_Limit_Sec', 'Required_Pass_Count', 'Pass_Score', 'Pass_Mode', 'Weakness_Review',
   'Target_Class',
   'Target_attribute1', 'Target_attribute2', 'Target_attribute3', 'Target_attribute4', 'Target_attribute5',
   'Sections_JSON', 'Active', 'Created_By', 'Updated_At'
@@ -2324,6 +2329,44 @@ function sheetRowsToObjects_(sheet) {
   return rows;
 }
 
+/** 旧 Max_Attempts 列も読み取り（ノルマ回数・最低1） */
+function readRequiredPassCount_(row) {
+  const raw = (row && row.Required_Pass_Count != null && row.Required_Pass_Count !== '')
+    ? row.Required_Pass_Count
+    : (row && row.Max_Attempts);
+  const n = parseInt(raw, 10);
+  if (isNaN(n) || n < 1) return 1;
+  return n;
+}
+
+function hasAssignmentAchievement_(subSheet, assignmentId, account) {
+  const rows = sheetRowsToObjects_(subSheet);
+  for (let i = 0; i < rows.length; i++) {
+    if (String(rows[i].Assignment_ID) === String(assignmentId)
+        && String(rows[i].Account || '').toLowerCase() === String(account || '').toLowerCase()
+        && String(rows[i].Status || '') === 'passed') {
+      return rows[i];
+    }
+  }
+  return null;
+}
+
+function evaluateQuizAttemptPass_(asg, correct, total, points, pointsMax, durationSec, timedOut) {
+  const score = total > 0
+    ? Math.round((correct / total) * 100)
+    : (pointsMax > 0 ? Math.round((points / pointsMax) * 100) : 0);
+  let pass = false;
+  if (asg.Pass_Mode === 'points') {
+    pass = points >= asg.Pass_Score;
+  } else {
+    pass = score >= asg.Pass_Score;
+  }
+  if (asg.Time_Limit_Sec > 0 && durationSec > asg.Time_Limit_Sec + 2) {
+    pass = false;
+  }
+  return { pass: pass, score: score };
+}
+
 function parseSectionsJson_(raw) {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw.slice(0, 4);
@@ -2344,7 +2387,8 @@ function normalizeAssignmentRow_(row) {
     Window_End: String(row.Window_End || ''),
     Deadline: String(row.Deadline || ''),
     Time_Limit_Sec: Math.max(0, parseInt(row.Time_Limit_Sec, 10) || 0),
-    Max_Attempts: Math.max(0, parseInt(row.Max_Attempts, 10) || 0),
+    Required_Pass_Count: readRequiredPassCount_(row),
+    Max_Attempts: readRequiredPassCount_(row),
     Pass_Score: Math.max(0, parseInt(row.Pass_Score, 10) || 0),
     Pass_Mode: String(row.Pass_Mode || 'rate') === 'points' ? 'points' : 'rate',
     Weakness_Review: String(row.Weakness_Review || '0') === '1' || row.Weakness_Review === true || row.Weakness_Review === 1 ? 1 : 0,
@@ -2492,7 +2536,7 @@ function apiAdminUpsertAssignment_(requestData) {
     Window_End: String(payload.Window_End || ''),
     Deadline: String(payload.Deadline || ''),
     Time_Limit_Sec: Math.max(0, parseInt(payload.Time_Limit_Sec, 10) || 0),
-    Max_Attempts: Math.max(0, parseInt(payload.Max_Attempts, 10) || 0),
+    Required_Pass_Count: Math.max(1, parseInt(payload.Required_Pass_Count != null ? payload.Required_Pass_Count : payload.Max_Attempts, 10) || 1),
     Pass_Score: Math.max(0, parseInt(payload.Pass_Score, 10) || 0),
     Pass_Mode: String(payload.Pass_Mode || 'rate') === 'points' ? 'points' : 'rate',
     Weakness_Review: (String(payload.Weakness_Review || '0') === '1' || payload.Weakness_Review === true || payload.Weakness_Review === 1) ? 1 : 0,
@@ -2552,22 +2596,16 @@ function apiListMyAssignments_(requestData) {
     .filter(function (s) { return String(s.Account || '').toLowerCase() === account; });
   const data = assignments.map(function (a) {
     const mine = subs.filter(function (s) { return String(s.Assignment_ID) === a.Assignment_ID; });
-    const attempts = mine.length;
-    const best = mine.reduce(function (acc, s) {
-      const score = parseInt(s.Score, 10);
-      if (isNaN(score)) return acc;
-      if (!acc || score > parseInt(acc.Score, 10)) return s;
-      return acc;
-    }, null);
+    const achievement = hasAssignmentAchievement_(ss.getSheetByName('assignment_submissions'), a.Assignment_ID, account);
     const latest = mine.slice().sort(function (x, y) {
       return String(y.Submitted_At || '').localeCompare(String(x.Submitted_At || ''));
     })[0] || null;
     return {
       assignment: a,
-      attempts: attempts,
+      serverAchieved: !!achievement,
+      achievementSubmission: achievement,
       latestSubmission: latest,
-      bestSubmission: best,
-      remainingAttempts: a.Max_Attempts > 0 ? Math.max(0, a.Max_Attempts - attempts) : null
+      requiredPassCount: a.Required_Pass_Count
     };
   });
   return { status: 'success', data: data };
@@ -2621,13 +2659,28 @@ function apiStartAssignmentAttempt_(requestData) {
     return { status: 'error', message: 'この課題の配布対象ではありません' };
   }
   const subSheet = ss.getSheetByName('assignment_submissions');
-  const attempts = countAttempts_(subSheet, id, account);
-  if (asg.Max_Attempts > 0 && attempts >= asg.Max_Attempts) {
-    return { status: 'error', message: '挑戦回数の上限に達しています' };
+  const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+
+  /** 小テスト: サーバー行は達成時のみ。開始はクライアントローカル */
+  if (asg.Kind === 'quiz') {
+    const achieved = hasAssignmentAchievement_(subSheet, id, account);
+    return {
+      status: 'success',
+      data: {
+        submissionId: 'local_' + newId_('sub'),
+        attemptNo: 0,
+        assignment: asg,
+        localSession: true,
+        serverAchieved: !!achieved,
+        startedAt: now,
+        timeLimitSec: asg.Time_Limit_Sec
+      }
+    };
   }
+
+  const attempts = countAttempts_(subSheet, id, account);
   const submissionId = newId_('sub');
   const attemptNo = attempts + 1;
-  const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
   subSheet.appendRow([
     submissionId, id, account, attemptNo, 'in_progress',
     '', '', '', '', '', '', 0,
@@ -2674,10 +2727,123 @@ function apiSubmitAssignmentAttempt_(requestData) {
   const authReq = requireAuthToken_(requestData || {});
   if (!authReq.ok) return { status: 'error', message: authReq.error };
   const submissionId = String(requestData.submissionId || '').trim();
+  const assignmentId = String(requestData.assignmentId || '').trim();
   if (!submissionId) return { status: 'error', message: 'submissionId が必要です' };
   const account = String(authReq.auth.email || '').toLowerCase();
   const ss = openAppSpreadsheet_();
   const sheet = ss.getSheetByName('assignment_submissions');
+  const asgRows = sheetRowsToObjects_(ss.getSheetByName('assignments'));
+  let asg = null;
+  if (assignmentId) {
+    for (let i = 0; i < asgRows.length; i++) {
+      if (String(asgRows[i].Assignment_ID) === assignmentId) {
+        asg = normalizeAssignmentRow_(asgRows[i]);
+        break;
+      }
+    }
+  }
+
+  const correct = Math.max(0, parseInt(requestData.correct, 10) || 0);
+  const total = Math.max(0, parseInt(requestData.total, 10) || 0);
+  const points = Math.max(0, parseInt(requestData.points, 10) || 0);
+  const pointsMax = Math.max(0, parseInt(requestData.pointsMax, 10) || 0);
+  const durationSec = Math.max(0, parseInt(requestData.durationSec, 10) || 0);
+  const timedOut = requestData.timedOut === true || requestData.timedOut === 1 || requestData.timedOut === '1';
+  const recordAchievement = requestData.recordAchievement === true
+    || requestData.recordAchievement === 1
+    || requestData.recordAchievement === '1';
+  const clearCount = Math.max(0, parseInt(requestData.clearCount, 10) || 0);
+  const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+
+  /** 小テスト: 達成記録前は SS に書かない（ローカルでクリア回数を管理） */
+  if (asg && asg.Kind === 'quiz') {
+    const evalResult = evaluateQuizAttemptPass_(asg, correct, total, points, pointsMax, durationSec, timedOut);
+    const passedThisAttempt = evalResult.pass;
+    const score = evalResult.score;
+    const existing = hasAssignmentAchievement_(sheet, asg.Assignment_ID, account);
+    if (existing) {
+      return {
+        status: 'success',
+        data: {
+          clientOnly: true,
+          serverAchieved: true,
+          alreadyAchieved: true,
+          passedThisAttempt: passedThisAttempt,
+          resultStatus: passedThisAttempt ? 'clear' : (timedOut ? 'forced' : 'failed'),
+          score: score,
+          correct: correct,
+          total: total,
+          points: points,
+          pointsMax: pointsMax,
+          timedOut: !!timedOut,
+          passed: false
+        }
+      };
+    }
+    if (!recordAchievement) {
+      const resultStatus = passedThisAttempt ? 'clear' : (timedOut ? 'forced' : 'failed');
+      return {
+        status: 'success',
+        data: {
+          clientOnly: true,
+          serverAchieved: false,
+          passedThisAttempt: passedThisAttempt,
+          resultStatus: resultStatus,
+          score: score,
+          correct: correct,
+          total: total,
+          points: points,
+          pointsMax: pointsMax,
+          timedOut: !!timedOut,
+          passed: false,
+          requiredPassCount: asg.Required_Pass_Count,
+          clearCount: clearCount
+        }
+      };
+    }
+    if (!passedThisAttempt) {
+      return { status: 'error', message: '達成記録には今回の結果が合格条件を満たす必要があります' };
+    }
+    if (clearCount < asg.Required_Pass_Count) {
+      return {
+        status: 'error',
+        message: 'ノルマ回数（' + asg.Required_Pass_Count + '回クリア）に達していません（現在' + clearCount + '回）'
+      };
+    }
+    const newSubId = newId_('sub');
+    const attemptNo = countAttempts_(sheet, asg.Assignment_ID, account) + 1;
+    const detail = Object.assign({}, requestData.detail || {}, {
+      recordType: 'achievement',
+      clearCount: clearCount,
+      requiredPassCount: asg.Required_Pass_Count
+    });
+    sheet.appendRow([
+      newSubId, asg.Assignment_ID, account, attemptNo, 'passed',
+      score, correct, total, points, pointsMax, durationSec, timedOut ? 1 : 0,
+      JSON.stringify(requestData.progress || {}),
+      JSON.stringify(detail),
+      now
+    ]);
+    return {
+      status: 'success',
+      data: {
+        submissionId: newSubId,
+        serverRecorded: true,
+        serverAchieved: true,
+        resultStatus: 'passed',
+        score: score,
+        correct: correct,
+        total: total,
+        points: points,
+        pointsMax: pointsMax,
+        timedOut: !!timedOut,
+        passed: true,
+        clearCount: clearCount,
+        requiredPassCount: asg.Required_Pass_Count
+      }
+    };
+  }
+
   const rows = sheetRowsToObjects_(sheet);
   let row = null;
   for (let i = 0; i < rows.length; i++) {
@@ -2692,21 +2858,15 @@ function apiSubmitAssignmentAttempt_(requestData) {
     return { status: 'error', message: 'この提出は既に完了しています' };
   }
 
-  const asgRows = sheetRowsToObjects_(ss.getSheetByName('assignments'));
-  let asg = null;
-  for (let i = 0; i < asgRows.length; i++) {
-    if (String(asgRows[i].Assignment_ID) === String(row.Assignment_ID)) {
-      asg = normalizeAssignmentRow_(asgRows[i]);
-      break;
+  if (!asg) {
+    for (let j = 0; j < asgRows.length; j++) {
+      if (String(asgRows[j].Assignment_ID) === String(row.Assignment_ID)) {
+        asg = normalizeAssignmentRow_(asgRows[j]);
+        break;
+      }
     }
   }
 
-  const correct = Math.max(0, parseInt(requestData.correct, 10) || 0);
-  const total = Math.max(0, parseInt(requestData.total, 10) || 0);
-  const points = Math.max(0, parseInt(requestData.points, 10) || 0);
-  const pointsMax = Math.max(0, parseInt(requestData.pointsMax, 10) || 0);
-  const durationSec = Math.max(0, parseInt(requestData.durationSec, 10) || 0);
-  const timedOut = requestData.timedOut === true || requestData.timedOut === 1 || requestData.timedOut === '1';
   const score = total > 0 ? Math.round((correct / total) * 100) : (pointsMax > 0 ? Math.round((points / pointsMax) * 100) : 0);
 
   let status = 'submitted';
@@ -2714,24 +2874,10 @@ function apiSubmitAssignmentAttempt_(requestData) {
     if (asg.Kind === 'homework') {
       const done = requestData.rangeComplete === true || requestData.rangeComplete === 1 || requestData.rangeComplete === '1';
       status = done ? 'passed' : 'submitted';
-    } else {
-      let pass = false;
-      if (asg.Pass_Mode === 'points') {
-        pass = pointsMax > 0 ? points >= asg.Pass_Score : points >= asg.Pass_Score;
-      } else {
-        pass = score >= asg.Pass_Score;
-      }
-      if (asg.Time_Limit_Sec > 0 && durationSec > asg.Time_Limit_Sec + 2) {
-        // 制限超過は不合格扱い（強制提出でも timedOut フラグで区別）
-        pass = false;
-      }
-      status = timedOut ? (pass ? 'passed' : 'forced') : (pass ? 'passed' : 'failed');
-      if (timedOut && !pass) status = 'forced';
     }
   }
   if (timedOut && status === 'submitted') status = 'forced';
 
-  const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
   const values = [
     row.Submission_ID, row.Assignment_ID, row.Account, row.Attempt_No, status,
     score, correct, total, points, pointsMax, durationSec, timedOut ? 1 : 0,
