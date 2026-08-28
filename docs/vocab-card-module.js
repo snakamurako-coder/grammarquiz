@@ -43,9 +43,19 @@ const VocabCardModule = (() => {
       .replace(/"/g, '&quot;');
   }
 
+  function unreg_() {
+    return window.VOCAB_UNREGISTERED || '×';
+  }
+
+  function displayVocab_(text) {
+    const s = window.vocabNorm(text);
+    if (!s || s === unreg_()) return '';
+    return esc_(s);
+  }
+
   function highlightBracket_(text) {
     const s = window.vocabNorm(text);
-    if (!s || s === window.VOCAB_UNREGISTERED) return '';
+    if (!s || s === unreg_()) return '';
     const m = s.match(/[(（]([^)）]+)[)）]/);
     if (!m) return esc_(s);
     const inner = m[1];
@@ -59,8 +69,8 @@ const VocabCardModule = (() => {
   function highlightWord_(text, word) {
     const s = window.vocabNorm(text);
     const w = window.vocabNorm(word);
-    if (!s || s === window.VOCAB_UNREGISTERED) return '';
-    if (!w || w === window.VOCAB_UNREGISTERED) return esc_(s);
+    if (!s || s === unreg_()) return '';
+    if (!w || w === unreg_()) return esc_(s);
     const lower = s.toLowerCase();
     const wl = w.toLowerCase();
     const idx = lower.indexOf(wl);
@@ -86,22 +96,30 @@ const VocabCardModule = (() => {
       const meaning = meanings.length ? meanings[0].meaning : '';
       const chunk = window.vocabGetChunkMaterial(wordObj);
       const ex = window.vocabGetExampleMaterial(wordObj);
-      const phraseEn = chunk.enFull !== window.VOCAB_UNREGISTERED ? highlightBracket_(chunk.enFull) || highlightWord_(chunk.enFull, word) : '';
-      const exEn = ex.enFull !== window.VOCAB_UNREGISTERED ? highlightBracket_(ex.enFull) || highlightWord_(ex.enFull, word) : '';
+      const unregistered = unreg_();
+      const phraseEn = chunk.enFull !== unregistered
+        ? (highlightBracket_(chunk.enFull) || highlightWord_(chunk.enFull, word))
+        : '';
+      const exEn = ex.enFull !== unregistered
+        ? (highlightBracket_(ex.enFull) || highlightWord_(ex.enFull, word))
+        : '';
       return {
         id: wordObj['通し番号'],
         wordObj: wordObj,
-        word: esc_(word),
-        meaning: esc_(meaning),
+        word: displayVocab_(wordObj['英単語・熟語の表現']),
+        meaning: displayVocab_(meaning),
         phrase: phraseEn,
-        phraseMeaning: esc_(chunk.jaFull),
+        phraseMeaning: displayVocab_(chunk.jaFull),
         example: exEn,
-        exampleMeaning: esc_(ex.jaFull),
+        exampleMeaning: displayVocab_(ex.jaFull),
         defaultContentType: defaultType,
         defaultFirstLang: defaultFirstLang
       };
     }).filter(function (item) {
-      return item.word || (item.phrase && item.phraseMeaning) || (item.example && item.exampleMeaning);
+      const hasWord = !!(item.word && item.meaning);
+      const hasPhrase = !!(item.phrase && item.phraseMeaning);
+      const hasExample = !!(item.example && item.exampleMeaning);
+      return hasWord || hasPhrase || hasExample;
     });
   }
 
