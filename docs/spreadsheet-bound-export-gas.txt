@@ -257,9 +257,10 @@ function ddExport_showSourceMap() {
 // ---------------------------------------------------------------------------
 
 function ddExport_computeVersion_(ss) {
+    var lastUpdated = DriveApp.getFileById(ss.getId()).getLastUpdated().getTime();
     return Utilities.computeDigest(
       Utilities.DigestAlgorithm.MD5,
-      ss.getId() + ':' + ss.getLastUpdated().getTime(),
+      ss.getId() + ':' + lastUpdated,
       Utilities.Charset.UTF_8
     ).map(function (b) { return ('0' + (b & 0xFF).toString(16)).slice(-2); }).join('');
 }
