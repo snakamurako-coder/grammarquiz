@@ -90,7 +90,9 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .result-review-item.result-item-correct { border-left-color: var(--c-success); }
 .result-review-item.result-item-wrong { border-left-color: var(--c-danger); }
 .result-review-item.result-item-unknown { border-left-color: var(--c-warn); }
-.result-review-head { display: flex; justify-content: space-between; margin-bottom: 6px; font-weight: bold; }
+.result-review-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-weight: bold; gap: 8px; }
+.result-review-head-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.result-review-mark-actions { display: flex; gap: 6px; }
 .result-review-no { color: var(--c-text-sub); }
 .result-review-status { font-size: 0.9em; }
 .result-item-correct .result-review-status { color: var(--c-success); }
@@ -101,19 +103,9 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .result-review-answer, .result-review-correct { font-size: 0.95em; margin-top: 4px; word-break: break-word; }
 .result-review-explanation { background: #fff8e1; border-left: 3px solid #ffb300; padding: 10px 12px; border-radius: 8px; margin-top: 8px; font-size: 0.88em; line-height: 1.55; color: var(--c-text); }
 .result-review-explanation .result-review-grammar-area { font-weight: bold; display: block; margin-bottom: 4px; color: var(--c-text-sub); font-size: 0.92em; }
-#result-vocab-sort { text-align: left; margin-bottom: 16px; }
-.result-vocab-sort-summary { font-size: 0.9em; font-weight: bold; color: #4a5568; margin: 0 0 10px; }
-.result-vocab-sort-item {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 10px 12px; margin-bottom: 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
-}
-.result-vocab-sort-label { flex: 1; min-width: 0; }
-.result-vocab-sort-word { font-weight: bold; color: #1e293b; word-break: break-word; }
-.result-vocab-sort-sub { display: block; font-size: 0.85em; color: #64748b; margin-top: 2px; word-break: break-word; }
-.result-vocab-sort-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .result-vocab-mark {
-  width: 44px; height: 44px; font-size: 20px; border-radius: 10px; border: 2px solid #e2e8f0;
-  background: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; font-size: 18px; border-radius: 8px; border: 2px solid #e2e8f0;
+  background: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
 }
 .result-vocab-mark.known.active { background: #f0fff4; border-color: #9ae6b4; }
 .result-vocab-mark.unknown.active { background: #fff5f5; border-color: #feb2b2; }
@@ -748,7 +740,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
 .key:active { background-color: #adb5bd; }
 .key.wide { max-width: 74px; font-size: 0.9em; background-color: #adb5bd; }
 .key.del { max-width: 52px; font-size: 0.78em; font-weight: bold; background-color: #eceff1; }
-.key.space { max-width: 260px; }
+.key.space { max-width: 150px; }
 .key.enter { max-width: 110px; background-color: var(--c-warn); color: white; font-weight: bold; }
 .key.activated { background-color: #333 !important; color: #fff; }
 
@@ -1273,7 +1265,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
       <div id="manage-settings-panel" style="display:none;">
         <div class="setting-section">
           <div class="section-title">読み上げ（TTS）</div>
-          <p style="font-size:0.9em;color:#666;margin-bottom:12px;">問題画面の英文わきの「📢」で読み上げます。端末のブラウザ音声（Web Speech API）を使います。</p>
+          <p style="font-size:0.9em;color:#666;margin-bottom:12px;">問題画面の「📢」・単語カードの「🔊」で共通の設定を使います。端末のブラウザ音声（Web Speech API）です。</p>
           <div class="form-group">
             <label>英語の種類</label>
             <select id="tts-locale-select">
@@ -1288,8 +1280,23 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
               <option value="male">男性</option>
             </select>
           </div>
+          <div class="form-group">
+            <label><input type="checkbox" id="tts-speech-en" checked> 英語を読み上げる（単語カードの自動再生など）</label>
+          </div>
+          <div class="form-group">
+            <label>英語の速度: <b id="tts-val-rate-en">1.0</b></label>
+            <input type="range" id="tts-rate-en" min="0.5" max="1.5" step="0.1" value="1.0" style="width:100%;">
+          </div>
+          <div class="form-group">
+            <label><input type="checkbox" id="tts-speech-ja" checked> 日本語を読み上げる（単語カードの自動再生など）</label>
+          </div>
+          <div class="form-group">
+            <label>日本語の速度: <b id="tts-val-rate-ja">1.0</b></label>
+            <input type="range" id="tts-rate-ja" min="0.5" max="1.5" step="0.1" value="1.0" style="width:100%;">
+          </div>
           <p id="tts-voice-status" style="font-size:0.85em;color:#555;margin-bottom:10px;">音声を準備しています...</p>
-          <button type="button" id="tts-preview-btn" class="btn-small">サンプルを再生</button>
+          <button type="button" id="tts-preview-btn" class="btn-small">英語サンプルを再生</button>
+          <button type="button" id="tts-preview-ja-btn" class="btn-small" style="margin-left:8px;">日本語サンプルを再生</button>
         </div>
         <div class="setting-section">
           <div class="section-title">音声認識（STT）</div>
@@ -1519,7 +1526,6 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
       <h2 id="result-score" style="font-size: 2em; color: #2196f3; margin-bottom: 20px;"></h2>
       <p id="result-details" style="font-size: 1.1em; color: #555; margin-bottom: 0;"></p>
     </div>
-    <div id="result-vocab-sort" class="setting-section" style="display: none;"></div>
     <div id="result-review-list" class="setting-section"></div>
     <button id="return-settings-btn" class="btn-primary">学習設定に戻る</button>
   </div>
@@ -1607,6 +1613,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         </div>
         <hr style="border:0;border-top:1px solid #edf2f7;">
         <div class="vocab-card-setting-group">
+          <p style="font-size:0.8em;color:#718096;margin:0 0 8px;">読み上げの音声・速度は詳細設定と共通です。</p>
           <div class="vocab-card-setting-row">
             <span class="vocab-card-setting-label">英語読み上げ:</span>
             <input type="checkbox" id="vc-cfg-speech-en" checked>
@@ -1771,29 +1778,76 @@ window.BackendSyncStatus = BackendSyncStatus;
 /** ブラウザ TTS（GitHub Pages 上の HTML だけで動作。サーバー不要） */
 const TtsModule = (() => {
   const STORAGE_KEY = 'digitaldrill_tts_settings';
-  const DEFAULTS = { locale: 'en-US', gender: 'female' };
-  const FEMALE_HINTS = ['female', 'woman', 'zira', 'aria', 'jenny', 'sonia', 'sara', 'susan', 'samantha', 'victoria', 'karen', 'moira', 'tessa', 'hazel', 'eva', 'linda', 'heather', 'catherine', 'michelle', 'amy', 'emma', 'libby', 'natasha', 'salli', 'ivy', 'joanna', 'kendra', 'kimberly', 'nicole', 'olivia', 'raveena', 'aditi'];
-  const MALE_HINTS = ['male', 'man', 'david', 'guy', 'ryan', 'george', 'daniel', 'mark', 'fred', 'james', 'thomas', 'ravi', 'aaron', 'brian', 'matthew', 'justin', 'joey', 'kevin', 'stephen', 'andrew'];
+  const VOCAB_CARD_SETTINGS_KEY = 'dd_vocab_card_settings';
+  const DEFAULTS = {
+    locale: 'en-US',
+    gender: 'female',
+    speechEn: true,
+    speechJa: true,
+    rateEn: 1.0,
+    rateJa: 1.0
+  };
+  const FEMALE_HINTS = ['female', 'woman', 'zira', 'aria', 'jenny', 'sonia', 'sara', 'susan', 'samantha', 'victoria', 'karen', 'moira', 'tessa', 'hazel', 'eva', 'linda', 'heather', 'catherine', 'michelle', 'amy', 'emma', 'libby', 'natasha', 'salli', 'ivy', 'joanna', 'kendra', 'kimberly', 'nicole', 'olivia', 'raveena', 'aditi', 'kyoko', 'haruka', 'nanami', 'sayaka', 'ayumi', 'mei'];
+  const MALE_HINTS = ['male', 'man', 'david', 'guy', 'ryan', 'george', 'daniel', 'mark', 'fred', 'james', 'thomas', 'ravi', 'aaron', 'brian', 'matthew', 'justin', 'joey', 'kevin', 'stephen', 'andrew', 'ichiro', 'otoya', 'keita'];
   let bound = false;
+
+  function clampRate_(v) {
+    const n = parseFloat(v);
+    if (!isFinite(n)) return DEFAULTS.rateEn;
+    return Math.min(1.5, Math.max(0.5, n));
+  }
+
+  function migrateFromVocabCard_(parsed) {
+    if (parsed._migratedFromVocabCard) return parsed;
+    try {
+      const raw = localStorage.getItem(VOCAB_CARD_SETTINGS_KEY);
+      const vc = raw ? JSON.parse(raw) : null;
+      if (vc && typeof vc === 'object') {
+        if (parsed.speechEn === undefined && vc.speechEn !== undefined) parsed.speechEn = !!vc.speechEn;
+        if (parsed.speechJa === undefined && vc.speechJa !== undefined) parsed.speechJa = !!vc.speechJa;
+        if (parsed.rateEn === undefined && vc.rateEn !== undefined) parsed.rateEn = clampRate_(vc.rateEn);
+        if (parsed.rateJa === undefined && vc.rateJa !== undefined) parsed.rateJa = clampRate_(vc.rateJa);
+      }
+    } catch (e) { /* ignore */ }
+    parsed._migratedFromVocabCard = true;
+    return parsed;
+  }
+
+  function normalizeSettings_(parsed) {
+    const src = migrateFromVocabCard_(parsed && typeof parsed === 'object' ? parsed : {});
+    return {
+      locale: src.locale === 'en-GB' ? 'en-GB' : 'en-US',
+      gender: src.gender === 'male' ? 'male' : 'female',
+      speechEn: src.speechEn !== false,
+      speechJa: src.speechJa !== false,
+      rateEn: clampRate_(src.rateEn != null ? src.rateEn : DEFAULTS.rateEn),
+      rateJa: clampRate_(src.rateJa != null ? src.rateJa : DEFAULTS.rateJa)
+    };
+  }
 
   function load() {
     try {
       const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-      return {
-        locale: parsed.locale === 'en-GB' ? 'en-GB' : 'en-US',
-        gender: parsed.gender === 'male' ? 'male' : 'female'
-      };
+      return normalizeSettings_(parsed);
     } catch (e) {
-      return { locale: DEFAULTS.locale, gender: DEFAULTS.gender };
+      return normalizeSettings_({});
     }
   }
 
   function save(next) {
-    const data = {
-      locale: next && next.locale === 'en-GB' ? 'en-GB' : 'en-US',
-      gender: next && next.gender === 'male' ? 'male' : 'female'
-    };
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
+    const current = load();
+    const data = normalizeSettings_(Object.assign({}, current, next || {}));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        locale: data.locale,
+        gender: data.gender,
+        speechEn: data.speechEn,
+        speechJa: data.speechJa,
+        rateEn: data.rateEn,
+        rateJa: data.rateJa,
+        _migratedFromVocabCard: true
+      }));
+    } catch (e) { /* ignore */ }
     refreshSettingsUi();
     return data;
   }
@@ -1836,10 +1890,15 @@ const TtsModule = (() => {
     return s;
   }
 
-  function pickVoice() {
+  function pickVoiceForLang(langCode) {
     const settings = load();
-    const want = normalizeLang(settings.locale);
-    const list = voices().filter(function (v) { return /^en(-|$)/i.test(normalizeLang(v.lang)); });
+    const norm = normalizeLang(langCode);
+    const isJa = norm.indexOf('ja') === 0;
+    const want = isJa ? 'ja-jp' : normalizeLang(settings.locale);
+    const list = voices().filter(function (v) {
+      const lang = normalizeLang(v.lang);
+      return isJa ? /^ja(-|$)/i.test(lang) : /^en(-|$)/i.test(lang);
+    });
     if (!list.length) return null;
     let best = null;
     let bestScore = -9999;
@@ -1854,6 +1913,14 @@ const TtsModule = (() => {
       }
     });
     return best;
+  }
+
+  function pickVoice() {
+    return pickVoiceForLang(load().locale);
+  }
+
+  function isJapaneseLang_(lang) {
+    return normalizeLang(lang).indexOf('ja') === 0;
   }
 
   function normalizeSpeakText(text) {
@@ -1877,23 +1944,47 @@ const TtsModule = (() => {
     }
     const utterText = normalizeSpeakText(text);
     if (!utterText) return;
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(utterText);
-    const voice = pickVoice();
-    const settings = load();
-    if (voice) {
-      u.voice = voice;
-      u.lang = voice.lang || settings.locale;
-    } else {
-      u.lang = settings.locale;
-    }
-    u.rate = 0.95;
-    u.pitch = 1;
-    document.querySelectorAll('.tts-btn').forEach(function (b) { b.classList.remove('speaking'); });
-    u.onend = function () {
+    document.querySelectorAll('.tts-btn').forEach(function (b) { b.classList.add('speaking'); });
+    speakText(utterText, load().locale, { force: true }).then(function () {
       document.querySelectorAll('.tts-btn').forEach(function (b) { b.classList.remove('speaking'); });
-    };
-    speechSynthesis.speak(u);
+    });
+  }
+
+  function speakText(text, lang, options) {
+    return new Promise(function (resolve) {
+      if (!supported()) {
+        resolve();
+        return;
+      }
+      const settings = load();
+      const opts = options || {};
+      const isJa = isJapaneseLang_(lang);
+      const force = !!opts.force;
+      if (!force) {
+        if (isJa && !settings.speechJa) { resolve(); return; }
+        if (!isJa && !settings.speechEn) { resolve(); return; }
+      }
+      const utterText = normalizeSpeakText(text);
+      if (!utterText) {
+        resolve();
+        return;
+      }
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(utterText);
+      const voice = pickVoiceForLang(isJa ? 'ja-JP' : settings.locale);
+      if (voice) {
+        u.voice = voice;
+        u.lang = voice.lang || (isJa ? 'ja-JP' : settings.locale);
+      } else {
+        u.lang = isJa ? 'ja-JP' : settings.locale;
+      }
+      u.rate = isJa ? settings.rateJa : settings.rateEn;
+      if (opts.rate != null) u.rate = clampRate_(opts.rate);
+      u.pitch = 1;
+      u.onend = function () { resolve(); };
+      u.onerror = function () { resolve(); };
+      speechSynthesis.speak(u);
+    });
   }
 
   function stop() {
@@ -1926,20 +2017,69 @@ const TtsModule = (() => {
     const settings = load();
     const localeEl = document.getElementById('tts-locale-select');
     const genderEl = document.getElementById('tts-gender-select');
+    const speechEnEl = document.getElementById('tts-speech-en');
+    const speechJaEl = document.getElementById('tts-speech-ja');
+    const rateEnEl = document.getElementById('tts-rate-en');
+    const rateJaEl = document.getElementById('tts-rate-ja');
+    const valRateEnEl = document.getElementById('tts-val-rate-en');
+    const valRateJaEl = document.getElementById('tts-val-rate-ja');
     const statusEl = document.getElementById('tts-voice-status');
     if (localeEl) localeEl.value = settings.locale;
     if (genderEl) genderEl.value = settings.gender;
+    if (speechEnEl) speechEnEl.checked = !!settings.speechEn;
+    if (speechJaEl) speechJaEl.checked = !!settings.speechJa;
+    if (rateEnEl) rateEnEl.value = String(settings.rateEn);
+    if (rateJaEl) rateJaEl.value = String(settings.rateJa);
+    if (valRateEnEl) valRateEnEl.textContent = settings.rateEn.toFixed(1);
+    if (valRateJaEl) valRateJaEl.textContent = settings.rateJa.toFixed(1);
+    syncVocabCardTtsForm_(settings);
     if (!statusEl) return;
     if (!supported()) {
       statusEl.textContent = 'このブラウザは Web Speech API に対応していません。';
       return;
     }
-    const voice = pickVoice();
-    if (voice) {
-      statusEl.textContent = '使用する音声: ' + voice.name + '（' + voice.lang + '）';
-    } else {
-      statusEl.textContent = '英語音声が見つかりません。端末の音声設定を確認してください。';
-    }
+    const enVoice = pickVoiceForLang(settings.locale);
+    const jaVoice = pickVoiceForLang('ja-JP');
+    const parts = [];
+    if (enVoice) parts.push('英語: ' + enVoice.name + '（' + enVoice.lang + '）');
+    else parts.push('英語音声が見つかりません');
+    if (jaVoice) parts.push('日本語: ' + jaVoice.name + '（' + jaVoice.lang + '）');
+    else parts.push('日本語音声が見つかりません');
+    statusEl.textContent = parts.join(' / ');
+  }
+
+  function syncVocabCardTtsForm_(settings) {
+    const s = settings || load();
+    const speechEnEl = document.getElementById('vc-cfg-speech-en');
+    const speechJaEl = document.getElementById('vc-cfg-speech-ja');
+    const rateEnEl = document.getElementById('vc-cfg-rate-en');
+    const rateJaEl = document.getElementById('vc-cfg-rate-ja');
+    const valRateEnEl = document.getElementById('vc-val-rate-en');
+    const valRateJaEl = document.getElementById('vc-val-rate-ja');
+    if (speechEnEl) speechEnEl.checked = !!s.speechEn;
+    if (speechJaEl) speechJaEl.checked = !!s.speechJa;
+    if (rateEnEl) rateEnEl.value = String(s.rateEn);
+    if (rateJaEl) rateJaEl.value = String(s.rateJa);
+    if (valRateEnEl) valRateEnEl.textContent = s.rateEn.toFixed(1);
+    if (valRateJaEl) valRateJaEl.textContent = s.rateJa.toFixed(1);
+  }
+
+  function readTtsForm_(prefix) {
+    const p = prefix || 'tts';
+    const speechEnEl = document.getElementById(p === 'vc' ? 'vc-cfg-speech-en' : 'tts-speech-en');
+    const speechJaEl = document.getElementById(p === 'vc' ? 'vc-cfg-speech-ja' : 'tts-speech-ja');
+    const rateEnEl = document.getElementById(p === 'vc' ? 'vc-cfg-rate-en' : 'tts-rate-en');
+    const rateJaEl = document.getElementById(p === 'vc' ? 'vc-cfg-rate-ja' : 'tts-rate-ja');
+    return {
+      speechEn: speechEnEl ? speechEnEl.checked : true,
+      speechJa: speechJaEl ? speechJaEl.checked : true,
+      rateEn: rateEnEl ? clampRate_(rateEnEl.value) : load().rateEn,
+      rateJa: rateJaEl ? clampRate_(rateJaEl.value) : load().rateJa
+    };
+  }
+
+  function previewJa() {
+    speakText('これは日本語のサンプルです。', 'ja-JP', { force: true });
   }
 
   function preview() {
@@ -1968,17 +2108,36 @@ const TtsModule = (() => {
     const localeEl = document.getElementById('tts-locale-select');
     const genderEl = document.getElementById('tts-gender-select');
     const previewBtn = document.getElementById('tts-preview-btn');
+    const previewJaBtn = document.getElementById('tts-preview-ja-btn');
+    const speechEnEl = document.getElementById('tts-speech-en');
+    const speechJaEl = document.getElementById('tts-speech-ja');
+    const rateEnEl = document.getElementById('tts-rate-en');
+    const rateJaEl = document.getElementById('tts-rate-ja');
     if (localeEl) {
       localeEl.addEventListener('change', function () {
-        save({ locale: localeEl.value, gender: load().gender });
+        save({ locale: localeEl.value });
       });
     }
     if (genderEl) {
       genderEl.addEventListener('change', function () {
-        save({ locale: load().locale, gender: genderEl.value });
+        save({ gender: genderEl.value });
       });
     }
+    function saveTtsForm_() {
+      save(readTtsForm_('tts'));
+    }
+    if (speechEnEl) speechEnEl.addEventListener('change', saveTtsForm_);
+    if (speechJaEl) speechJaEl.addEventListener('change', saveTtsForm_);
+    if (rateEnEl) {
+      rateEnEl.addEventListener('input', saveTtsForm_);
+      rateEnEl.addEventListener('change', saveTtsForm_);
+    }
+    if (rateJaEl) {
+      rateJaEl.addEventListener('input', saveTtsForm_);
+      rateJaEl.addEventListener('change', saveTtsForm_);
+    }
     if (previewBtn) previewBtn.addEventListener('click', preview);
+    if (previewJaBtn) previewJaBtn.addEventListener('click', previewJa);
     if (supported()) {
       speechSynthesis.addEventListener('voiceschanged', refreshSettingsUi);
       refreshSettingsUi();
@@ -1988,7 +2147,8 @@ const TtsModule = (() => {
   }
 
   return {
-    load, save, speak, stop, pickVoice, refreshTargetButtons, setResultSpeakText, refreshSettingsUi, bindUi, supported
+    load, save, speak, speakText, stop, pickVoice, pickVoiceForLang,
+    refreshTargetButtons, setResultSpeakText, refreshSettingsUi, syncVocabCardTtsForm_, readTtsForm_, bindUi, supported
   };
 })();
 window.TtsModule = TtsModule;
@@ -3640,15 +3800,15 @@ const KeyboardModule = (() => {
       ['!', '"', '&', "'", '(', ')', '-', '¥', 'Back'],
       ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
       ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
-      ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.'],
-      ['Shift', 'Space', 'Enter']
+      ['z', 'x', 'c', 'v', 'b', 'n', 'm', 'Back'],
+      ['Shift', 'Space', ',', '.', 'Enter']
     ],
     shifted: [
       ['!', '"', '&', "'", '(', ')', '-', '¥', 'Back'],
       ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
       ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
-      ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.'],
-      ['Shift', 'Space', 'Enter']
+      ['Z', 'X', 'C', 'V', 'B', 'N', 'M', 'Back'],
+      ['Shift', 'Space', ',', '.', 'Enter']
     ]
   };
 
@@ -8864,25 +9024,14 @@ function normalizeExplanationField_(value) {
   return text;
 }
 
-function collectVocabWordsFromSession_() {
-  const byId = {};
-  (currentQuestionDataList || []).forEach(function (q) {
-    if (!q || !q.wordId) return;
-    if (byId[q.wordId]) return;
-    let label = '';
-    let sub = '';
-    if (q.wordObj) {
-      vocabCanonicalizeWordObj(q.wordObj);
-      label = vocabNorm(q.wordObj['英単語・熟語の表現']);
-      const meanings = vocabGetMeanings(q.wordObj);
-      sub = meanings.length ? meanings[0].meaning : '';
-    } else {
-      label = q.word || q.japanese || getQuestionPrompt_(q);
-    }
-    if (!label || label === VOCAB_UNREGISTERED) label = String(q.wordId);
-    byId[q.wordId] = { wordId: q.wordId, label: label, sub: sub };
-  });
-  return Object.keys(byId).map(function (k) { return byId[k]; });
+function buildVocabResultMarkButtons_(wordId) {
+  const mark = vocabResultMarks_[wordId];
+  const safeId = escapeHtml_(wordId);
+  let html = '<div class="result-review-mark-actions">';
+  html += '<button type="button" class="result-vocab-mark unknown' + (mark === 'unknown' ? ' active' : '') + '" data-word-id="' + safeId + '" data-mark="unknown" title="まだ覚えていない">😫</button>';
+  html += '<button type="button" class="result-vocab-mark known' + (mark === 'known' ? ' active' : '') + '" data-word-id="' + safeId + '" data-mark="known" title="覚えている">👍</button>';
+  html += '</div>';
+  return html;
 }
 
 function applyVocabResultMark_(wordId, isKnown) {
@@ -8897,48 +9046,7 @@ function applyVocabResultMark_(wordId, isKnown) {
   }
   sessionPersistedToServer = false;
   BackendSyncStatus.refresh();
-  renderVocabResultWordSort_();
-}
-
-function renderVocabResultWordSort_() {
-  const container = document.getElementById('result-vocab-sort');
-  if (!container) return;
-  if (currentAppMode !== 'vocab') {
-    container.style.display = 'none';
-    container.innerHTML = '';
-    return;
-  }
-  const words = collectVocabWordsFromSession_();
-  if (!words.length) {
-    container.style.display = 'none';
-    container.innerHTML = '';
-    return;
-  }
-  let known = 0;
-  let unknown = 0;
-  words.forEach(function (w) {
-    const m = vocabResultMarks_[w.wordId];
-    if (m === 'known') known++;
-    else if (m === 'unknown') unknown++;
-  });
-  let html = '<div class="section-title">単語の仕分け</div>';
-  html += '<p class="filter-axis-hint" style="margin-top:0;">👍 覚えている / 😫 まだ難しい、で学習状態を登録できます。</p>';
-  html += '<p class="result-vocab-sort-summary">👍 ' + known + ' | 😫 ' + unknown + ' / ' + words.length + ' 語</p>';
-  words.forEach(function (w) {
-    const mark = vocabResultMarks_[w.wordId];
-    const safeId = escapeHtml_(w.wordId);
-    html += '<div class="result-vocab-sort-item">';
-    html += '<div class="result-vocab-sort-label">';
-    html += '<span class="result-vocab-sort-word">' + escapeHtml_(w.label) + '</span>';
-    if (w.sub) html += '<span class="result-vocab-sort-sub">' + escapeHtml_(w.sub) + '</span>';
-    html += '</div>';
-    html += '<div class="result-vocab-sort-actions">';
-    html += '<button type="button" class="result-vocab-mark unknown' + (mark === 'unknown' ? ' active' : '') + '" data-word-id="' + safeId + '" data-mark="unknown" title="まだ覚えていない">😫</button>';
-    html += '<button type="button" class="result-vocab-mark known' + (mark === 'known' ? ' active' : '') + '" data-word-id="' + safeId + '" data-mark="known" title="覚えている">👍</button>';
-    html += '</div></div>';
-  });
-  container.innerHTML = html;
-  container.style.display = 'block';
+  renderResultReviewList_();
 }
 
 function renderResultReviewList_() {
@@ -8949,6 +9057,9 @@ function renderResultReviewList_() {
     return;
   }
   let html = '<div class="section-title">出題と回答</div>';
+  if (currentAppMode === 'vocab') {
+    html += '<p class="filter-axis-hint" style="margin-top:0;">各語の 👍 / 😫 で学習状態を登録できます。</p>';
+  }
   sessionAnswerLog.forEach(function (item, i) {
     const statusClass = item.isCorrect
       ? 'result-item-correct'
@@ -8956,7 +9067,12 @@ function renderResultReviewList_() {
     const statusLabel = item.isCorrect ? '正解' : (item.isUnknown ? 'わからない' : '不正解');
     html += '<div class="result-review-item ' + statusClass + '">';
     html += '<div class="result-review-head"><span class="result-review-no">Q' + (i + 1) + '</span>';
-    html += '<span class="result-review-status">' + statusLabel + '</span></div>';
+    html += '<div class="result-review-head-right">';
+    html += '<span class="result-review-status">' + statusLabel + '</span>';
+    if (currentAppMode === 'vocab' && item.wordId) {
+      html += buildVocabResultMarkButtons_(item.wordId);
+    }
+    html += '</div></div>';
     html += '<div class="result-review-prompt">' + escapeHtml_(item.prompt);
     if ((item.format === 'vocab-enja' || item.format === 'W4') && item.prompt) {
       html += ' <button type="button" class="tts-btn" data-tts-text="' + escapeHtml_(String(item.prompt).replace(/（.*?）/g, '')) + '" aria-label="読み上げ">📢</button>';
@@ -9022,6 +9138,7 @@ window.onQuestionCompleted = (isCorrect, meta) => {
     correctAnswer: meta.correctAnswer || getDefaultCorrectAnswer_(currentQ),
     isCorrect: !!isCorrect,
     isUnknown: !!meta.isUnknown,
+    wordId: currentQ && currentQ.wordId ? currentQ.wordId : '',
     grammarArea: normalizeExplanationField_(currentQ && currentQ.grammarArea),
     explanation: normalizeExplanationField_(currentQ && currentQ.explanation)
   });
@@ -9207,7 +9324,6 @@ function showResultScreen() {
 
   document.getElementById('result-score').textContent = `スコア: ${currentScore} / ${totalQuestionsCount}`;
   renderResultReviewList_();
-  renderVocabResultWordSort_();
 
   const detailsEl = document.getElementById('result-details');
   if (!AuthGateService.isValid()) {
@@ -9245,11 +9361,12 @@ function showResultScreen() {
 }
 
 (function bindVocabResultSortUi_() {
-  const container = document.getElementById('result-vocab-sort');
+  const container = document.getElementById('result-review-list');
   if (!container) return;
   container.addEventListener('click', function (e) {
     const btn = e.target.closest('.result-vocab-mark');
     if (!btn) return;
+    e.preventDefault();
     const wordId = btn.getAttribute('data-word-id');
     const mark = btn.getAttribute('data-mark');
     if (!wordId || !mark) return;

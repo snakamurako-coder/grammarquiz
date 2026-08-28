@@ -10,10 +10,6 @@ const VocabCardModule = (() => {
     contentType: 'word',
     firstLang: 'en',
     shuffle: false,
-    speechEn: true,
-    rateEn: 1.0,
-    speechJa: true,
-    rateJa: 1.0,
     intervalFrontBack: 1.0,
     intervalNextWord: 1.0
   };
@@ -32,8 +28,6 @@ const VocabCardModule = (() => {
   let keyHandler = null;
   let settings = Object.assign({}, DEFAULT_SETTINGS);
   let resultsCommitted = false;
-
-  const synth = window.speechSynthesis;
 
   function esc_(s) {
     return String(s || '')
@@ -276,24 +270,14 @@ const VocabCardModule = (() => {
     return div.textContent || div.innerText || '';
   }
 
-  function speakPromise_(htmlText, lang, rate) {
+  function speakPromise_(htmlText, lang) {
     return new Promise(function (resolve) {
-      if ((lang === 'en-US' && !settings.speechEn) || (lang === 'ja-JP' && !settings.speechJa)) {
+      if (!window.TtsModule || typeof window.TtsModule.speakText !== 'function') {
         resolve();
         return;
       }
-      if (window.TtsModule && typeof window.TtsModule.speakText === 'function') {
-        window.TtsModule.speakText(stripTags_(htmlText), lang === 'ja-JP' ? 'ja' : 'en').then(resolve).catch(resolve);
-        return;
-      }
-      if (!synth) { resolve(); return; }
-      synth.cancel();
-      const u = new SpeechSynthesisUtterance(stripTags_(htmlText));
-      u.lang = lang;
-      u.rate = rate;
-      u.onend = function () { resolve(); };
-      u.onerror = function () { resolve(); };
-      synth.speak(u);
+      const langCode = lang === 'ja-JP' ? 'ja-JP' : (window.TtsModule.load().locale || 'en-US');
+      window.TtsModule.speakText(stripTags_(htmlText), langCode).then(resolve).catch(resolve);
     });
   }
 
@@ -314,12 +298,12 @@ const VocabCardModule = (() => {
     const isEnOnFront = settings.firstLang === 'en';
     if (!isBack) {
       return isEnOnFront
-        ? speakPromise_(content.en, 'en-US', settings.rateEn)
-        : speakPromise_(content.ja, 'ja-JP', settings.rateJa);
+        ? speakPromise_(content.en, 'en-US')
+        : speakPromise_(content.ja, 'ja-JP');
     }
     return isEnOnFront
-      ? speakPromise_(content.ja, 'ja-JP', settings.rateJa)
-      : speakPromise_(content.en, 'en-US', settings.rateEn);
+      ? speakPromise_(content.ja, 'ja-JP')
+      : speakPromise_(content.en, 'en-US');
   }
 
   function flipCard_() {
@@ -483,7 +467,6 @@ const VocabCardModule = (() => {
   function stopAutoPlay_() {
     isAutoPlaying = false;
     autoPlayToken++;
-    if (synth) synth.cancel();
     if (window.TtsModule && typeof window.TtsModule.stop === 'function') window.TtsModule.stop();
     const btn = el_('vc-auto-play-btn');
     if (btn) {
@@ -536,14 +519,11 @@ const VocabCardModule = (() => {
     if (el_('vc-cfg-content-type')) el_('vc-cfg-content-type').value = settings.contentType;
     if (el_('vc-cfg-first-lang')) el_('vc-cfg-first-lang').value = settings.firstLang;
     if (el_('vc-cfg-shuffle')) el_('vc-cfg-shuffle').checked = !!settings.shuffle;
-    if (el_('vc-cfg-speech-en')) el_('vc-cfg-speech-en').checked = !!settings.speechEn;
-    if (el_('vc-cfg-rate-en')) el_('vc-cfg-rate-en').value = settings.rateEn;
-    if (el_('vc-cfg-speech-ja')) el_('vc-cfg-speech-ja').checked = !!settings.speechJa;
-    if (el_('vc-cfg-rate-ja')) el_('vc-cfg-rate-ja').value = settings.rateJa;
+    if (window.TtsModule && typeof window.TtsModule.syncVocabCardTtsForm_ === 'function') {
+      window.TtsModule.syncVocabCardTtsForm_();
+    }
     if (el_('vc-cfg-interval-fb')) el_('vc-cfg-interval-fb').value = String(settings.intervalFrontBack);
     if (el_('vc-cfg-interval-nw')) el_('vc-cfg-interval-nw').value = String(settings.intervalNextWord);
-    if (el_('vc-val-rate-en')) el_('vc-val-rate-en').textContent = Number(settings.rateEn).toFixed(1);
-    if (el_('vc-val-rate-ja')) el_('vc-val-rate-ja').textContent = Number(settings.rateJa).toFixed(1);
   }
 
   function updateSettingsFromForm_() {
@@ -551,14 +531,11 @@ const VocabCardModule = (() => {
     if (settings.contentType !== newType) setContentType_(newType);
     settings.firstLang = el_('vc-cfg-first-lang').value;
     const newShuffle = el_('vc-cfg-shuffle').checked;
-    settings.speechEn = el_('vc-cfg-speech-en').checked;
-    settings.rateEn = parseFloat(el_('vc-cfg-rate-en').value) || 1;
-    settings.speechJa = el_('vc-cfg-speech-ja').checked;
-    settings.rateJa = parseFloat(el_('vc-cfg-rate-ja').value) || 1;
+    if (window.TtsModule && typeof window.TtsModule.save === 'function' && typeof window.TtsModule.readTtsForm_ === 'function') {
+      window.TtsModule.save(window.TtsModule.readTtsForm_('vc'));
+    }
     settings.intervalFrontBack = parseFloat(el_('vc-cfg-interval-fb').value) || 1;
     settings.intervalNextWord = parseFloat(el_('vc-cfg-interval-nw').value) || 1;
-    if (el_('vc-val-rate-en')) el_('vc-val-rate-en').textContent = settings.rateEn.toFixed(1);
-    if (el_('vc-val-rate-ja')) el_('vc-val-rate-ja').textContent = settings.rateJa.toFixed(1);
     writeSettings_();
     if (settings.shuffle !== newShuffle) {
       settings.shuffle = newShuffle;
