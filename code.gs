@@ -199,7 +199,7 @@ function doGet(e) {
     return renderAccessDeniedPage_(access.email, access.reason);
   }
 
-  if (!isAdminEmail_(access.email)) {
+  if (!isAssignmentAdminEmail_(access.email)) {
     const pagesUrl = getPagesUrl_();
     return HtmlService.createHtmlOutput(
       '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
@@ -207,7 +207,8 @@ function doGet(e) {
       '<h1>' + APP_NAME + '</h1>' +
       '<p>学習者の方は GitHub Pages の学習画面をご利用ください。</p>' +
       '<p><a href="' + pagesUrl + '">学習画面を開く</a></p>' +
-      '<p style="font-size:.85em;color:#666;margin-top:24px;"><a href="' + ScriptApp.getService().getUrl() + '?action=auth">ログイン（Pagesへ）</a></p>' +
+      '<p style="font-size:.85em;color:#666;margin-top:24px;">管理画面は whitelist の class 列が <code>admin</code> のアカウントのみ利用できます。</p>' +
+      '<p style="font-size:.85em;color:#666;margin-top:8px;"><a href="' + ScriptApp.getService().getUrl() + '?action=auth">ログイン（Pagesへ）</a></p>' +
       '</body></html>'
     ).setTitle(APP_NAME).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
@@ -500,6 +501,12 @@ function doPost(e) {
     } else if (action === "submitFormSummary") {
       syncWhitelistCacheIfStale_();
       return sendResponse(apiSubmitFormSummary_(requestData));
+    } else if (action === 'listMyAssignments' || action === 'getAssignment'
+        || action === 'startAssignmentAttempt' || action === 'submitAssignmentAttempt'
+        || action === 'saveHomeworkProgress' || action === 'adminListAssignments'
+        || action === 'adminUpsertAssignment' || action === 'adminListSubmissions') {
+      syncWhitelistCacheIfStale_();
+      return sendResponse(handleAssignmentApi_(action, requestData));
     } else {
       return sendResponse({ status: "error", message: "無効なactionです: " + action });
     }
@@ -746,7 +753,7 @@ function getWhitelistUserProfile_(email) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return null;
   if (isAdminEmail_(normalized)) {
-    return { account: normalized, name: '管理者', grade: '', class: '', role: 'admin' };
+    return { account: normalized, name: '管理者', grade: '', class: 'admin', role: 'admin' };
   }
   const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
   if (!spreadId) return { account: normalized, name: '', grade: '', class: '' };
@@ -763,6 +770,9 @@ function getWhitelistUserProfile_(email) {
         for (let j = 0; j < headers.length; j++) {
           if (headers[j]) user[headers[j]] = data[i][j];
         }
+        if (String(user.class || '').trim().toLowerCase() === 'admin') {
+          user.role = 'admin';
+        }
         return user;
       }
     }
@@ -770,6 +780,25 @@ function getWhitelistUserProfile_(email) {
     // GAS① 実行文脈など
   }
   return { account: normalized, name: '', grade: '', class: '' };
+}
+
+/**
+ * 宿題・小テスト管理権限。
+ * whitelist の class=admin、または Script Properties の ADMIN_EMAIL。
+ */
+function isAssignmentAdminUser_(user) {
+  if (!user) return false;
+  if (String(user.role || '').toLowerCase() === 'admin') return true;
+  if (String(user.class || '').trim().toLowerCase() === 'admin') return true;
+  const account = String(user.account || user.email || '').trim().toLowerCase();
+  return !!account && isAdminEmail_(account);
+}
+
+function isAssignmentAdminEmail_(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return false;
+  if (isAdminEmail_(normalized)) return true;
+  return isAssignmentAdminUser_(getWhitelistUserProfile_(normalized));
 }
 
 /** 認証トークンを発行して CacheService に保存 */
@@ -1194,6 +1223,8 @@ function ensureAppBookSheets_(ss) {
     whitelist.appendRow(['example@example.com', 'サンプル太郎', '1', 'A']);
     whitelist.getRange(1, 1, 1, 4).setFontWeight('bold');
   }
+
+  ensureAssignmentSheets_(ss);
 
   // 作成直後の「シート1」が残っていれば削除
   const leftover = ss.getSheetByName('シート1');
@@ -2111,8 +2142,8 @@ function normalizeFormResponseRow_(headers, row) {
 function apiAdminGetSessionSummaries(limit) {
   try {
     const access = checkDashboardAccess_();
-    if (!access.allowed || !isAdminEmail_(access.email)) {
-      return { status: 'error', message: '管理者権限が必要です' };
+    if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
+      return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
     }
     const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
     const ss = SpreadsheetApp.openById(spreadId);
@@ -2135,8 +2166,8 @@ function apiAdminGetSessionSummaries(limit) {
 function apiAdminGetWhitelist() {
   try {
     const access = checkDashboardAccess_();
-    if (!access.allowed || !isAdminEmail_(access.email)) {
-      return { status: 'error', message: '管理者権限が必要です' };
+    if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
+      return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
     }
     const emails = readWhitelistEmailsFromSheet_();
     const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
@@ -2155,6 +2186,490 @@ function apiAdminGetWhitelist() {
   } catch (e) {
     return { status: 'error', message: e.toString() };
   }
+}
+
+// =========================================================
+// 宿題・小テスト（assignments / assignment_submissions）
+// =========================================================
+
+const ASSIGNMENT_HEADERS = [
+  'Assignment_ID', 'Title', 'Kind', 'Window_Start', 'Window_End', 'Deadline',
+  'Time_Limit_Sec', 'Max_Attempts', 'Pass_Score', 'Pass_Mode', 'Weakness_Review',
+  'Target_Class', 'Sections_JSON', 'Active', 'Created_By', 'Updated_At'
+];
+
+const SUBMISSION_HEADERS = [
+  'Submission_ID', 'Assignment_ID', 'Account', 'Attempt_No', 'Status',
+  'Score', 'Correct', 'Total', 'Points', 'Points_Max', 'Duration_Sec', 'Timed_Out',
+  'Progress_JSON', 'Detail_JSON', 'Submitted_At'
+];
+
+function ensureAssignmentSheets_(ss) {
+  ensureSheetWithHeaders_(ss, 'assignments', ASSIGNMENT_HEADERS);
+  ensureSheetWithHeaders_(ss, 'assignment_submissions', SUBMISSION_HEADERS);
+}
+
+function ensureSheetWithHeaders_(ss, name, headers) {
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    sheet.appendRow(headers);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+    return sheet;
+  }
+  if (sheet.getLastRow() === 0 || String(sheet.getRange(1, 1).getValue() || '') === '') {
+    sheet.clear();
+    sheet.appendRow(headers);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+  }
+  return sheet;
+}
+
+function openAppSpreadsheet_() {
+  const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
+  if (!spreadId) throw new Error('SPREADSHEET_ID が未設定です');
+  const ss = SpreadsheetApp.openById(spreadId);
+  ensureAssignmentSheets_(ss);
+  return ss;
+}
+
+function sheetRowsToObjects_(sheet) {
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
+  const headers = data[0];
+  const rows = [];
+  for (let i = 1; i < data.length; i++) {
+    const obj = { _row: i + 1 };
+    for (let j = 0; j < headers.length; j++) {
+      if (headers[j]) obj[headers[j]] = data[i][j];
+    }
+    rows.push(obj);
+  }
+  return rows;
+}
+
+function parseSectionsJson_(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.slice(0, 4);
+  try {
+    const parsed = JSON.parse(String(raw));
+    return Array.isArray(parsed) ? parsed.slice(0, 4) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function normalizeAssignmentRow_(row) {
+  return {
+    Assignment_ID: String(row.Assignment_ID || ''),
+    Title: String(row.Title || ''),
+    Kind: String(row.Kind || 'homework') === 'quiz' ? 'quiz' : 'homework',
+    Window_Start: String(row.Window_Start || ''),
+    Window_End: String(row.Window_End || ''),
+    Deadline: String(row.Deadline || ''),
+    Time_Limit_Sec: Math.max(0, parseInt(row.Time_Limit_Sec, 10) || 0),
+    Max_Attempts: Math.max(0, parseInt(row.Max_Attempts, 10) || 0),
+    Pass_Score: Math.max(0, parseInt(row.Pass_Score, 10) || 0),
+    Pass_Mode: String(row.Pass_Mode || 'rate') === 'points' ? 'points' : 'rate',
+    Weakness_Review: String(row.Weakness_Review || '0') === '1' || row.Weakness_Review === true || row.Weakness_Review === 1 ? 1 : 0,
+    Target_Class: String(row.Target_Class || ''),
+    Sections: parseSectionsJson_(row.Sections_JSON),
+    Sections_JSON: typeof row.Sections_JSON === 'string'
+      ? row.Sections_JSON
+      : JSON.stringify(parseSectionsJson_(row.Sections_JSON)),
+    Active: String(row.Active || '0') === '1' || row.Active === true || row.Active === 1 ? 1 : 0,
+    Created_By: String(row.Created_By || ''),
+    Updated_At: String(row.Updated_At || '')
+  };
+}
+
+function newId_(prefix) {
+  return prefix + '_' + Utilities.getUuid().replace(/-/g, '').slice(0, 16);
+}
+
+function parseLooseDate_(value) {
+  if (!value) return null;
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    return value.getTime();
+  }
+  const s = String(value).trim();
+  if (!s) return null;
+  const t = Date.parse(s);
+  return isNaN(t) ? null : t;
+}
+
+function isAssignmentInWindow_(asg, nowMs) {
+  const start = parseLooseDate_(asg.Window_Start);
+  const end = parseLooseDate_(asg.Window_End);
+  const deadline = parseLooseDate_(asg.Deadline);
+  if (start != null && nowMs < start) return false;
+  if (end != null && nowMs > end) return false;
+  if (deadline != null && nowMs > deadline) return false;
+  return true;
+}
+
+function isTargetClassMatch_(targetClass, userClass) {
+  const raw = String(targetClass || '').trim();
+  if (!raw) return true;
+  const user = String(userClass || '').trim().toLowerCase();
+  return raw.split(/[,、]/).map(function (s) {
+    return String(s || '').trim().toLowerCase();
+  }).filter(Boolean).indexOf(user) >= 0;
+}
+
+function requireAssignmentAdminFromRequest_(requestData) {
+  const authReq = requireAuthToken_(requestData);
+  if (authReq.ok) {
+    if (!isAssignmentAdminUser_(authReq.auth.user) && !isAssignmentAdminEmail_(authReq.auth.email)) {
+      return { ok: false, error: '管理者権限が必要です（whitelist の class=admin）' };
+    }
+    return { ok: true, email: authReq.auth.email, user: authReq.auth.user };
+  }
+  // GAS① dashboard（ActiveUser）
+  const access = checkDashboardAccess_();
+  if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
+    return { ok: false, error: authReq.error || '管理者権限が必要です（whitelist の class=admin）' };
+  }
+  return {
+    ok: true,
+    email: access.email,
+    user: getWhitelistUserProfile_(access.email)
+  };
+}
+
+function handleAssignmentApi_(action, requestData) {
+  try {
+    if (action === 'adminListAssignments') return apiAdminListAssignments_(requestData);
+    if (action === 'adminUpsertAssignment') return apiAdminUpsertAssignment_(requestData);
+    if (action === 'adminListSubmissions') return apiAdminListSubmissions_(requestData);
+    if (action === 'listMyAssignments') return apiListMyAssignments_(requestData);
+    if (action === 'getAssignment') return apiGetAssignment_(requestData);
+    if (action === 'startAssignmentAttempt') return apiStartAssignmentAttempt_(requestData);
+    if (action === 'submitAssignmentAttempt') return apiSubmitAssignmentAttempt_(requestData);
+    if (action === 'saveHomeworkProgress') return apiSaveHomeworkProgress_(requestData);
+    return { status: 'error', message: '未知の課題API: ' + action };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiAdminListAssignments_(requestData) {
+  const admin = requireAssignmentAdminFromRequest_(requestData || {});
+  if (!admin.ok) return { status: 'error', message: admin.error };
+  const ss = openAppSpreadsheet_();
+  const rows = sheetRowsToObjects_(ss.getSheetByName('assignments')).map(normalizeAssignmentRow_);
+  rows.sort(function (a, b) {
+    return String(b.Updated_At).localeCompare(String(a.Updated_At));
+  });
+  return { status: 'success', data: rows };
+}
+
+function apiAdminUpsertAssignment_(requestData) {
+  const admin = requireAssignmentAdminFromRequest_(requestData || {});
+  if (!admin.ok) return { status: 'error', message: admin.error };
+  const payload = requestData.assignment || requestData;
+  const title = String(payload.Title || '').trim();
+  if (!title) return { status: 'error', message: '課題名（Title）は必須です' };
+  const sections = parseSectionsJson_(payload.Sections || payload.Sections_JSON);
+  if (!sections.length) return { status: 'error', message: 'セクションを1つ以上指定してください' };
+  if (sections.length > 4) return { status: 'error', message: 'セクションは最大4つです' };
+
+  const ss = openAppSpreadsheet_();
+  const sheet = ss.getSheetByName('assignments');
+  const rows = sheetRowsToObjects_(sheet);
+  let id = String(payload.Assignment_ID || '').trim();
+  let existing = null;
+  if (id) {
+    for (let i = 0; i < rows.length; i++) {
+      if (String(rows[i].Assignment_ID) === id) {
+        existing = rows[i];
+        break;
+      }
+    }
+  } else {
+    id = newId_('asg');
+  }
+
+  const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+  const values = [
+    id,
+    title,
+    String(payload.Kind || 'homework') === 'quiz' ? 'quiz' : 'homework',
+    String(payload.Window_Start || ''),
+    String(payload.Window_End || ''),
+    String(payload.Deadline || ''),
+    Math.max(0, parseInt(payload.Time_Limit_Sec, 10) || 0),
+    Math.max(0, parseInt(payload.Max_Attempts, 10) || 0),
+    Math.max(0, parseInt(payload.Pass_Score, 10) || 0),
+    String(payload.Pass_Mode || 'rate') === 'points' ? 'points' : 'rate',
+    (String(payload.Weakness_Review || '0') === '1' || payload.Weakness_Review === true || payload.Weakness_Review === 1) ? 1 : 0,
+    String(payload.Target_Class || ''),
+    JSON.stringify(sections),
+    (String(payload.Active || '1') === '1' || payload.Active === true || payload.Active === 1) ? 1 : 0,
+    existing ? String(existing.Created_By || admin.email) : admin.email,
+    now
+  ];
+
+  if (existing) {
+    sheet.getRange(existing._row, 1, 1, ASSIGNMENT_HEADERS.length).setValues([values]);
+  } else {
+    sheet.appendRow(values);
+  }
+  return { status: 'success', data: normalizeAssignmentRow_({
+    Assignment_ID: values[0], Title: values[1], Kind: values[2], Window_Start: values[3],
+    Window_End: values[4], Deadline: values[5], Time_Limit_Sec: values[6], Max_Attempts: values[7],
+    Pass_Score: values[8], Pass_Mode: values[9], Weakness_Review: values[10], Target_Class: values[11],
+    Sections_JSON: values[12], Active: values[13], Created_By: values[14], Updated_At: values[15]
+  }) };
+}
+
+function apiAdminListSubmissions_(requestData) {
+  const admin = requireAssignmentAdminFromRequest_(requestData || {});
+  if (!admin.ok) return { status: 'error', message: admin.error };
+  const assignmentId = String((requestData && requestData.assignmentId) || '').trim();
+  const ss = openAppSpreadsheet_();
+  let rows = sheetRowsToObjects_(ss.getSheetByName('assignment_submissions'));
+  if (assignmentId) {
+    rows = rows.filter(function (r) { return String(r.Assignment_ID) === assignmentId; });
+  }
+  rows.sort(function (a, b) {
+    return String(b.Submitted_At || '').localeCompare(String(a.Submitted_At || ''));
+  });
+  const limit = Math.min(500, Math.max(1, parseInt(requestData && requestData.limit, 10) || 200));
+  return { status: 'success', data: rows.slice(0, limit) };
+}
+
+function apiListMyAssignments_(requestData) {
+  const authReq = requireAuthToken_(requestData || {});
+  if (!authReq.ok) return { status: 'error', message: authReq.error };
+  const user = authReq.auth.user || {};
+  const account = String(authReq.auth.email || user.account || '').toLowerCase();
+  const ss = openAppSpreadsheet_();
+  const now = Date.now();
+  const assignments = sheetRowsToObjects_(ss.getSheetByName('assignments'))
+    .map(normalizeAssignmentRow_)
+    .filter(function (a) {
+      return a.Active === 1
+        && isAssignmentInWindow_(a, now)
+        && isTargetClassMatch_(a.Target_Class, user.class);
+    });
+  const subs = sheetRowsToObjects_(ss.getSheetByName('assignment_submissions'))
+    .filter(function (s) { return String(s.Account || '').toLowerCase() === account; });
+  const data = assignments.map(function (a) {
+    const mine = subs.filter(function (s) { return String(s.Assignment_ID) === a.Assignment_ID; });
+    const attempts = mine.length;
+    const best = mine.reduce(function (acc, s) {
+      const score = parseInt(s.Score, 10);
+      if (isNaN(score)) return acc;
+      if (!acc || score > parseInt(acc.Score, 10)) return s;
+      return acc;
+    }, null);
+    const latest = mine.slice().sort(function (x, y) {
+      return String(y.Submitted_At || '').localeCompare(String(x.Submitted_At || ''));
+    })[0] || null;
+    return {
+      assignment: a,
+      attempts: attempts,
+      latestSubmission: latest,
+      bestSubmission: best,
+      remainingAttempts: a.Max_Attempts > 0 ? Math.max(0, a.Max_Attempts - attempts) : null
+    };
+  });
+  return { status: 'success', data: data };
+}
+
+function apiGetAssignment_(requestData) {
+  const authReq = requireAuthToken_(requestData || {});
+  if (!authReq.ok) return { status: 'error', message: authReq.error };
+  const id = String(requestData.assignmentId || '').trim();
+  if (!id) return { status: 'error', message: 'assignmentId が必要です' };
+  const ss = openAppSpreadsheet_();
+  const rows = sheetRowsToObjects_(ss.getSheetByName('assignments'));
+  for (let i = 0; i < rows.length; i++) {
+    if (String(rows[i].Assignment_ID) === id) {
+      return { status: 'success', data: normalizeAssignmentRow_(rows[i]) };
+    }
+  }
+  return { status: 'error', message: '課題が見つかりません' };
+}
+
+function countAttempts_(sheet, assignmentId, account) {
+  const rows = sheetRowsToObjects_(sheet);
+  let n = 0;
+  for (let i = 0; i < rows.length; i++) {
+    if (String(rows[i].Assignment_ID) === assignmentId
+        && String(rows[i].Account || '').toLowerCase() === account) n++;
+  }
+  return n;
+}
+
+function apiStartAssignmentAttempt_(requestData) {
+  const authReq = requireAuthToken_(requestData || {});
+  if (!authReq.ok) return { status: 'error', message: authReq.error };
+  const id = String(requestData.assignmentId || '').trim();
+  if (!id) return { status: 'error', message: 'assignmentId が必要です' };
+  const user = authReq.auth.user || {};
+  const account = String(authReq.auth.email || user.account || '').toLowerCase();
+  const ss = openAppSpreadsheet_();
+  const asgSheet = ss.getSheetByName('assignments');
+  const asgRows = sheetRowsToObjects_(asgSheet);
+  let asg = null;
+  for (let i = 0; i < asgRows.length; i++) {
+    if (String(asgRows[i].Assignment_ID) === id) {
+      asg = normalizeAssignmentRow_(asgRows[i]);
+      break;
+    }
+  }
+  if (!asg || asg.Active !== 1) return { status: 'error', message: '課題が無効または見つかりません' };
+  if (!isAssignmentInWindow_(asg, Date.now())) return { status: 'error', message: '取り組める期間外です' };
+  if (!isTargetClassMatch_(asg.Target_Class, user.class)) {
+    return { status: 'error', message: 'この課題の対象クラスではありません' };
+  }
+  const subSheet = ss.getSheetByName('assignment_submissions');
+  const attempts = countAttempts_(subSheet, id, account);
+  if (asg.Max_Attempts > 0 && attempts >= asg.Max_Attempts) {
+    return { status: 'error', message: '挑戦回数の上限に達しています' };
+  }
+  const submissionId = newId_('sub');
+  const attemptNo = attempts + 1;
+  const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+  subSheet.appendRow([
+    submissionId, id, account, attemptNo, 'in_progress',
+    '', '', '', '', '', '', 0,
+    JSON.stringify(requestData.progress || {}),
+    JSON.stringify({ phase: 'start' }),
+    now
+  ]);
+  return {
+    status: 'success',
+    data: {
+      submissionId: submissionId,
+      attemptNo: attemptNo,
+      assignment: asg,
+      startedAt: now,
+      timeLimitSec: asg.Time_Limit_Sec
+    }
+  };
+}
+
+function apiSaveHomeworkProgress_(requestData) {
+  const authReq = requireAuthToken_(requestData || {});
+  if (!authReq.ok) return { status: 'error', message: authReq.error };
+  const submissionId = String(requestData.submissionId || '').trim();
+  if (!submissionId) return { status: 'error', message: 'submissionId が必要です' };
+  const account = String(authReq.auth.email || '').toLowerCase();
+  const ss = openAppSpreadsheet_();
+  const sheet = ss.getSheetByName('assignment_submissions');
+  const rows = sheetRowsToObjects_(sheet);
+  for (let i = 0; i < rows.length; i++) {
+    if (String(rows[i].Submission_ID) === submissionId
+        && String(rows[i].Account || '').toLowerCase() === account) {
+      if (String(rows[i].Status) !== 'in_progress') {
+        return { status: 'error', message: 'この提出は既に完了しています' };
+      }
+      const progressCol = SUBMISSION_HEADERS.indexOf('Progress_JSON') + 1;
+      sheet.getRange(rows[i]._row, progressCol).setValue(JSON.stringify(requestData.progress || {}));
+      return { status: 'success' };
+    }
+  }
+  return { status: 'error', message: '提出レコードが見つかりません' };
+}
+
+function apiSubmitAssignmentAttempt_(requestData) {
+  const authReq = requireAuthToken_(requestData || {});
+  if (!authReq.ok) return { status: 'error', message: authReq.error };
+  const submissionId = String(requestData.submissionId || '').trim();
+  if (!submissionId) return { status: 'error', message: 'submissionId が必要です' };
+  const account = String(authReq.auth.email || '').toLowerCase();
+  const ss = openAppSpreadsheet_();
+  const sheet = ss.getSheetByName('assignment_submissions');
+  const rows = sheetRowsToObjects_(sheet);
+  let row = null;
+  for (let i = 0; i < rows.length; i++) {
+    if (String(rows[i].Submission_ID) === submissionId
+        && String(rows[i].Account || '').toLowerCase() === account) {
+      row = rows[i];
+      break;
+    }
+  }
+  if (!row) return { status: 'error', message: '提出レコードが見つかりません' };
+  if (String(row.Status) !== 'in_progress') {
+    return { status: 'error', message: 'この提出は既に完了しています' };
+  }
+
+  const asgRows = sheetRowsToObjects_(ss.getSheetByName('assignments'));
+  let asg = null;
+  for (let i = 0; i < asgRows.length; i++) {
+    if (String(asgRows[i].Assignment_ID) === String(row.Assignment_ID)) {
+      asg = normalizeAssignmentRow_(asgRows[i]);
+      break;
+    }
+  }
+
+  const correct = Math.max(0, parseInt(requestData.correct, 10) || 0);
+  const total = Math.max(0, parseInt(requestData.total, 10) || 0);
+  const points = Math.max(0, parseInt(requestData.points, 10) || 0);
+  const pointsMax = Math.max(0, parseInt(requestData.pointsMax, 10) || 0);
+  const durationSec = Math.max(0, parseInt(requestData.durationSec, 10) || 0);
+  const timedOut = requestData.timedOut === true || requestData.timedOut === 1 || requestData.timedOut === '1';
+  const score = total > 0 ? Math.round((correct / total) * 100) : (pointsMax > 0 ? Math.round((points / pointsMax) * 100) : 0);
+
+  let status = 'submitted';
+  if (asg) {
+    if (asg.Kind === 'homework') {
+      const done = requestData.rangeComplete === true || requestData.rangeComplete === 1 || requestData.rangeComplete === '1';
+      status = done ? 'passed' : 'submitted';
+    } else {
+      let pass = false;
+      if (asg.Pass_Mode === 'points') {
+        pass = pointsMax > 0 ? points >= asg.Pass_Score : points >= asg.Pass_Score;
+      } else {
+        pass = score >= asg.Pass_Score;
+      }
+      if (asg.Time_Limit_Sec > 0 && durationSec > asg.Time_Limit_Sec + 2) {
+        // 制限超過は不合格扱い（強制提出でも timedOut フラグで区別）
+        pass = false;
+      }
+      status = timedOut ? (pass ? 'passed' : 'forced') : (pass ? 'passed' : 'failed');
+      if (timedOut && !pass) status = 'forced';
+    }
+  }
+  if (timedOut && status === 'submitted') status = 'forced';
+
+  const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+  const values = [
+    row.Submission_ID, row.Assignment_ID, row.Account, row.Attempt_No, status,
+    score, correct, total, points, pointsMax, durationSec, timedOut ? 1 : 0,
+    JSON.stringify(requestData.progress || {}),
+    JSON.stringify(requestData.detail || {}),
+    now
+  ];
+  sheet.getRange(row._row, 1, 1, SUBMISSION_HEADERS.length).setValues([values]);
+  return {
+    status: 'success',
+    data: {
+      submissionId: submissionId,
+      resultStatus: status,
+      score: score,
+      correct: correct,
+      total: total,
+      points: points,
+      pointsMax: pointsMax,
+      timedOut: !!timedOut,
+      passed: status === 'passed'
+    }
+  };
+}
+
+/** dashboard.html 用（google.script.run） */
+function apiAdminListAssignments() {
+  return apiAdminListAssignments_({});
+}
+function apiAdminUpsertAssignment(assignment) {
+  return apiAdminUpsertAssignment_({ assignment: assignment });
+}
+function apiAdminListSubmissions(assignmentId, limit) {
+  return apiAdminListSubmissions_({ assignmentId: assignmentId || '', limit: limit || 200 });
 }
 
 // =========================================================

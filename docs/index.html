@@ -435,6 +435,44 @@ body.pool-match-active .game-footer {
 .btn-instruction-toggle { display: inline-block; min-height: 32px; padding: 6px 12px; font-size: 0.82em; background: #eceff1; color: #455a64; border: 1px solid #cfd8dc; border-radius: 6px; cursor: pointer; font-weight: bold; }
 .question-instruction { font-size: 0.85em; color: var(--c-text-sub); line-height: 1.5; margin-top: 8px; }
 .question-ja { font-size: clamp(1.1em, 4.2vw, 1.3em); font-weight: bold; color: var(--c-text); }
+.question-progress {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 4px 10px;
+  font-size: 0.88em;
+  font-weight: bold;
+  color: #1565c0;
+  background: #e3f2fd;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+.question-progress[hidden] { display: none !important; }
+.assignment-timer {
+  display: inline-block;
+  margin: 0 0 8px 8px;
+  padding: 4px 10px;
+  font-size: 0.88em;
+  font-weight: bold;
+  color: #b71c1c;
+  background: #ffebee;
+  border-radius: 999px;
+}
+.assignment-timer.urgent { animation: assignment-pulse 1s ease infinite; }
+@keyframes assignment-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.assignment-timer[hidden] { display: none !important; }
+#assignment-session-banner {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  background: #e3f2fd;
+  border-radius: 8px;
+  font-weight: bold;
+  color: #0d47a1;
+  font-size: 0.92em;
+}
+#assignment-session-banner[hidden] { display: none !important; }
 .answer-feedback { display: none; }
 .answer-feedback.is-visible { display: block; margin: 8px 0 14px; }
 #question-explanation { background: #fff8e1; border-left: 4px solid #ffb300; padding: 12px 14px; border-radius: 8px; margin-top: 8px; font-size: 0.9em; line-height: 1.6; color: var(--c-text); text-align: left; }
@@ -685,6 +723,7 @@ body.pool-match-active .game-footer {
       <button type="button" class="mode-tab active" data-mode="grammar">文法・語法演習</button>
       <button type="button" class="mode-tab" data-mode="vocab">単語学習</button>
       <button type="button" class="mode-tab" data-mode="reading">音読練習</button>
+      <button type="button" class="mode-tab" data-mode="assignment">宿題・小テスト</button>
       <button type="button" class="mode-tab" data-mode="manage">マイページ</button>
     </div>
 
@@ -988,6 +1027,17 @@ body.pool-match-active .game-footer {
       </div>
     </div>
 
+    <div id="assignment-panel" style="display: none;">
+      <div class="setting-section">
+        <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+          <span>宿題・小テスト</span>
+          <button type="button" id="assignment-refresh-btn" class="btn-small" style="font-weight:normal;">更新</button>
+        </div>
+        <p style="font-size:0.9em;color:#666;margin:0 0 12px;">管理者が出した課題に取り組みます。A宿題は範囲を分割して消化できます。B小テストは制限時間・合格ラインがあります。</p>
+        <div id="assignment-list"><p>タブを開くと読み込みます</p></div>
+      </div>
+    </div>
+
     <div id="manage-panel" style="display: none;">
       <div class="mode-tabs" style="margin-bottom:12px;">
         <button type="button" class="mode-tab manage-sub-tab active" data-manage-tab="sets">マイセット</button>
@@ -1100,6 +1150,7 @@ body.pool-match-active .game-footer {
 
   <!-- Game Screen -->
   <div id="game-screen" style="display: none;">
+    <div id="assignment-session-banner" hidden></div>
     <div class="question-box">
       <div class="question-instruction-wrap">
         <div class="question-instruction-row">
@@ -1107,6 +1158,10 @@ body.pool-match-active .game-footer {
           <button id="next-btn" class="btn-primary btn-next-in-card" style="display: none;">次の問題へ進む</button>
         </div>
         <div class="question-instruction" id="question-instruction" hidden></div>
+      </div>
+      <div>
+        <div class="question-progress" id="question-progress" hidden>問 1 / 1</div>
+        <span class="assignment-timer" id="assignment-timer" hidden></span>
       </div>
       <div class="question-ja" id="question-ja"></div>
     </div>
@@ -1317,6 +1372,7 @@ body.pool-match-active .game-footer {
 <script src="config.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="user-drive.js"></script>
+<script src="assignment.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script>
 /** true: GAS① 認証ゲート必須（短命 auth トークン） */
@@ -5570,7 +5626,7 @@ const VocabQuizGenerator = (() => {
     if (!formats.length) throw new Error('出題形式を1つ以上選択してください。');
     const perSection = options.homeworkPerSection || 5;
     const sourcePools = vocabBuildSourcePools(words);
-    const usedKeys = new Set();
+    const usedKeys = options.usedKeys || new Set();
     const questions = [];
     let qIdx = 0;
 
@@ -6810,7 +6866,7 @@ const ReadingSessionModule = (() => {
       return;
     }
     const w = words[currentIndex];
-    progressEl.textContent = '単語 ' + (currentIndex + 1) + ' / ' + words.length;
+    progressEl.textContent = '問 ' + (currentIndex + 1) + ' / ' + words.length;
     const wordText = vocabNorm(w['英単語・熟語の表現']);
     const exampleText = vocabNorm(w['例文']);
     cardEl.innerHTML =
@@ -7913,6 +7969,20 @@ function placeAnswerFeedback(format) {
   if (slot && fb.parentNode !== slot) slot.appendChild(fb);
 }
 
+function updateQuestionProgressDisplay_() {
+  const el = document.getElementById('question-progress');
+  if (!el) return;
+  const total = totalQuestionsCount || (currentQuestionDataList && currentQuestionDataList.length) || 0;
+  if (total <= 0) {
+    el.hidden = true;
+    el.textContent = '';
+    return;
+  }
+  const current = Math.min(currentQuestionIndex + 1, total);
+  el.hidden = false;
+  el.textContent = '問 ' + current + ' / ' + total;
+}
+
 function loadQuestionToGame(qData) {
   if (window.KeyboardModule) window.KeyboardModule.deactivate();
   const instructionBtn = document.getElementById('question-instruction-btn');
@@ -7920,13 +7990,15 @@ function loadQuestionToGame(qData) {
   const explanationEl = document.getElementById('question-explanation');
   const answerFeedback = document.getElementById('answer-feedback');
 
+  updateQuestionProgressDisplay_();
+
   if (qData.format === 'vocab-enja' || VOCAB_ENJA_MCQ_FORMATS[qData.format] || VOCAB_JA_POOL_FORMATS[qData.format]) {
     if (instructionBtn) instructionBtn.style.display = 'none';
     if (instructionEl) {
       instructionEl.textContent = '';
       instructionEl.hidden = true;
     }
-    elements.qJa.textContent = '単語学習（英日） ' + (currentQuestionIndex + 1) + ' / ' + totalQuestionsCount;
+    elements.qJa.textContent = '単語学習（英日）';
   } else if (isVocabFormat(qData.format)) {
     const def = VOCAB_FORMAT_MAP[qData.format];
     if (instructionBtn) {
@@ -7941,7 +8013,7 @@ function loadQuestionToGame(qData) {
     if (VOCAB_TYPING_FORMATS[qData.format] || VOCAB_CHOICE_FORMATS[qData.format]) {
       elements.qJa.textContent = qData.japanese || def.label;
     } else if (VOCAB_JA_FORMATS[qData.format]) {
-      elements.qJa.textContent = (def ? def.label : qData.format) + ' — ' + (currentQuestionIndex + 1) + ' / ' + totalQuestionsCount;
+      elements.qJa.textContent = def ? def.label : qData.format;
     } else {
       elements.qJa.textContent = def ? def.label : qData.format;
     }
@@ -8122,14 +8194,17 @@ const SessionSave = (function () {
 
   function startSave() {
     if (activePromise) return activePromise;
-    activePromise = (currentAppMode === 'vocab'
-      ? saveVocabSessionResults()
-      : saveGrammarSessionResults())
-      .finally(function () {
-        activePromise = null;
-        BackendSyncStatus.refresh();
-        // マイページはタブ切替／更新ボタンでのみ再取得（自動再描画しない）
-      });
+    activePromise = (async function () {
+      if (window.AssignmentModule && AssignmentModule.isActive()) {
+        const res = await AssignmentModule.finalizeIfActive();
+        return Object.assign({ status: 'success', assignment: true }, res || {});
+      }
+      if (currentAppMode === 'vocab') return saveVocabSessionResults();
+      return saveGrammarSessionResults();
+    })().finally(function () {
+      activePromise = null;
+      BackendSyncStatus.refresh();
+    });
     return activePromise;
   }
 
@@ -8157,7 +8232,14 @@ window.onQuestionCompleted = (isCorrect, meta) => {
   sessionPersistedToServer = false;
   BackendSyncStatus.refresh();
 
-  if (currentAppMode === 'vocab') {
+  const assignmentActive = window.AssignmentModule && AssignmentModule.isActive();
+  if (assignmentActive) {
+    const itemId = currentQ && (currentQ._assignmentItemId || currentQ.questionId || currentQ.itemId
+      || currentQ.wordId || currentQ.rowId);
+    AssignmentModule.onAnswered(itemId, isCorrect, currentQ && currentQ._pointsPerQuestion);
+    AssignmentModule.persistHomeworkProgress();
+    if (currentQ && currentQ.rowId) showExplanation(currentQ);
+  } else if (currentAppMode === 'vocab') {
     if (window.SrsModule && currentQ.wordId) {
       window.SrsModule.update(currentQ.wordId, isCorrect, meta.answerMs || 0, !!meta.isUnknown);
     }
@@ -8277,6 +8359,15 @@ document.getElementById('next-btn').addEventListener('click', () => {
 });
 
 function getResultSavedMessage_(saveResult) {
+  if (saveResult && saveResult.assignment) {
+    const d = saveResult.data || saveResult;
+    const st = d.resultStatus || (d.data && d.data.resultStatus) || '';
+    const score = d.score != null ? d.score : (d.data && d.data.score);
+    if (st === 'passed') return '課題を提出しました。合格（' + score + '%）';
+    if (st === 'forced') return '制限時間のため強制提出しました（' + score + '%）';
+    if (st === 'failed') return '課題を提出しました。不合格（' + score + '%）';
+    return '課題を提出しました（' + (st || 'submitted') + '）';
+  }
   if (!AuthGateService.isValid()) {
     return currentAppMode === 'vocab'
       ? '演習が終了しました。（ローカルSRSのみ更新・ログインすると同期されます）'
@@ -8390,6 +8481,7 @@ function initModeTabs() {
   const grammarPanel = document.getElementById('grammar-settings-panel');
   const vocabPanel = document.getElementById('vocab-settings-panel');
   const readingPanel = document.getElementById('reading-info-panel');
+  const assignmentPanel = document.getElementById('assignment-panel');
   const managePanel = document.getElementById('manage-panel');
   const startBtn = document.getElementById('start-btn');
   const profileEl = document.getElementById('profile-container');
@@ -8399,6 +8491,7 @@ function initModeTabs() {
     grammarPanel.style.display = mode === 'grammar' ? 'block' : 'none';
     vocabPanel.style.display = mode === 'vocab' ? 'block' : 'none';
     readingPanel.style.display = mode === 'reading' ? 'block' : 'none';
+    if (assignmentPanel) assignmentPanel.style.display = mode === 'assignment' ? 'block' : 'none';
     if (managePanel) managePanel.style.display = mode === 'manage' ? 'block' : 'none';
     if (startBtn) startBtn.style.display = mode === 'grammar' ? 'block' : 'none';
     if (profileEl) profileEl.style.display = mode === 'manage' ? 'block' : 'none';
@@ -8414,6 +8507,10 @@ function initModeTabs() {
       if (mode === 'manage') {
         loadManagePanel_();
         fetchUserLogs({ reason: 'tab' }).catch(function (e) { console.warn('マイページ学習記録:', e); });
+      }
+      if (mode === 'assignment' && window.AssignmentModule) {
+        AssignmentModule.bindUi();
+        AssignmentModule.refreshList().catch(function (e) { console.warn('課題一覧:', e); });
       }
     });
   });

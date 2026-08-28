@@ -7,20 +7,27 @@
   <style>
 :root { --c-primary:#2196f3; --c-primary-dark:#1976d2; --c-success:#4caf50; --c-text:#333; --c-text-sub:#666; --c-bg:#f4f7f6; --radius:12px; --shadow:0 2px 8px rgba(0,0,0,0.06); }
 *,*::before,*::after{box-sizing:border-box}
-body{font-family:'Helvetica Neue','Hiragino Kaku Gothic ProN','Noto Sans JP',Arial,sans-serif;background:var(--c-bg);color:var(--c-text);line-height:1.55;margin:0 auto;max-width:800px;padding:12px 12px 40px}
+body{font-family:'Helvetica Neue','Hiragino Kaku Gothic ProN','Noto Sans JP',Arial,sans-serif;background:var(--c-bg);color:var(--c-text);line-height:1.55;margin:0 auto;max-width:920px;padding:12px 12px 40px}
 .header-title{font-size:clamp(1.3em,5vw,1.8em);font-weight:bold;color:#2c3e50;text-align:center;margin:4px 0 16px}
 .setting-section{background:#fff;padding:16px;border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:16px}
 .section-title{font-size:1.05em;font-weight:bold;color:#455a64;margin-bottom:12px;border-bottom:2px solid #eceff1;padding-bottom:6px}
 .btn-primary{width:100%;min-height:48px;padding:12px;font-size:1em;font-weight:bold;background:var(--c-primary);color:#fff;border:none;border-radius:10px;cursor:pointer;margin-top:8px}
 .btn-small{min-height:38px;padding:8px 14px;font-size:.85em;background:#607d8b;color:#fff;border:none;border-radius:8px;cursor:pointer}
+.btn-danger{background:#e53935}
 .alert-box{padding:12px;border-radius:8px;margin-bottom:16px;font-weight:bold}
 .alert-success{background:#e8f5e9;color:#2e7d32}
 .alert-error{background:#ffebee;color:#c62828}
-.log-item{padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:.9em}
-.log-item:last-child{border-bottom:none}
 table{width:100%;border-collapse:collapse;font-size:.85em}
-th,td{border:1px solid #ddd;padding:6px 8px;text-align:left}
+th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;vertical-align:top}
 th{background:#f5f5f5}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form-group{margin-bottom:10px}
+.form-group label{display:block;font-size:.85em;font-weight:bold;color:#555;margin-bottom:4px}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:8px;font-size:.95em}
+.form-group.full{grid-column:1 / -1}
+.hint{font-size:.8em;color:#777;margin:4px 0 0}
+.section-card{border:1px solid #e0e0e0;border-radius:8px;padding:10px;margin-bottom:10px;background:#fafafa}
+@media (max-width:640px){.form-grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -28,7 +35,55 @@ th{background:#f5f5f5}
   <p style="text-align:center;font-size:.9em;margin:-8px 0 12px;">
     <a id="pages-link" href="#">学習画面（GitHub Pages）を開く</a>
   </p>
+  <p style="text-align:center;font-size:.8em;color:#666;margin:-4px 0 16px;">管理操作は whitelist の <code>class</code> 列が <strong>admin</strong> のアカウントのみ可能です。</p>
   <div id="status-banner" style="display:none;" class="alert-box"></div>
+
+  <div class="setting-section">
+    <div class="section-title">宿題・小テスト</div>
+    <p class="hint">最大4セクション。音読・AI英会話は未実装のため mode に指定しないでください。</p>
+    <div class="form-grid">
+      <div class="form-group"><label>課題ID（空欄で新規）</label><input id="asg-id" type="text" placeholder="空欄＝新規作成"></div>
+      <div class="form-group"><label>⓪ 課題名</label><input id="asg-title" type="text" required></div>
+      <div class="form-group"><label>種別</label>
+        <select id="asg-kind"><option value="homework">A 宿題（範囲完走）</option><option value="quiz">B 小テスト</option></select>
+      </div>
+      <div class="form-group"><label>対象クラス（空＝全体、カンマ区切り可）</label><input id="asg-target-class" type="text" placeholder="例: A,B"></div>
+      <div class="form-group"><label>① 期間開始</label><input id="asg-window-start" type="datetime-local"></div>
+      <div class="form-group"><label>① 期間終了</label><input id="asg-window-end" type="datetime-local"></div>
+      <div class="form-group"><label>① 期限（任意）</label><input id="asg-deadline" type="datetime-local"></div>
+      <div class="form-group"><label>② 制限時間（秒・0＝なし）</label><input id="asg-time-limit" type="number" min="0" value="0"></div>
+      <div class="form-group"><label>③ 最大回数（0＝無制限）</label><input id="asg-max-attempts" type="number" min="0" value="1"></div>
+      <div class="form-group"><label>④ 合格ライン</label><input id="asg-pass-score" type="number" min="0" value="60"></div>
+      <div class="form-group"><label>④ 合格基準</label>
+        <select id="asg-pass-mode"><option value="rate">正答率 %</option><option value="points">得点（点）</option></select>
+      </div>
+      <div class="form-group"><label>⑥ ニガテ復習</label>
+        <select id="asg-weakness"><option value="0">しない</option><option value="1">する</option></select>
+      </div>
+      <div class="form-group"><label>公開</label>
+        <select id="asg-active"><option value="1">有効</option><option value="0">無効</option></select>
+      </div>
+      <div class="form-group full">
+        <label>⑤ セクション（最大4・JSON）</label>
+        <textarea id="asg-sections" rows="12" spellcheck="false"></textarea>
+        <p class="hint">例: mode=grammar|vocab / formats / questionCount / pointsPerQuestion / subject+units または bookType+bookName+sheetName</p>
+        <button type="button" id="asg-fill-sample" class="btn-small">サンプルJSONを入れる</button>
+      </div>
+    </div>
+    <button type="button" id="asg-save-btn" class="btn-primary">課題を保存</button>
+    <button type="button" id="asg-refresh-btn" class="btn-small" style="margin-top:8px;">課題一覧を再読込</button>
+    <div id="asg-list-wrap" style="overflow-x:auto;margin-top:12px;">読込中...</div>
+  </div>
+
+  <div class="setting-section">
+    <div class="section-title">提出一覧</div>
+    <div class="form-group">
+      <label>課題IDで絞り込み（空＝全体）</label>
+      <input id="sub-filter-id" type="text">
+    </div>
+    <button type="button" id="sub-refresh-btn" class="btn-small">提出を再読込</button>
+    <div id="sub-list-wrap" style="overflow-x:auto;margin-top:12px;">—</div>
+  </div>
 
   <div class="setting-section">
     <div class="section-title">セッション集約（直近100件）</div>
@@ -39,12 +94,34 @@ th{background:#f5f5f5}
 
   <div class="setting-section">
     <div class="section-title">ホワイトリスト</div>
-    <p style="font-size:.85em;color:#666;">本体スプレッドシートの whitelist シートを編集してください（ここは閲覧のみ）。</p>
+    <p style="font-size:.85em;color:#666;">本体スプレッドシートの whitelist シートを編集してください（ここは閲覧のみ）。宿題管理は class 列に <code>admin</code> と入力したアカウントのみ。</p>
     <div id="whitelist-wrap" style="overflow-x:auto;margin-top:8px;">読込中...</div>
   </div>
 
 <script>
 const PAGES_URL = '<?= PAGES_URL ?>';
+
+const SAMPLE_SECTIONS = [
+  {
+    mode: 'grammar',
+    subject: '高校英語',
+    units: ['サンプル単元'],
+    formats: ['A', 'G'],
+    questionCount: 5,
+    pointsPerQuestion: 1,
+    filters: { dai: [], sho: [], area: [] }
+  },
+  {
+    mode: 'vocab',
+    bookType: 'preset',
+    bookName: 'サンプル単語帳',
+    sheetName: 'Sheet1',
+    formats: ['vocab-enja', 'W4'],
+    questionCount: 5,
+    pointsPerQuestion: 2,
+    filters: {}
+  }
+];
 
 function gasRun(fnName) {
   var args = Array.prototype.slice.call(arguments, 1);
@@ -64,6 +141,145 @@ function showBanner(text, ok) {
   el.style.display = 'block';
 }
 
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function localInputToSheet_(value) {
+  if (!value) return '';
+  // datetime-local → yyyy-MM-dd HH:mm:ss
+  return String(value).replace('T', ' ') + (String(value).length === 16 ? ':00' : '');
+}
+
+function collectAssignment_() {
+  var sectionsRaw = document.getElementById('asg-sections').value.trim();
+  var sections;
+  try {
+    sections = JSON.parse(sectionsRaw || '[]');
+  } catch (e) {
+    throw new Error('セクションJSONが不正です: ' + e.message);
+  }
+  if (!Array.isArray(sections) || !sections.length) throw new Error('セクションを1つ以上入れてください');
+  if (sections.length > 4) throw new Error('セクションは最大4つです');
+  return {
+    Assignment_ID: document.getElementById('asg-id').value.trim(),
+    Title: document.getElementById('asg-title').value.trim(),
+    Kind: document.getElementById('asg-kind').value,
+    Window_Start: localInputToSheet_(document.getElementById('asg-window-start').value),
+    Window_End: localInputToSheet_(document.getElementById('asg-window-end').value),
+    Deadline: localInputToSheet_(document.getElementById('asg-deadline').value),
+    Time_Limit_Sec: parseInt(document.getElementById('asg-time-limit').value, 10) || 0,
+    Max_Attempts: parseInt(document.getElementById('asg-max-attempts').value, 10) || 0,
+    Pass_Score: parseInt(document.getElementById('asg-pass-score').value, 10) || 0,
+    Pass_Mode: document.getElementById('asg-pass-mode').value,
+    Weakness_Review: document.getElementById('asg-weakness').value,
+    Target_Class: document.getElementById('asg-target-class').value.trim(),
+    Sections: sections,
+    Active: document.getElementById('asg-active').value
+  };
+}
+
+function fillFormFromAssignment_(a) {
+  document.getElementById('asg-id').value = a.Assignment_ID || '';
+  document.getElementById('asg-title').value = a.Title || '';
+  document.getElementById('asg-kind').value = a.Kind || 'homework';
+  document.getElementById('asg-target-class').value = a.Target_Class || '';
+  document.getElementById('asg-time-limit').value = a.Time_Limit_Sec || 0;
+  document.getElementById('asg-max-attempts').value = a.Max_Attempts || 0;
+  document.getElementById('asg-pass-score').value = a.Pass_Score || 0;
+  document.getElementById('asg-pass-mode').value = a.Pass_Mode || 'rate';
+  document.getElementById('asg-weakness').value = String(a.Weakness_Review || 0);
+  document.getElementById('asg-active').value = String(a.Active != null ? a.Active : 1);
+  document.getElementById('asg-sections').value = JSON.stringify(a.Sections || [], null, 2);
+}
+
+async function loadAssignments() {
+  var wrap = document.getElementById('asg-list-wrap');
+  try {
+    var result = await gasRun('apiAdminListAssignments');
+    if (result.status !== 'success') throw new Error(result.message);
+    var rows = result.data || [];
+    if (!rows.length) {
+      wrap.innerHTML = '<p>まだ課題がありません。</p>';
+      return;
+    }
+    var html = '<table><thead><tr><th>名前</th><th>種別</th><th>期限/期間</th><th>制限</th><th>合格</th><th>公開</th><th></th></tr></thead><tbody>';
+    rows.forEach(function (a) {
+      html += '<tr>';
+      html += '<td>' + escapeHtml(a.Title) + '<div class="hint">' + escapeHtml(a.Assignment_ID) + '</div></td>';
+      html += '<td>' + escapeHtml(a.Kind) + '</td>';
+      html += '<td>' + escapeHtml([a.Window_Start, a.Window_End, a.Deadline].filter(Boolean).join(' / ')) + '</td>';
+      html += '<td>' + (a.Time_Limit_Sec || 0) + '秒 / ' + (a.Max_Attempts || '∞') + '回</td>';
+      html += '<td>' + escapeHtml(a.Pass_Score) + (a.Pass_Mode === 'points' ? '点' : '%') + '</td>';
+      html += '<td>' + (a.Active ? '有効' : '無効') + '</td>';
+      html += '<td><button type="button" class="btn-small asg-edit-btn" data-id="' + escapeHtml(a.Assignment_ID) + '">編集</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+    wrap._rows = rows;
+    wrap.querySelectorAll('.asg-edit-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-id');
+        var found = (wrap._rows || []).filter(function (r) { return r.Assignment_ID === id; })[0];
+        if (found) {
+          fillFormFromAssignment_(found);
+          showBanner('編集用に読み込みました: ' + found.Title, true);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      });
+    });
+  } catch (e) {
+    wrap.innerHTML = '<p style="color:#c62828;">エラー: ' + escapeHtml(e.message) + '</p>';
+  }
+}
+
+async function saveAssignment() {
+  try {
+    var payload = collectAssignment_();
+    if (!payload.Title) throw new Error('課題名を入力してください');
+    var result = await gasRun('apiAdminUpsertAssignment', payload);
+    if (result.status !== 'success') throw new Error(result.message);
+    showBanner('保存しました: ' + result.data.Title, true);
+    document.getElementById('asg-id').value = result.data.Assignment_ID || '';
+    await loadAssignments();
+  } catch (e) {
+    showBanner(e.message || String(e), false);
+  }
+}
+
+async function loadSubmissions() {
+  var wrap = document.getElementById('sub-list-wrap');
+  var filterId = document.getElementById('sub-filter-id').value.trim();
+  try {
+    var result = await gasRun('apiAdminListSubmissions', filterId, 200);
+    if (result.status !== 'success') throw new Error(result.message);
+    var rows = result.data || [];
+    if (!rows.length) {
+      wrap.innerHTML = '<p>提出はありません。</p>';
+      return;
+    }
+    var html = '<table><thead><tr><th>提出日時</th><th>課題</th><th>生徒</th><th>回</th><th>状態</th><th>スコア</th><th>時間</th></tr></thead><tbody>';
+    rows.forEach(function (s) {
+      html += '<tr>';
+      html += '<td>' + escapeHtml(s.Submitted_At) + '</td>';
+      html += '<td>' + escapeHtml(s.Assignment_ID) + '</td>';
+      html += '<td>' + escapeHtml(s.Account) + '</td>';
+      html += '<td>' + escapeHtml(s.Attempt_No) + '</td>';
+      html += '<td>' + escapeHtml(s.Status) + '</td>';
+      html += '<td>' + escapeHtml(s.Score) + '% (' + escapeHtml(s.Correct) + '/' + escapeHtml(s.Total) + ')</td>';
+      html += '<td>' + escapeHtml(s.Duration_Sec) + 's' + (String(s.Timed_Out) === '1' ? ' 強制' : '') + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  } catch (e) {
+    wrap.innerHTML = '<p style="color:#c62828;">エラー: ' + escapeHtml(e.message) + '</p>';
+  }
+}
+
 async function loadSummaries() {
   var wrap = document.getElementById('summaries-wrap');
   try {
@@ -77,17 +293,17 @@ async function loadSummaries() {
     var html = '<table><thead><tr>';
     html += '<th>日時</th><th>ユーザー</th><th>モード</th><th>セット</th><th>回数</th><th>スコア</th></tr></thead><tbody>';
     logs.forEach(function (log) {
-      html += '<tr><td>' + (log.Ended_At || log.Started_At || '') + '</td>';
-      html += '<td>' + (log.User_ID || '') + '</td>';
-      html += '<td>' + (log.Mode || '') + '</td>';
-      html += '<td>' + (log.Set_Name || '') + '</td>';
-      html += '<td>' + (log.Attempt_No || '') + '</td>';
-      html += '<td>' + (log.Score != null ? log.Score + '%' : '') + '</td></tr>';
+      html += '<tr><td>' + escapeHtml(log.Ended_At || log.Started_At || '') + '</td>';
+      html += '<td>' + escapeHtml(log.User_ID || '') + '</td>';
+      html += '<td>' + escapeHtml(log.Mode || '') + '</td>';
+      html += '<td>' + escapeHtml(log.Set_Name || '') + '</td>';
+      html += '<td>' + escapeHtml(log.Attempt_No || '') + '</td>';
+      html += '<td>' + (log.Score != null ? escapeHtml(log.Score) + '%' : '') + '</td></tr>';
     });
     html += '</tbody></table>';
     wrap.innerHTML = html;
   } catch (e) {
-    wrap.innerHTML = '<p style="color:#c62828;">エラー: ' + e.message + '</p>';
+    wrap.innerHTML = '<p style="color:#c62828;">エラー: ' + escapeHtml(e.message) + '</p>';
   }
 }
 
@@ -103,13 +319,13 @@ async function loadWhitelist() {
     }
     var html = '<table><thead><tr><th>account</th><th>name</th><th>grade</th><th>class</th></tr></thead><tbody>';
     rows.forEach(function (r) {
-      html += '<tr><td>' + (r.account || '') + '</td><td>' + (r.name || '') + '</td>';
-      html += '<td>' + (r.grade || '') + '</td><td>' + (r.class || '') + '</td></tr>';
+      html += '<tr><td>' + escapeHtml(r.account || '') + '</td><td>' + escapeHtml(r.name || '') + '</td>';
+      html += '<td>' + escapeHtml(r.grade || '') + '</td><td>' + escapeHtml(r.class || '') + '</td></tr>';
     });
     html += '</tbody></table>';
     wrap.innerHTML = html;
   } catch (e) {
-    wrap.innerHTML = '<p style="color:#c62828;">' + e.message + '</p>';
+    wrap.innerHTML = '<p style="color:#c62828;">' + escapeHtml(e.message) + '</p>';
   }
 }
 
@@ -117,10 +333,19 @@ document.addEventListener('DOMContentLoaded', function() {
   var pagesLink = document.getElementById('pages-link');
   if (pagesLink && PAGES_URL) pagesLink.href = PAGES_URL;
 
+  document.getElementById('asg-sections').value = JSON.stringify(SAMPLE_SECTIONS, null, 2);
+  document.getElementById('asg-fill-sample').addEventListener('click', function () {
+    document.getElementById('asg-sections').value = JSON.stringify(SAMPLE_SECTIONS, null, 2);
+  });
+  document.getElementById('asg-save-btn').addEventListener('click', saveAssignment);
+  document.getElementById('asg-refresh-btn').addEventListener('click', loadAssignments);
+  document.getElementById('sub-refresh-btn').addEventListener('click', loadSubmissions);
+  document.getElementById('refresh-summaries-btn').addEventListener('click', loadSummaries);
+
+  loadAssignments();
+  loadSubmissions();
   loadSummaries();
   loadWhitelist();
-
-  document.getElementById('refresh-summaries-btn').addEventListener('click', loadSummaries);
 });
 </script>
 </body>
