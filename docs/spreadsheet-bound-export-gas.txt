@@ -1,0 +1,823 @@
+================================================================================
+DigitalDrill 教材スプレッドシート → GitHub 用データエクスポート（コンテナバインド GAS）
+================================================================================
+
+【使い方】
+1. エクスポートしたい教材スプレッドシート（文法ブック or 単語ブック）を開く
+2. 拡張機能 → Apps Script を開く
+3. 下記「=== ここからコピー ===」〜「=== ここまでコピー ===」を Code.gs に貼り付けて保存
+4. スプレッドシートを再読み込み → メニュー「GitHubエクスポート」が出る
+5. 次のいずれかを実行
+   - 「① バンドルJSONをダウンロード」… 1ファイルで全部取得（手動マージ用）
+   - 「② Driveにファイル一式を書き出し」… GitHub にそのまま置ける複数 JSON
+   - 「④ manifest.jsonをダウンロード」… 学習モード別 manifest を一発取得（推奨）
+
+【GitHub への配置イメージ】（学習モードごとに専用 manifest を1つ）
+  docs/data/
+    manifest-grammar.json          … 文法・語法演習（catalog + questions）
+    manifest-vocab.json            … 単語学習（vocabCatalog + vocabWords）
+    manifest-reading.json          … 音読練習（単語ブックと同構造・例文付き単語）
+    manifest-ai-conversation.json  … AI英会話（将来用・本 GAS では未生成）
+    sources/{スプレッドシートID}.json   … 元SSとの紐づけ（これがあると本体はSSを読まない）
+    grammar/{ブック名}/{シート名}.json  … 文法問題配列（getQuestions と同じ）
+    vocab/{ブック名}/{シート名}.json    … { words, pool, bookPool }（getVocabWords と同じ）
+    vocab/{ブック名}/_catalog.json      … 単語カタログ用シート情報
+
+【本体側の想定】（今後の微調整）
+- 学習モード別 manifest（manifest-grammar.json 等）または sources/*.json が
+  GitHub/Pages に存在すれば、対応する spreadsheetId の Drive 読み込みをスキップする
+- manifestKey（文法: "科目::単元" / 単語: "ブック::シート"）でデータを引く
+- 複数ブックがある場合は、同じ mode の manifest をマージして1ファイルにまとめる
+
+【オプション設定】スクリプトプロパティ（任意）
+  BOOK_NAME_OVERRIDE … ブック名（科目名）を SS ファイル名と違う名前で出す
+  GITHUB_DATA_PREFIX … 既定 "data"（GitHub 上の data フォルダ）
+
+================================================================================
+=== ここからコピー（Code.gs 全文） ===
+================================================================================
+
+/**
+ * DigitalDrill 教材 SS → GitHub 静的データエクスポート（コンテナバインド専用）
+ * 本体 code.gs の fetchQuestionsFromSheet / fetchVocabWords 相当の JSON を生成する。
+ *
+ * ※ onOpen とメニューから呼ぶ関数はトップレベル必須（GAS の仕様）
+ */
+
+var SCHEMA_VERSION = 1;
+var UNREGISTERED = '×';
+var LEGACY_UNREGISTERED = '(未登録)';
+
+var GRAMMAR_HEADERS = [
+    '通し番号', '大単元', '小単元', '英文全文', '日本語訳',
+    '並び替え文', '並び替えダミー', 'N択文', 'N択ダミー',
+    'ターゲット文法領域', '解説'
+];
+
+var VOCAB_HEADERS = [
+    '通し番号', '大区分', '中区分', '小区分', '英単語・熟語の表現',
+    '意味＠名詞', '意味＠動詞', '意味＠形容詞', '意味＠副詞', '意味＠前置詞',
+    '意味＠接続詞', '意味＠その他品詞', '意味＠熟語・慣用表現',
+    'メモ', '類義語・同義語', '対義語', '派生語・関連語',
+    '英文による定義', 'チャンク', 'チャンク訳', '例文', '例文訳'
+];
+
+var VOCAB_HEADER_ALIASES = {
+    '意味①名詞': '意味＠名詞',
+    '意味②動詞': '意味＠動詞',
+    '意味③形容詞': '意味＠形容詞',
+    '意味④副詞': '意味＠副詞',
+    '意味⑤前置詞': '意味＠前置詞',
+    '意味⑥接続詞': '意味＠接続詞',
+    '意味⑦その他品詞': '意味＠その他品詞',
+    '意味⑦その他助動詞': '意味＠その他品詞',
+    '意味⑧熟語・慣用表現': '意味＠熟語・慣用表現',
+    '意味⑧句動詞・熟語表現': '意味＠熟語・慣用表現'
+};
+
+var GRAMMAR_BRACKET_RE = /[(（][^)）]*[)）]/;
+
+/** 学習モード別 manifest ファイル名（docs/data/ に配置） */
+var MANIFEST_MODES = {
+    grammar: {
+      key: 'grammar',
+      fileName: 'manifest-grammar.json',
+      label: '文法・語法演習'
+    },
+    vocab: {
+      key: 'vocab',
+      fileName: 'manifest-vocab.json',
+      label: '単語学習'
+    },
+    reading: {
+      key: 'reading',
+      fileName: 'manifest-reading.json',
+      label: '音読練習'
+    },
+    ai: {
+      key: 'ai',
+      fileName: 'manifest-ai-conversation.json',
+      label: 'AI英会話'
+    }
+};
+
+// ---------------------------------------------------------------------------
+// メニュー（トップレベル）
+// ---------------------------------------------------------------------------
+
+function onOpen() {
+    SpreadsheetApp.getUi()
+      .createMenu('GitHubエクスポート')
+      .addItem('④ manifest.jsonをダウンロード', 'ddExport_downloadManifestDialog')
+      .addSeparator()
+      .addItem('① バンドルJSONをダウンロード', 'ddExport_downloadBundleDialog')
+      .addItem('② Driveにファイル一式を書き出し', 'ddExport_writeFilesToDrive')
+      .addSeparator()
+      .addItem('③ 紐づけ情報（source-map）だけ表示', 'ddExport_showSourceMap')
+      .addToUi();
+}
+
+function ddExport_downloadManifestDialog() {
+    var bundle = ddExport_buildBundle_();
+    var manifests = ddExport_buildManifestsForBundle_(bundle);
+    if (!manifests.length) {
+      SpreadsheetApp.getUi().alert('manifest を生成できませんでした。');
+      return;
+    }
+
+    var buttonsHtml = manifests.map(function (item, idx) {
+      return '<button class="dl" data-idx="' + idx + '">' + item.mode.label + '（' + item.mode.fileName + '）</button>';
+    }).join('');
+
+    var note = bundle.kind === 'grammar'
+      ? '<p>文法ブック → <code>manifest-grammar.json</code> を GitHub の <code>docs/data/</code> に配置してください。</p>'
+      : '<p>単語ブック → <code>manifest-vocab.json</code> と <code>manifest-reading.json</code> の2つを出力します（内容は同じ単語データ）。</p>';
+
+    var payload = manifests.map(function (item) {
+      return {
+        fileName: item.mode.fileName,
+        label: item.mode.label,
+        json: JSON.stringify(item.manifest, null, 2)
+      };
+    });
+
+    var html = HtmlService.createHtmlOutput(
+      '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'
+      + 'body{font-family:sans-serif;padding:16px;max-width:640px}'
+      + 'button{margin:6px 6px 0 0;padding:8px 14px}'
+      + 'textarea{width:100%;height:120px;font-size:11px;margin-top:10px}'
+      + 'code{background:#f5f5f5;padding:1px 4px;border-radius:3px}'
+      + '</style></head><body>'
+      + '<h3>学習モード別 manifest.json</h3>'
+      + note
+      + '<p>複数ブックがある場合は、同じファイル名の JSON をマージしてください。</p>'
+      + buttonsHtml
+      + '<textarea id="j" placeholder="プレビュー"></textarea>'
+      + '<script>'
+      + 'var items=' + JSON.stringify(payload) + ';'
+      + 'function download(idx){'
+      + 'var item=items[idx];'
+      + 'document.getElementById("j").value=item.json;'
+      + 'var b=new Blob([item.json],{type:"application/json"});'
+      + 'var a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=item.fileName;a.click();'
+      + '}'
+      + 'var btns=document.querySelectorAll("button.dl");'
+      + 'for(var i=0;i<btns.length;i++){'
+      + '(function(idx){btns[idx].onclick=function(){download(idx);};})(i);'
+      + '}'
+      + 'if(items.length) download(0);'
+      + '<\/script></body></html>'
+    ).setWidth(560).setHeight(460);
+    SpreadsheetApp.getUi().showModalDialog(html, 'manifest.json');
+}
+
+function ddExport_downloadBundleDialog() {
+    var bundle = ddExport_buildBundle_();
+    var json = JSON.stringify(bundle, null, 2);
+    var fileName = ddExport_safeFileName_(bundle.source.bookName) + '-preset-bundle.json';
+    var html = HtmlService.createHtmlOutput(
+      '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'
+      + 'body{font-family:sans-serif;padding:16px;max-width:640px}'
+      + 'textarea{width:100%;height:120px;font-size:12px}'
+      + 'button{margin:8px 4px 0 0;padding:8px 14px}'
+      + '</style></head><body>'
+      + '<h3>GitHub 用バンドル JSON</h3>'
+      + '<p>「ダウンロード」で1ファイル保存するか、下の JSON をコピーして GitHub に置いてください。</p>'
+      + '<p>ファイル数: ' + bundle.files.length + ' / 種別: ' + bundle.kind + '</p>'
+      + '<button id="dl">ダウンロード</button>'
+      + '<button onclick="navigator.clipboard.writeText(document.getElementById(\'j\').value)">コピー</button>'
+      + '<textarea id="j"></textarea>'
+      + '<script>'
+      + 'var name=' + JSON.stringify(fileName) + ';'
+      + 'var text=' + JSON.stringify(json) + ';'
+      + 'document.getElementById("j").value=text;'
+      + 'document.getElementById("dl").onclick=function(){'
+      + 'var b=new Blob([text],{type:"application/json"});'
+      + 'var a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name;a.click();};'
+      + '<\/script></body></html>'
+    ).setWidth(520).setHeight(420);
+    SpreadsheetApp.getUi().showModalDialog(html, 'バンドル JSON');
+}
+
+function ddExport_writeFilesToDrive() {
+    var bundle = ddExport_buildBundle_();
+    var prefix = ddExport_getProp_('GITHUB_DATA_PREFIX', 'data');
+    var rootName = 'DigitalDrill_GitHubExport';
+    var ssId = bundle.source.spreadsheetId;
+    var folder = ddExport_ensureFolderPath_([rootName, ssId]);
+
+    bundle.files.forEach(function (f) {
+      var blob = Utilities.newBlob(f.content, 'application/json', f.fileName);
+      ddExport_writeOrReplaceFile_(folder, f.fileName, blob);
+    });
+
+    var mapBlob = Utilities.newBlob(
+      JSON.stringify(bundle.sourceMap, null, 2),
+      'application/json',
+      ssId + '.json'
+    );
+    var sourcesFolder = ddExport_ensureFolderPath_([rootName, 'sources']);
+    ddExport_writeOrReplaceFile_(sourcesFolder, ssId + '.json', mapBlob);
+
+    var bundleBlob = Utilities.newBlob(
+      JSON.stringify(bundle, null, 2),
+      'application/json',
+      ddExport_safeFileName_(bundle.source.bookName) + '-preset-bundle.json'
+    );
+    ddExport_writeOrReplaceFile_(folder, '_bundle.json', bundleBlob);
+
+    var manifests = ddExport_buildManifestsForBundle_(bundle);
+    manifests.forEach(function (item) {
+      var manifestBlob = Utilities.newBlob(
+        JSON.stringify(item.manifest, null, 2),
+        'application/json',
+        item.mode.fileName
+      );
+      ddExport_writeOrReplaceFile_(folder, item.mode.fileName, manifestBlob);
+    });
+
+    SpreadsheetApp.getUi().alert(
+      'Drive に書き出しました。\n\n'
+      + 'フォルダ: ' + rootName + '/' + ssId + '\n'
+      + 'ファイル数: ' + (bundle.files.length + 2 + manifests.length) + '\n\n'
+      + 'sources/' + ssId + '.json に SS 紐づけ情報があります。\n'
+      + 'manifest: ' + manifests.map(function (m) { return m.mode.fileName; }).join(', ') + '\n'
+      + 'GitHub の docs/' + prefix + '/ 以下に同じ構造でアップロードしてください。'
+    );
+}
+
+function ddExport_showSourceMap() {
+    var bundle = ddExport_buildBundle_();
+    var ui = SpreadsheetApp.getUi();
+    ui.alert('source-map（概要）\n\n' + JSON.stringify(bundle.sourceMap, null, 2).slice(0, 1800));
+}
+
+// ---------------------------------------------------------------------------
+// manifest.json（学習モード別・PresetModule / exportStatic 互換）
+// ---------------------------------------------------------------------------
+
+function ddExport_computeVersion_(ss) {
+    return Utilities.computeDigest(
+      Utilities.DigestAlgorithm.MD5,
+      ss.getId() + ':' + ss.getLastUpdated().getTime(),
+      Utilities.Charset.UTF_8
+    ).map(function (b) { return ('0' + (b & 0xFF).toString(16)).slice(-2); }).join('');
+}
+
+function ddExport_emptyManifestBody_() {
+    return {
+      catalog: {},
+      vocabCatalog: { presets: [] },
+      questions: {},
+      vocabWords: {}
+    };
+}
+
+/**
+ * 1ブック分の manifest を生成する。
+ * @param {string} modeKey grammar | vocab | reading | ai
+ * @param {object} bundle ddExport_buildBundle_() の戻り値
+ */
+function ddExport_buildManifest_(modeKey, bundle) {
+    var mode = MANIFEST_MODES[modeKey];
+    if (!mode) throw new Error('未知の学習モード: ' + modeKey);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var pm = (bundle && bundle.partialManifest) || {};
+    var body = ddExport_emptyManifestBody_();
+    var source = (bundle && bundle.source) || {};
+
+    if (modeKey === 'grammar') {
+      body.catalog = pm.catalog || {};
+      body.questions = pm.questions || {};
+    } else if (modeKey === 'vocab' || modeKey === 'reading') {
+      body.vocabCatalog = pm.vocabCatalog || { presets: [] };
+      body.vocabWords = pm.vocabWords || {};
+    } else if (modeKey === 'ai') {
+      // 将来: 会話シナリオ等。現行の教材 SS からは生成しない。
+    }
+
+    return {
+      schemaVersion: SCHEMA_VERSION,
+      mode: mode.key,
+      modeLabel: mode.label,
+      manifestFile: mode.fileName,
+      version: ddExport_computeVersion_(ss),
+      exportedAt: (bundle && bundle.exportedAt) || new Date().toISOString(),
+      source: {
+        spreadsheetId: source.spreadsheetId || ss.getId(),
+        spreadsheetName: source.spreadsheetName || ss.getName(),
+        bookName: source.bookName || ss.getName()
+      },
+      catalog: body.catalog,
+      vocabCatalog: body.vocabCatalog,
+      questions: body.questions,
+      vocabWords: body.vocabWords
+    };
+}
+
+/** ブック種別に応じて出力すべき manifest の一覧を返す */
+function ddExport_buildManifestsForBundle_(bundle) {
+    var kind = bundle && bundle.kind;
+    if (kind === 'grammar') {
+      return [{ mode: MANIFEST_MODES.grammar, manifest: ddExport_buildManifest_('grammar', bundle) }];
+    }
+    if (kind === 'vocab') {
+      return [
+        { mode: MANIFEST_MODES.vocab, manifest: ddExport_buildManifest_('vocab', bundle) },
+        { mode: MANIFEST_MODES.reading, manifest: ddExport_buildManifest_('reading', bundle) }
+      ];
+    }
+    return [];
+}
+
+// ---------------------------------------------------------------------------
+// バンドル構築
+// ---------------------------------------------------------------------------
+
+function ddExport_buildBundle_() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var bookName = ddExport_getProp_('BOOK_NAME_OVERRIDE', ss.getName());
+    var kind = ddExport_detectKind_(ss);
+    if (!kind) {
+      throw new Error('文法（英文全文列）または単語（英単語・熟語の表現列）のシートが見つかりません。');
+    }
+    var prefix = ddExport_getProp_('GITHUB_DATA_PREFIX', 'data');
+    var exportedAt = new Date().toISOString();
+    var source = {
+      spreadsheetId: ss.getId(),
+      spreadsheetName: ss.getName(),
+      spreadsheetUrl: ss.getUrl(),
+      bookName: bookName
+    };
+
+    var files = [];
+    var partialManifest = {
+      schemaVersion: SCHEMA_VERSION,
+      kind: kind,
+      exportedAt: exportedAt,
+      source: source
+    };
+
+    if (kind === 'grammar') {
+      var catalog = {};
+      catalog[bookName] = [];
+      var questions = {};
+      ss.getSheets().forEach(function (sheet) {
+        if (!ddExport_isGrammarSheet_(sheet)) return;
+        var sheetName = sheet.getName();
+        catalog[bookName].push(sheetName);
+        var rows = ddExport_parseGrammarSheet_(sheet);
+        var manifestKey = bookName + '::' + sheetName;
+        questions[manifestKey] = rows;
+        var githubPath = prefix + '/grammar/' + bookName + '/' + sheetName + '.json';
+        files.push({
+          fileName: sheetName + '.json',
+          githubPath: githubPath,
+          manifestKey: manifestKey,
+          kind: 'grammar_questions',
+          sheetName: sheetName,
+          rowCount: rows.length,
+          content: JSON.stringify(rows, null, 2)
+        });
+      });
+      partialManifest.catalog = catalog;
+      partialManifest.questions = questions;
+    } else {
+      var sheetInfos = [];
+      var vocabWords = {};
+      var bookPool = [];
+      ss.getSheets().forEach(function (sh) {
+        var part = ddExport_parseVocabSheetValues_(sh.getDataRange().getValues(), {});
+        part.pool.forEach(function (rowObj) {
+          rowObj._sheetName = sh.getName();
+          bookPool.push(rowObj);
+        });
+      });
+      ss.getSheets().forEach(function (sheet) {
+        var sheetName = sheet.getName();
+        var data = ddExport_fetchVocabWordsForSheet_(ss, sheetName, bookPool);
+        var manifestKey = bookName + '::' + sheetName;
+        vocabWords[manifestKey] = data;
+        sheetInfos.push(ddExport_buildVocabSheetInfo_(sheet));
+        var githubPath = prefix + '/vocab/' + bookName + '/' + sheetName + '.json';
+        files.push({
+          fileName: sheetName + '.json',
+          githubPath: githubPath,
+          manifestKey: manifestKey,
+          kind: 'vocab_words',
+          sheetName: sheetName,
+          rowCount: (data.words || []).length,
+          content: JSON.stringify(data, null, 2)
+        });
+      });
+      var catalogJson = {
+        bookName: bookName,
+        bookId: ss.getId(),
+        bookUrl: ss.getUrl(),
+        sheets: sheetInfos
+      };
+      partialManifest.vocabCatalog = { presets: [catalogJson] };
+      partialManifest.vocabWords = vocabWords;
+      files.push({
+        fileName: '_catalog.json',
+        githubPath: prefix + '/vocab/' + bookName + '/_catalog.json',
+        manifestKey: bookName + '::_catalog',
+        kind: 'vocab_catalog',
+        sheetName: '_catalog',
+        rowCount: sheetInfos.length,
+        content: JSON.stringify(catalogJson, null, 2)
+      });
+    }
+
+    var sourceMap = {
+      schemaVersion: SCHEMA_VERSION,
+      kind: kind,
+      spreadsheetId: source.spreadsheetId,
+      spreadsheetName: source.spreadsheetName,
+      spreadsheetUrl: source.spreadsheetUrl,
+      bookName: bookName,
+      exportedAt: exportedAt,
+      github: {
+        dataPrefix: prefix,
+        sourceMapPath: prefix + '/sources/' + source.spreadsheetId + '.json',
+        skipSpreadsheetWhenFilesPresent: true
+      },
+      files: files.map(function (f) {
+        return {
+          sheetName: f.sheetName,
+          kind: f.kind,
+          manifestKey: f.manifestKey,
+          githubPath: f.githubPath,
+          rowCount: f.rowCount
+        };
+      })
+    };
+
+    return {
+      schemaVersion: SCHEMA_VERSION,
+      kind: kind,
+      exportedAt: exportedAt,
+      source: source,
+      sourceMap: sourceMap,
+      partialManifest: partialManifest,
+      files: files
+    };
+}
+
+// ---------------------------------------------------------------------------
+// 種別判定
+// ---------------------------------------------------------------------------
+
+function ddExport_detectKind_(ss) {
+    var grammar = false;
+    var vocab = false;
+    ss.getSheets().forEach(function (sheet) {
+      if (ddExport_isGrammarSheet_(sheet)) grammar = true;
+      if (ddExport_isVocabSheet_(sheet)) vocab = true;
+    });
+    if (grammar && vocab) {
+      throw new Error('文法シートと単語シートが混在しています。ブックを分けてください。');
+    }
+    if (grammar) return 'grammar';
+    if (vocab) return 'vocab';
+    return null;
+}
+
+function ddExport_isGrammarSheet_(sheet) {
+    var headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0]
+      .map(function (h) { return (h == null ? '' : String(h)).trim(); });
+    return headers.indexOf('英文全文') >= 0 && headers.indexOf('日本語訳') >= 0;
+}
+
+function ddExport_isVocabSheet_(sheet) {
+    var headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0]
+      .map(function (h) { return ddExport_canonicalVocabHeader_(h); });
+    return headers.indexOf('英単語・熟語の表現') >= 0;
+}
+
+// ---------------------------------------------------------------------------
+// 文法パース（本体 code.gs と同等）
+// ---------------------------------------------------------------------------
+
+function ddExport_parseGrammarSheet_(sheet) {
+    var data = sheet.getDataRange().getValues();
+    if (data.length <= 1) return [];
+    var sheetName = sheet.getName();
+    var headers = data[0].map(function (h) { return (h == null ? '' : String(h)).trim(); });
+    var colIndex = {};
+    GRAMMAR_HEADERS.forEach(function (name) { colIndex[name] = headers.indexOf(name); });
+    var questions = [];
+
+    for (var r = 1; r < data.length; r++) {
+      var row = data[r];
+      function cell(name) {
+        var i = colIndex[name];
+        if (i === -1) return '';
+        var v = row[i];
+        return (v == null ? '' : String(v)).replace(/\s+/g, ' ').trim();
+      }
+      var id = cell('通し番号');
+      var fullSentence = cell('英文全文');
+      var japanese = cell('日本語訳');
+      if (!id || !fullSentence || !japanese) continue;
+
+      var sort = ddExport_parseBracketSentence_(cell('並び替え文'));
+      var mcq = ddExport_parseBracketSentence_(cell('N択文'));
+      var sortTokens = sort ? ddExport_splitGrammarList_(sort.inner) : [];
+      var sortDummy = cell('並び替えダミー');
+      var mcqAnswer = mcq ? mcq.inner : '';
+      var mcqDummies = ddExport_splitGrammarList_(cell('N択ダミー'));
+      var acceptedSentences = ddExport_expandAcceptedSentences_(fullSentence);
+      var warnings = [];
+      if (sort && !ddExport_matchesAcceptedSentences_(
+        ddExport_joinGrammarSentence_(sort.prefix, sortTokens.join(' '), sort.suffix), acceptedSentences)) {
+        warnings.push('並び替え文を組み立てても英文全文と一致しません');
+      }
+      if (mcq && !ddExport_matchesAcceptedSentences_(
+        ddExport_joinGrammarSentence_(mcq.prefix, mcqAnswer, mcq.suffix), acceptedSentences)) {
+        warnings.push('N択文を組み立てても英文全文と一致しません');
+      }
+      var hasSort = sortTokens.length > 0;
+      var hasMcq = mcqAnswer !== '';
+      questions.push({
+        rowId: sheetName + '#' + id,
+        id: id,
+        unit: sheetName,
+        daiUnit: cell('大単元'),
+        shoUnit: cell('小単元'),
+        fullSentence: fullSentence,
+        japanese: japanese,
+        grammarArea: cell('ターゲット文法領域'),
+        explanation: cell('解説'),
+        sortPrefix: sort ? sort.prefix : '',
+        sortTokens: sortTokens,
+        sortSuffix: sort ? sort.suffix : '',
+        sortDummy: sortDummy,
+        mcqPrefix: mcq ? mcq.prefix : '',
+        mcqAnswer: mcqAnswer,
+        mcqSuffix: mcq ? mcq.suffix : '',
+        mcqDummies: mcqDummies,
+        available: {
+          A: true,
+          B: hasSort,
+          C: sortTokens.length >= 2,
+          D: hasSort && sortDummy !== '',
+          E: hasSort,
+          F: hasMcq,
+          G: hasMcq && mcqDummies.length >= 1,
+          H: hasMcq && mcqDummies.length >= 1
+        },
+        warnings: warnings
+      });
+    }
+    return questions;
+}
+
+function ddExport_parseBracketSentence_(text) {
+    var s = (text || '').toString().replace(/\s+/g, ' ').trim();
+    if (!s) return null;
+    var m = s.match(GRAMMAR_BRACKET_RE);
+    if (!m) return null;
+    return {
+      prefix: s.slice(0, m.index).trim(),
+      inner: m[0].slice(1, -1).trim(),
+      suffix: s.slice(m.index + m[0].length).trim()
+    };
+}
+
+function ddExport_splitGrammarList_(text) {
+    return (text || '').toString().split(/[,、，]/)
+      .map(function (s) { return s.replace(/\s+/g, ' ').trim(); })
+      .filter(function (s) { return s !== ''; });
+}
+
+function ddExport_joinGrammarSentence_(prefix, inner, suffix) {
+    var s = prefix ? (inner ? prefix + ' ' + inner : prefix) : inner;
+    if (suffix) s += /^[.,!?;:]/.test(suffix) ? suffix : ' ' + suffix;
+    return s.replace(/\s+/g, ' ').trim();
+}
+
+function ddExport_normalizeGrammarSentence_(s) {
+    return (s || '').toString().toLowerCase()
+      .replace(/[.,!?;:"]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+}
+
+function ddExport_splitGrammarVariants_(text) {
+    var s = (text || '').toString().trim();
+    if (!s) return [''];
+    var parts = [];
+    var current = '';
+    var bracketDepth = 0;
+    for (var i = 0; i < s.length; i++) {
+      var ch = s[i];
+      if (ch === '[') { bracketDepth++; current += ch; }
+      else if (ch === ']') { bracketDepth = Math.max(0, bracketDepth - 1); current += ch; }
+      else if (ch === '/' && bracketDepth === 0) { parts.push(current.trim()); current = ''; }
+      else current += ch;
+    }
+    if (current.trim()) parts.push(current.trim());
+    return parts.length ? parts : [''];
+}
+
+function ddExport_expandWordAlternatives_(sentence) {
+    var s = (sentence || '').toString().trim();
+    if (!s) return [''];
+    function expandRecursive(str) {
+      var m = str.match(/([^\s\[]+)\[([^\]]+)\]/);
+      if (!m) return [str.replace(/\s+/g, ' ').trim()];
+      var alts = [m[1]].concat(m[2].split('/').map(function (a) { return a.trim(); }).filter(Boolean));
+      var results = [];
+      alts.forEach(function (alt) {
+        var replaced = str.slice(0, m.index) + alt + str.slice(m.index + m[0].length);
+        expandRecursive(replaced).forEach(function (r) {
+          if (r && results.indexOf(r) === -1) results.push(r);
+        });
+      });
+      return results;
+    }
+    return expandRecursive(s);
+}
+
+function ddExport_expandAcceptedSentences_(raw) {
+    var variants = ddExport_splitGrammarVariants_(raw);
+    var all = [];
+    variants.forEach(function (v) {
+      ddExport_expandWordAlternatives_(v).forEach(function (sent) {
+        var norm = sent.replace(/\s+/g, ' ').trim();
+        if (norm && all.indexOf(norm) === -1) all.push(norm);
+      });
+    });
+    return all.length ? all : [''];
+}
+
+function ddExport_matchesAcceptedSentences_(user, acceptedSentences) {
+    var normUser = ddExport_normalizeGrammarSentence_(user);
+    if (!normUser) return false;
+    var list = acceptedSentences || [];
+    for (var i = 0; i < list.length; i++) {
+      if (ddExport_normalizeGrammarSentence_(list[i]) === normUser) return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// 単語パース（本体 code.gs と同等）
+// ---------------------------------------------------------------------------
+
+function ddExport_canonicalVocabHeader_(header) {
+    var raw = (header == null ? '' : String(header)).trim();
+    if (!raw) return '';
+    if (VOCAB_HEADER_ALIASES[raw]) return VOCAB_HEADER_ALIASES[raw];
+    if (raw.indexOf('意味@') === 0) return '意味＠' + raw.slice('意味@'.length);
+    return raw;
+}
+
+function ddExport_normalizeVocabField_(value) {
+    if (value == null) return UNREGISTERED;
+    var str = String(value).trim();
+    if (str === '' || str === LEGACY_UNREGISTERED) return UNREGISTERED;
+    return str;
+}
+
+function ddExport_rowToVocabObject_(headers, row) {
+    var obj = {};
+    for (var i = 0; i < headers.length; i++) {
+      var key = ddExport_canonicalVocabHeader_(headers[i]);
+      if (!key) continue;
+      var value = row[i] !== undefined && row[i] !== null ? row[i] : '';
+      if (obj[key] === undefined || obj[key] === '') obj[key] = value;
+    }
+    return obj;
+}
+
+function ddExport_parseVocabSheetValues_(data, filters) {
+    if (!data || data.length <= 1) return { words: [], pool: [] };
+    var headers = data[0];
+    var daiFilter = (filters && filters.dai) || [];
+    var chuFilter = (filters && filters.chu) || [];
+    var shoFilter = (filters && filters.sho) || [];
+    var words = [];
+    var pool = [];
+    for (var r = 1; r < data.length; r++) {
+      var rowObj = ddExport_rowToVocabObject_(headers, data[r]);
+      rowObj._rowIndex = r + 1;
+      var word = ddExport_normalizeVocabField_(rowObj['英単語・熟語の表現']);
+      if (word === UNREGISTERED) continue;
+      pool.push(rowObj);
+      var dai = ddExport_normalizeVocabField_(rowObj['大区分']);
+      var chu = ddExport_normalizeVocabField_(rowObj['中区分']);
+      var sho = ddExport_normalizeVocabField_(rowObj['小区分']);
+      if (daiFilter.length && daiFilter.indexOf(dai) === -1) continue;
+      if (chuFilter.length && chuFilter.indexOf(chu) === -1) continue;
+      if (shoFilter.length && shoFilter.indexOf(sho) === -1) continue;
+      words.push(rowObj);
+    }
+    return { words: words, pool: pool };
+}
+
+function ddExport_fetchVocabWordsForSheet_(ss, sheetName, bookPool) {
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) throw new Error('シートが見つかりません: ' + sheetName);
+    var parsed = ddExport_parseVocabSheetValues_(sheet.getDataRange().getValues(), {});
+    return { words: parsed.words, pool: parsed.pool, bookPool: bookPool || parsed.pool };
+}
+
+function ddExport_buildVocabSheetInfo_(sheet) {
+    var data = sheet.getDataRange().getValues();
+    if (data.length <= 1) {
+      return { sheetName: sheet.getName(), wordCount: 0, divisions: { dai: [], chu: [], sho: [] } };
+    }
+    var headers = data[0];
+    var daiIdx = -1;
+    var chuIdx = -1;
+    var shoIdx = -1;
+    var wordIdx = -1;
+    for (var i = 0; i < headers.length; i++) {
+      var h = ddExport_canonicalVocabHeader_(headers[i]);
+      if (h === '大区分') daiIdx = i;
+      if (h === '中区分') chuIdx = i;
+      if (h === '小区分') shoIdx = i;
+      if (h === '英単語・熟語の表現') wordIdx = i;
+    }
+    var daiSet = {};
+    var chuSet = {};
+    var shoSet = {};
+    var wordCount = 0;
+    for (var r = 1; r < data.length; r++) {
+      var row = data[r];
+      var word = wordIdx >= 0 ? row[wordIdx] : '';
+      if (!word || String(word).trim() === '') continue;
+      wordCount++;
+      var dai = daiIdx >= 0 ? ddExport_normalizeVocabField_(row[daiIdx]) : UNREGISTERED;
+      var chu = chuIdx >= 0 ? ddExport_normalizeVocabField_(row[chuIdx]) : UNREGISTERED;
+      var sho = shoIdx >= 0 ? ddExport_normalizeVocabField_(row[shoIdx]) : UNREGISTERED;
+      daiSet[dai] = true;
+      chuSet[chu] = true;
+      shoSet[sho] = true;
+    }
+    function keys(obj) {
+      return Object.keys(obj).sort(function (a, b) { return String(a).localeCompare(String(b), 'ja'); });
+    }
+    return {
+      sheetName: sheet.getName(),
+      wordCount: wordCount,
+      divisions: { dai: keys(daiSet), chu: keys(chuSet), sho: keys(shoSet) }
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Drive / ユーティリティ
+// ---------------------------------------------------------------------------
+
+function ddExport_getProp_(key, defaultValue) {
+    var v = PropertiesService.getScriptProperties().getProperty(key);
+    return (v && String(v).trim()) ? String(v).trim() : defaultValue;
+}
+
+function ddExport_safeFileName_(name) {
+    return String(name || 'export').replace(/[\\/:*?"<>|]/g, '_');
+}
+
+function ddExport_ensureFolderPath_(pathParts) {
+    var parent = DriveApp.getRootFolder();
+    pathParts.forEach(function (part) {
+      var it = parent.getFoldersByName(part);
+      parent = it.hasNext() ? it.next() : parent.createFolder(part);
+    });
+    return parent;
+}
+
+function ddExport_writeOrReplaceFile_(folder, fileName, blob) {
+    var it = folder.getFilesByName(fileName);
+    while (it.hasNext()) it.next().setTrashed(true);
+    folder.createFile(blob);
+}
+
+================================================================================
+=== ここまでコピー ===
+================================================================================
+
+【GitHub マージ手順（複数ブックがある場合）】
+1. 各 SS で「④ manifest.jsonをダウンロード」
+2. 同じ学習モードの manifest をマージして docs/data/ に1ファイルずつ配置
+   - 文法ブック複数 → manifest-grammar.json（catalog / questions を結合）
+   - 単語ブック複数 → manifest-vocab.json と manifest-reading.json（vocabCatalog.presets / vocabWords を結合）
+3. 分割 JSON も使う場合は「② Driveに書き出し」で grammar/ vocab/ sources/ も配置
+4. version はマージ後に再計算するか、GAS② の presetVersion に揃える（本体キャッシュの無効化用）
+
+【学習モードと manifest ファイル名】
+  文法・語法演習  → manifest-grammar.json
+  単語学習        → manifest-vocab.json
+  音読練習        → manifest-reading.json（単語ブックと同データ・例文付き）
+  AI英会話        → manifest-ai-conversation.json（本 GAS では未対応・将来用）
+
+【source-map の意味】
+  sources/{spreadsheetId}.json が GitHub にある → その SS は Drive から読まない
+  files[].githubPath に実データのパス、manifestKey に本体の参照キーを記録
+
+【トラブルシュート】
+- メニューが出ない → 一度 SS を閉じて開き直す / onOpen を手動実行
+- ダウンロードが重い → 「② Driveに書き出し」で分割ファイルを使う
+- 文法・単語が混在 → 1ブック1用途の SS に分ける

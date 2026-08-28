@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  GAS② exportStatic API から docs/data/manifest.json を生成する。
+  GAS② exportStatic API から学習モード別 manifest を docs/data/ に生成する。
 #>
 param(
   [string]$ApiUrl
@@ -36,8 +36,58 @@ if (-not (Test-Path $outDir)) {
   New-Item -ItemType Directory -Path $outDir | Out-Null
 }
 
-$manifestPath = Join-Path $outDir 'manifest.json'
-$data | ConvertTo-Json -Depth 20 -Compress | Set-Content -Path $manifestPath -Encoding UTF8
+function New-ModeManifest {
+  param(
+    [Parameter(Mandatory = $true)]$Source,
+    [Parameter(Mandatory = $true)][string]$Mode,
+    [Parameter(Mandatory = $true)][string]$ModeLabel,
+    [Parameter(Mandatory = $true)][string]$FileName
+  )
 
-Write-Host "Written: $manifestPath"
+  $manifest = [ordered]@{
+    schemaVersion = 1
+    mode          = $Mode
+    modeLabel     = $ModeLabel
+    manifestFile  = $FileName
+    version       = $Source.version
+    exportedAt    = $Source.exportedAt
+    catalog       = @{}
+    vocabCatalog  = @{ presets = @() }
+    questions     = @{}
+    vocabWords    = @{}
+  }
+
+  switch ($Mode) {
+    'grammar' {
+      if ($Source.catalog) { $manifest.catalog = $Source.catalog }
+      if ($Source.questions) { $manifest.questions = $Source.questions }
+    }
+    { $_ -in @('vocab', 'reading') } {
+      if ($Source.vocabCatalog) { $manifest.vocabCatalog = $Source.vocabCatalog }
+      if ($Source.vocabWords) { $manifest.vocabWords = $Source.vocabWords }
+    }
+    'ai' { }
+  }
+
+  return $manifest
+}
+
+$modeFiles = @(
+  @{ Mode = 'grammar'; Label = '文法・語法演習'; File = 'manifest-grammar.json' },
+  @{ Mode = 'vocab'; Label = '単語学習'; File = 'manifest-vocab.json' },
+  @{ Mode = 'reading'; Label = '音読練習'; File = 'manifest-reading.json' },
+  @{ Mode = 'ai'; Label = 'AI英会話'; File = 'manifest-ai-conversation.json' }
+)
+
+foreach ($item in $modeFiles) {
+  $manifest = New-ModeManifest -Source $data -Mode $item.Mode -ModeLabel $item.Label -FileName $item.File
+  $manifestPath = Join-Path $outDir $item.File
+  $manifest | ConvertTo-Json -Depth 20 -Compress | Set-Content -Path $manifestPath -Encoding UTF8
+  Write-Host "Written: $manifestPath"
+}
+
+# 後方互換: 旧クライアント向けに統合 manifest も残す
+$legacyPath = Join-Path $outDir 'manifest.json'
+$data | ConvertTo-Json -Depth 20 -Compress | Set-Content -Path $legacyPath -Encoding UTF8
+Write-Host "Written: $legacyPath (legacy)"
 Write-Host "Version: $($data.version)"

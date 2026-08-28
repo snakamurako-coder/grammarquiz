@@ -2106,8 +2106,11 @@ async function flushSendOutbox_() {
  * プリセット取得（ハイブリッド）
  *
  *   1. localStorage キャッシュ … 教材の版が変わるまで再利用。ネットワークに出ない
- *   2. Pages の manifest.json  … 初回でも待たずに表示できる。GAS② に触らない
+ *   2. Pages のモード別 manifest … 初回でも待たずに表示できる。GAS② に触らない
  *   3. GAS② の JSON API        … manifest が古い・manifest に無い教材だけ
+ *
+ * manifest ファイル（docs/data/）:
+ *   manifest-grammar.json / manifest-vocab.json / manifest-reading.json / manifest-ai-conversation.json
  *
  * 教材が更新されたかどうかは GAS② の presetVersion で判定する。
  * 版が変わったときだけキャッシュを捨て、'digitaldrill:presets-updated' を通知する。
@@ -2116,14 +2119,34 @@ const PresetModule = (() => {
   const CACHE_PREFIX = 'dd_preset_';
   const VERSION_KEY = 'dd_preset_version';
 
-  let manifest = null;
-  let manifestPromise = null;
+  const MANIFEST_MODE_PATHS = {
+    grammar: 'data/manifest-grammar.json',
+    vocab: 'data/manifest-vocab.json',
+    reading: 'data/manifest-reading.json',
+    ai: 'data/manifest-ai-conversation.json'
+  };
+
+  const manifestsByMode = {};
+  const manifestPromisesByMode = {};
   let revalidatePromise = null;
 
-  function manifestUrl_() {
+  function manifestPaths_() {
+    const cfg = window.DIGITALDRILL_CONFIG || {};
+    const urls = cfg.STATIC_MANIFEST_URLS;
+    if (urls && typeof urls === 'object') {
+      return Object.assign({}, MANIFEST_MODE_PATHS, urls);
+    }
+    return MANIFEST_MODE_PATHS;
+  }
+
+  function legacyManifestUrl_() {
     return window.STATIC_MANIFEST_URL
       || (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.STATIC_MANIFEST_URL)
       || 'data/manifest.json';
+  }
+
+  function baseUrl_() {
+    return window.location.pathname.replace(/\/[^/]*$/, '/');
   }
 
   function currentVersion_() {
@@ -2162,29 +2185,50 @@ const PresetModule = (() => {
     } catch (e) {}
   }
 
-  /** Pages 上の manifest.json を1回だけ読む。未生成なら null */
-  function loadManifest() {
-    if (!manifestPromise) {
-      manifestPromise = (async () => {
-        const base = window.location.pathname.replace(/\/[^/]*$/, '/');
-        const res = await fetch(base + manifestUrl_());
-        if (!res.ok) {
-          console.warn('manifest.json がありません。GAS② API から取得します。');
+  async function fetchManifestJson_(path) {
+    const res = await fetch(baseUrl_() + path);
+    if (!res.ok) return null;
+    try { return await res.json(); } catch (e) { return null; }
+  }
+
+  function legacyManifestMatchesMode_(legacy, mode) {
+    if (!legacy) return false;
+    if (mode === 'grammar') return !!(legacy.catalog || legacy.questions);
+    if (mode === 'vocab' || mode === 'reading') {
+      return !!(legacy.vocabCatalog || legacy.vocabWords);
+    }
+    return false;
+  }
+
+  /** 学習モード別 manifest を1回だけ読む。未生成なら null */
+  function loadManifestForMode_(mode) {
+    if (!manifestPromisesByMode[mode]) {
+      manifestPromisesByMode[mode] = (async () => {
+        const paths = manifestPaths_();
+        let manifest = await fetchManifestJson_(paths[mode]);
+        if (!manifest && (mode === 'grammar' || mode === 'vocab' || mode === 'reading')) {
+          const legacy = await fetchManifestJson_(legacyManifestUrl_());
+          if (legacyManifestMatchesMode_(legacy, mode)) manifest = legacy;
+        }
+        if (!manifest) {
+          console.warn('manifest (' + mode + ') がありません。GAS② API から取得します。');
           return null;
         }
-        manifest = await res.json();
-        // 初回訪問時の出発点。2回目以降は API 由来の版のほうが新しいことがあるので上書きしない
-        if (!currentVersion_()) adoptVersion_(manifest.version);
+        manifestsByMode[mode] = manifest;
+        if (!currentVersion_() && manifest.version) adoptVersion_(manifest.version);
         return manifest;
       })();
     }
-    return manifestPromise;
+    return manifestPromisesByMode[mode];
   }
 
   /** manifest が現行版と一致していれば静的データを使える */
-  async function usableManifest_() {
-    const m = await loadManifest();
-    return m && m.version === currentVersion_() ? m : null;
+  async function usableManifestForMode_(mode) {
+    const manifest = await loadManifestForMode_(mode);
+    if (!manifest || !manifest.version) return null;
+    const current = currentVersion_();
+    if (!current) return manifest;
+    return manifest.version === current ? manifest : null;
   }
 
   async function fetchRemoteVersion_() {
@@ -2218,8 +2262,8 @@ const PresetModule = (() => {
   /** 「キャッシュ更新」ボタン用。全部捨てて版を取り直す（通知は出さない） */
   async function refreshAll() {
     clearAll();
-    manifest = null;
-    manifestPromise = null;
+    Object.keys(manifestsByMode).forEach(function (k) { delete manifestsByMode[k]; });
+    Object.keys(manifestPromisesByMode).forEach(function (k) { delete manifestPromisesByMode[k]; });
     revalidatePromise = null;
     try {
       const version = await fetchRemoteVersion_();
@@ -2231,17 +2275,18 @@ const PresetModule = (() => {
 
   /**
    * @param {string} key          キャッシュキー
+   * @param {string} mode         grammar | vocab | reading | ai
    * @param {function} fromManifest manifest から該当データを取り出す（無ければ null）
    * @param {function} fromApi     GAS② API を叩く
    * @param {boolean} force        キャッシュと manifest を無視して API から取り直す
    */
-  async function resolve_(key, fromManifest, fromApi, force) {
+  async function resolve_(key, mode, fromManifest, fromApi, force) {
     if (!force) {
       const cached = readCache_(key);
       if (cached !== null) return { status: 'success', data: cached };
 
-      const m = await usableManifest_();
-      const staticData = m ? fromManifest(m) : null;
+      const manifest = await usableManifestForMode_(mode);
+      const staticData = manifest ? fromManifest(manifest) : null;
       if (staticData != null) {
         writeCache_(key, staticData);
         return { status: 'success', data: staticData };
@@ -2269,7 +2314,7 @@ const PresetModule = (() => {
   }
 
   async function getVocabCatalog(force) {
-    const result = await resolve_('vocab_catalog',
+    const result = await resolve_('vocab_catalog', 'vocab',
       function (m) {
         const c = m.vocabCatalog || null;
         return isUsableVocabCatalog_(c) ? c : null;
@@ -2277,7 +2322,7 @@ const PresetModule = (() => {
       function () { return gasRun('apiGetVocabCatalog'); },
       force);
     if (!force && result.status === 'success' && !isUsableVocabCatalog_(result.data)) {
-      return resolve_('vocab_catalog',
+      return resolve_('vocab_catalog', 'vocab',
         function () { return null; },
         function () { return gasRun('apiGetVocabCatalog'); },
         true);
@@ -2286,7 +2331,7 @@ const PresetModule = (() => {
   }
 
   function getGrammarCatalog(force) {
-    return resolve_('grammar_catalog',
+    return resolve_('grammar_catalog', 'grammar',
       function (m) { return m.catalog || null; },
       function () { return gasRun('apiGetGrammarCatalog'); },
       force);
@@ -2294,7 +2339,7 @@ const PresetModule = (() => {
 
   function getVocabWords(bookName, sheetName, filtersJson, includeBookPool, force) {
     const manifestKey = bookName + '::' + sheetName;
-    return resolve_('vocab_words_' + manifestKey + '_' + (filtersJson || '{}'),
+    return resolve_('vocab_words_' + manifestKey + '_' + (filtersJson || '{}'), 'vocab',
       function (m) {
         if (!noFilters_(filtersJson)) return null;
         return (m.vocabWords && m.vocabWords[manifestKey]) || null;
@@ -2305,7 +2350,7 @@ const PresetModule = (() => {
 
   function getQuestions(subject, unit, force) {
     const manifestKey = subject + '::' + unit;
-    return resolve_('questions_' + manifestKey,
+    return resolve_('questions_' + manifestKey, 'grammar',
       function (m) { return (m.questions && m.questions[manifestKey]) || null; },
       function () { return gasRun('apiGetQuestions', subject, unit); },
       force);

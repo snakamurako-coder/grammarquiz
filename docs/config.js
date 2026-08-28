@@ -17,10 +17,19 @@ window.DIGITALDRILL_CONFIG = {
    * ログイン一本化時は上記に加えて openid email profile を付与（user-drive.js）。
    * GCP 同意画面のスコープに Drive / Sheets を含めること。
    */  /**
-   * 静的プリセット manifest（Pages 相対パス）。
-   * 教材の取得は「キャッシュ → この manifest → GAS② API」のハイブリッド。
-   * manifest が未生成でも API 経由で動くが、初回表示を速くするため
+   * 学習モード別の静的 manifest（Pages 相対パス）。
+   * 教材の取得は「キャッシュ → 該当 mode の manifest → GAS② API」のハイブリッド。
    * scripts/export-static.ps1 で生成しておくこと。
+   */
+  STATIC_MANIFEST_URLS: {
+    grammar: 'data/manifest-grammar.json',
+    vocab: 'data/manifest-vocab.json',
+    reading: 'data/manifest-reading.json',
+    ai: 'data/manifest-ai-conversation.json'
+  },
+  /**
+   * 旧形式の単一 manifest（後方互換）。
+   * モード別ファイルが無いときのみ PresetModule が参照する。
    */
   STATIC_MANIFEST_URL: 'data/manifest.json',
   /**
