@@ -205,7 +205,7 @@ VocabRegisterModule.submitCard_
 
 - ヘッダー定義の**正**: `user-drive.js` の `VOCAB_HEADERS`（22列）
 - クライアント登録 UI: `VOCAB_REGISTER_FIELDS` / `VocabRegisterModule`
-- 空欄の正規化: `(未登録)` = `UNREGISTERED`
+- 空欄の正規化: 学習セット（単語帳等）の空欄 sentinel は `×`（`UNREGISTERED`）。読込時に legacy `(未登録)` も `×` へ正規化する。
 - 意味列: `意味＠名詞` 〜 `意味＠熟語・慣用表現` のいずれか1つ以上必須
 
 列構成を変える場合は **同時に** `docs/gem_system_prompt.md` も更新（`.cursor/rules/keep-generator-prompts-in-sync.mdc`）。

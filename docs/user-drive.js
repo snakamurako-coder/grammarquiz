@@ -29,7 +29,8 @@ const UserDriveModule = (function () {
   const SESSION_LOG_SHEET = '学習記録';
   /** ローカルキャッシュに読み込んだ学習セットの記録（通信量抑制用） */
   const SET_CACHE_LOG_SHEET = '学習セット更新記録';
-  const UNREGISTERED = '(未登録)';
+  const UNREGISTERED = '×';
+  const LEGACY_UNREGISTERED = '(未登録)';
   /** refresh_token による再同意なし運用の目標期間（UX・ドキュメント用。Google 側の失効が優先） */
   const REFRESH_SOFT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -170,7 +171,8 @@ const UserDriveModule = (function () {
   function normField_(value) {
     if (value === null || value === undefined) return UNREGISTERED;
     const s = String(value).trim();
-    return s === '' ? UNREGISTERED : s;
+    if (s === '' || s === LEGACY_UNREGISTERED) return UNREGISTERED;
+    return s;
   }
 
   const VOCAB_HEADER_ALIASES = {

@@ -43,7 +43,9 @@ const VOCABULARY_FOLDER_NAME = 'vocabulary';
 /** 本体スプレッドシート（whitelist・フォーム回答） */
 const APP_BOOK_NAME = 'DigitalDrill';
 const MY_VOCAB_BOOK_NAME = 'マイ単語帳';
-const UNREGISTERED = '(未登録)';
+/** 単語帳など学習セットの空欄 sentinel（U+00D7 乗算記号） */
+const UNREGISTERED = '×';
+const LEGACY_UNREGISTERED = '(未登録)';
 
 function naturalLabelSort_(a, b) {
   return String(a).localeCompare(String(b), 'ja', { numeric: true, sensitivity: 'base' });
@@ -1716,7 +1718,7 @@ function getSampleVocabWords_() {
     sampleVocabRow_(5, '通常ステージ', 'Stage1', 'Lesson2', 'look up',
       UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED, UNREGISTERED,
       '（辞書などで）調べる',
-      '熟語として登録。6〜12列目はすべて(未登録)。',
+      '熟語として登録。6〜12列目はすべて×。',
       'search,check', UNREGISTERED, UNREGISTERED,
       'to search for information in a reference book or online',
       '(look up) a word', '単語を(調べる)',
@@ -1846,7 +1848,8 @@ function fetchVocabWordsFromSpreadsheet_(ss, sheetName, filters, includeBookPool
 function normalizeVocabField_(value) {
   if (value === null || value === undefined) return UNREGISTERED;
   const str = value.toString().trim();
-  return str === '' ? UNREGISTERED : str;
+  if (str === '' || str === LEGACY_UNREGISTERED) return UNREGISTERED;
+  return str;
 }
 
 function isMeaningRegistered_(value) {

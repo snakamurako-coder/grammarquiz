@@ -2342,9 +2342,9 @@ const UserVocabCacheModule = (() => {
     const chuSet = {};
     const shoSet = {};
     (words || []).forEach(function (w) {
-      const dai = String(w['大区分'] || '(未登録)').trim() || '(未登録)';
-      const chu = String(w['中区分'] || '(未登録)').trim() || '(未登録)';
-      const sho = String(w['小区分'] || '(未登録)').trim() || '(未登録)';
+      const dai = vocabNorm(w['大区分']);
+      const chu = vocabNorm(w['中区分']);
+      const sho = vocabNorm(w['小区分']);
       daiSet[dai] = true;
       chuSet[chu] = true;
       shoSet[sho] = true;
@@ -2362,9 +2362,9 @@ const UserVocabCacheModule = (() => {
     const chuFilter = (filters && filters.chu) || [];
     const shoFilter = (filters && filters.sho) || [];
     return (allWords || []).filter(function (rowObj) {
-      const dai = String(rowObj['大区分'] || '(未登録)').trim() || '(未登録)';
-      const chu = String(rowObj['中区分'] || '(未登録)').trim() || '(未登録)';
-      const sho = String(rowObj['小区分'] || '(未登録)').trim() || '(未登録)';
+      const dai = vocabNorm(rowObj['大区分']);
+      const chu = vocabNorm(rowObj['中区分']);
+      const sho = vocabNorm(rowObj['小区分']);
       if (daiFilter.length && daiFilter.indexOf(dai) === -1) return false;
       if (chuFilter.length && chuFilter.indexOf(chu) === -1) return false;
       if (shoFilter.length && shoFilter.indexOf(sho) === -1) return false;
@@ -2982,7 +2982,7 @@ const SrsModule = (() => {
   // 学習状態の保管場所は ItemStateModule ただ一つ。
   // ここは出題間隔（SM-2）の計算だけを担当する。
   function buildWordId(bookName, sheetName, serialNo) {
-    return String(bookName || '(未登録)') + '|' + String(sheetName || '(未登録)') + '|' + String(serialNo || '(未登録)');
+    return String(bookName || VOCAB_UNREGISTERED) + '|' + String(sheetName || VOCAB_UNREGISTERED) + '|' + String(serialNo || VOCAB_UNREGISTERED);
   }
 
   function setIdOf(wordId) {
@@ -4280,7 +4280,8 @@ const CorrectionModule = (() => {
 window.CorrectionModule = CorrectionModule;
 
 // vocabConstants.js
-const VOCAB_UNREGISTERED = '(未登録)';
+const VOCAB_UNREGISTERED = '×';
+const VOCAB_LEGACY_UNREGISTERED = '(未登録)';
 const VOCAB_MEANING_KEYS = [
   '意味＠名詞', '意味＠動詞', '意味＠形容詞', '意味＠副詞',
   '意味＠前置詞', '意味＠接続詞', '意味＠その他品詞', '意味＠熟語・慣用表現'
@@ -4315,7 +4316,8 @@ const VOCAB_OPTION_UNKNOWN = 'わからない';
 function vocabNorm(v) {
   if (v === null || v === undefined) return VOCAB_UNREGISTERED;
   const s = v.toString().trim();
-  return s === '' ? VOCAB_UNREGISTERED : s;
+  if (s === '' || s === VOCAB_LEGACY_UNREGISTERED) return VOCAB_UNREGISTERED;
+  return s;
 }
 
 function vocabHasMeaning(v) {
@@ -8141,7 +8143,7 @@ function getDefaultCorrectAnswer_(q) {
 
 function normalizeExplanationField_(value) {
   const text = String(value == null ? '' : value).trim();
-  if (!text || text === '(未登録)') return '';
+  if (!text || text === VOCAB_UNREGISTERED || text === VOCAB_LEGACY_UNREGISTERED) return '';
   return text;
 }
 
@@ -9217,7 +9219,7 @@ function renderUserLogsList_(logs) {
     const settingsText = formatSessionSettingsText_(log);
     html += '<div class="log-item">'
       + '<div class="log-item-main">'
-      + '<div class="log-title">' + escapeHtml_(log['学習セット名'] || '(未登録)') + '</div>'
+      + '<div class="log-title">' + escapeHtml_(log['学習セット名'] || '—') + '</div>'
       + '<div class="log-meta">' + escapeHtml_(metaParts.filter(Boolean).join(' / ')) + '</div>'
       + '<div class="log-settings">' + escapeHtml_(settingsText) + '</div>'
       + '</div>'
@@ -9427,7 +9429,7 @@ async function renderMyPage(logs, renderOpts) {
     recentHtml += `
       <div class="log-item">
         <div class="log-item-main">
-          <div class="log-title">${escapeHtml_(log['学習セット名'] || '(未登録)')}</div>
+          <div class="log-title">${escapeHtml_(log['学習セット名'] || '—')}</div>
           <div class="log-meta">${escapeHtml_(metaParts.join(' - '))}</div>
           <div class="log-settings">${escapeHtml_(settingsText)}</div>
         </div>

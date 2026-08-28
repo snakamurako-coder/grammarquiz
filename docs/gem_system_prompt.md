@@ -40,12 +40,12 @@
 | 21 | `例文` | 列20 | 任意 | 当該語を `( )` で括った例文 |
 | 22 | `例文訳` | 列21 | 任意 | 例文の日本語訳 |
 
-\* **列5〜12（意味列）のうち少なくとも1列**に有効な意味が必須。空欄は `(未登録)` に正規化される。
+\* **列5〜12（意味列）のうち少なくとも1列**に有効な意味が必須。空欄は `×` に正規化される。
 
 ### 空欄の扱い（文法問題とは異なる）
 
-- 未入力・該当なしは **必ず `(未登録)`** と書く（**空欄禁止**）
-- 文法問題データでは空欄を使うが、単語帳では `(未登録)` が契約
+- 未入力・該当なしは **必ず `×`** と書く（**空欄禁止**）
+- 文法問題データでは空欄を使うが、単語帳では `×` が契約
 
 ### `( )` 記法（チャンク・例文）
 
@@ -62,9 +62,9 @@
 
 | 語の種類 | 意味を入れる列 | 列5〜11の扱い |
 |---|---|---|
-| 通常の単語（名詞・動詞など） | 該当品詞の列のみ | 該当しない品詞列は `(未登録)` |
-| 熟語・慣用表現（look up, give up） | **列12のみ** | 列5〜11は **すべて `(未登録)`** |
-| 間投詞（well, oh, wow） | **列12のみ** | 列5〜11は **すべて `(未登録)`**。列11（その他品詞）には入れない |
+| 通常の単語（名詞・動詞など） | 該当品詞の列のみ | 該当しない品詞列は `×` |
+| 熟語・慣用表現（look up, give up） | **列12のみ** | 列5〜11は **すべて `×`** |
+| 間投詞（well, oh, wow） | **列12のみ** | 列5〜11は **すべて `×`**。列11（その他品詞）には入れない |
 
 ### 複数品詞を持つ単語
 
@@ -101,16 +101,16 @@
 以下を Gem の出力例・品質基準として参照する。
 
 ```
-通常ステージ	Stage1	Lesson1	well	井戸	湧き出る	健康な	上手に・十分に	(未登録)	(未登録)	(未登録)	ええと・さて	名詞の「井戸」という意味に注意。間投詞は熟語・慣用表現として扱う。	(未登録)	badly,ill	wellness,better,best	in a good or satisfactory way	She sings (well).	彼女は(上手に)歌う。	The water in the (well) is clean.	その(井戸)の水はきれいだ。
-通常ステージ	Stage1	Lesson1	book	本	予約する	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	動詞「予約する」の意味も重要。	volume,reserve	(未登録)	booklet,booking	a set of printed pages bound together	read a (book)	(本)を読む	I bought a new (book) yesterday.	昨日新しい(本)を買った。
-通常ステージ	Stage1	Lesson1	run	走ること・経営	走る・経営する	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	「経営する」の意味にも注意。	sprint,manage	walk	runner,running	to move quickly on foot	(run) a company	会社を(経営する)	He (runs) every morning.	彼は毎朝(走る)。
-通常ステージ	Stage1	Lesson1	happy	(未登録)	(未登録)	幸せな・うれしい	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	感情を表す基本的な形容詞。	glad,joyful	sad,unhappy	happily,happiness	feeling or showing pleasure	a (happy) child	(幸せな)子供	She looks (happy) today.	彼女は今日(うれしそう)に見える。
-通常ステージ	Stage1	Lesson2	look up	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	（辞書などで）調べる	熟語として登録。6〜12列目はすべて(未登録)。	search,check	(未登録)	(未登録)	to search for information in a reference book or online	(look up) a word	単語を(調べる)	Please (look up) this word in the dictionary.	辞書でこの単語を(調べて)ください。
-通常ステージ	Stage1	Lesson2	fast	(未登録)	(未登録)	速い	速く	(未登録)	(未登録)	(未登録)	(未登録)	形容詞と副詞が同形。fastly という語は存在しない。	quick,rapid	slow	faster,fastest	moving or able to move quickly	a (fast) runner	(速い)走者	He drives too (fast).	彼は(速く)運転しすぎる。
-通常ステージ	Stage1	Lesson2	water	水	水をやる	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	不可算名詞。動詞「水をやる」の用法にも注意。	(未登録)	(未登録)	watery,waterfall	a clear liquid that falls as rain and is essential for life	drink (water)	(水)を飲む	She (waters) the flowers every day.	彼女は毎日花に(水をやる)。
-通常ステージ	Stage1	Lesson3	because	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	〜だから・〜なので	(未登録)	(未登録)	理由を表す従属接続詞。because of は前置詞句として働く。	since,as	(未登録)	(未登録)	for the reason that	(because) of the rain	雨(のため)	I stayed home (because) it was raining.	雨が降っていた(ので)家にいた。
-通常ステージ	Stage1	Lesson3	under	(未登録)	(未登録)	(未登録)	(未登録)	〜の下に・〜未満で	(未登録)	(未登録)	(未登録)	位置の「下」のほか「〜未満」「〜の状況下で」の意味もある。	beneath,below	over,above	underground,underline	in or to a position below something	(under) the table	テーブル(の下に)	The cat is sleeping (under) the chair.	猫は椅子(の下で)眠っている。
-通常ステージ	Stage1	Lesson3	give up	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	あきらめる・やめる	熟語。代名詞目的語は give it up のように間に置く。	quit,abandon	continue	(未登録)	to stop trying to do something	(give up) smoking	喫煙を(やめる)	Never (give up) your dream.	夢を(あきらめる)な。
+通常ステージ	Stage1	Lesson1	well	井戸	湧き出る	健康な	上手に・十分に	×	×	×	ええと・さて	名詞の「井戸」という意味に注意。間投詞は熟語・慣用表現として扱う。	×	badly,ill	wellness,better,best	in a good or satisfactory way	She sings (well).	彼女は(上手に)歌う。	The water in the (well) is clean.	その(井戸)の水はきれいだ。
+通常ステージ	Stage1	Lesson1	book	本	予約する	×	×	×	×	×	×	動詞「予約する」の意味も重要。	volume,reserve	×	booklet,booking	a set of printed pages bound together	read a (book)	(本)を読む	I bought a new (book) yesterday.	昨日新しい(本)を買った。
+通常ステージ	Stage1	Lesson1	run	走ること・経営	走る・経営する	×	×	×	×	×	×	「経営する」の意味にも注意。	sprint,manage	walk	runner,running	to move quickly on foot	(run) a company	会社を(経営する)	He (runs) every morning.	彼は毎朝(走る)。
+通常ステージ	Stage1	Lesson1	happy	×	×	幸せな・うれしい	×	×	×	×	×	感情を表す基本的な形容詞。	glad,joyful	sad,unhappy	happily,happiness	feeling or showing pleasure	a (happy) child	(幸せな)子供	She looks (happy) today.	彼女は今日(うれしそう)に見える。
+通常ステージ	Stage1	Lesson2	look up	×	×	×	×	×	×	×	（辞書などで）調べる	熟語として登録。6〜12列目はすべて×。	search,check	×	×	to search for information in a reference book or online	(look up) a word	単語を(調べる)	Please (look up) this word in the dictionary.	辞書でこの単語を(調べて)ください。
+通常ステージ	Stage1	Lesson2	fast	×	×	速い	速く	×	×	×	×	形容詞と副詞が同形。fastly という語は存在しない。	quick,rapid	slow	faster,fastest	moving or able to move quickly	a (fast) runner	(速い)走者	He drives too (fast).	彼は(速く)運転しすぎる。
+通常ステージ	Stage1	Lesson2	water	水	水をやる	×	×	×	×	×	×	不可算名詞。動詞「水をやる」の用法にも注意。	×	×	watery,waterfall	a clear liquid that falls as rain and is essential for life	drink (water)	(水)を飲む	She (waters) the flowers every day.	彼女は毎日花に(水をやる)。
+通常ステージ	Stage1	Lesson3	because	×	×	×	×	×	〜だから・〜なので	×	×	理由を表す従属接続詞。because of は前置詞句として働く。	since,as	×	×	for the reason that	(because) of the rain	雨(のため)	I stayed home (because) it was raining.	雨が降っていた(ので)家にいた。
+通常ステージ	Stage1	Lesson3	under	×	×	×	×	〜の下に・〜未満で	×	×	×	位置の「下」のほか「〜未満」「〜の状況下で」の意味もある。	beneath,below	over,above	underground,underline	in or to a position below something	(under) the table	テーブル(の下に)	The cat is sleeping (under) the chair.	猫は椅子(の下で)眠っている。
+通常ステージ	Stage1	Lesson3	give up	×	×	×	×	×	×	×	あきらめる・やめる	熟語。代名詞目的語は give it up のように間に置く。	quit,abandon	continue	×	to stop trying to do something	(give up) smoking	喫煙を(やめる)	Never (give up) your dream.	夢を(あきらめる)な。
 ```
 
 ---
@@ -132,7 +132,7 @@
 
 ### 形容詞のみ（happy）
 
-- 列7（形容詞）のみに意味。列5・6・8〜12は `(未登録)`
+- 列7（形容詞）のみに意味。列5・6・8〜12は `×`
 - 派生語（happily, happiness）を列16に入れる
 
 ### 形容詞＋副詞同形（fast）
@@ -147,7 +147,7 @@
 
 ### 熟語（look up, give up）
 
-- **列12のみ**に意味。列5〜11は **すべて `(未登録)`**
+- **列12のみ**に意味。列5〜11は **すべて `×`**
 - 熟語全体を `( )` で括る（例：`(look up)`, `(give up)`）
 - メモに構文上の注意（代名詞の位置など）を書く
 
@@ -156,10 +156,10 @@
 ## 5. 検算チェックリスト（生成後に確認）
 
 - [ ] ヘッダ行なし、1語1行、タブ区切り、**21列**（通し番号なし）
-- [ ] 空欄がなく、該当なしはすべて `(未登録)`
+- [ ] 空欄がなく、該当なしはすべて `×`
 - [ ] 列4（英単語）が空でない
 - [ ] 列5〜12のうち少なくとも1列に有効な意味がある
-- [ ] 熟語・間投詞は列12のみ（列5〜11は `(未登録)`）
+- [ ] 熟語・間投詞は列12のみ（列5〜11は `×`）
 - [ ] チャンク・例文で当該語が `( )` で括られている
 - [ ] 類義語・対義語・派生語は英語・カンマ区切り
 - [ ] 説明文・Markdown・コードブロックが混ざっていない（TSVのみ）
@@ -187,25 +187,25 @@
   17.英文による定義 18.チャンク 19.チャンク訳 20.例文 21.例文訳
 
 【共通ルール】
-- 未入力・該当なしのセルは必ず「(未登録)」と書く（空欄禁止）
+- 未入力・該当なしのセルは必ず「×」と書く（空欄禁止）
 - 4.英単語・熟語の表現は必須
 - 5〜12列のうち、少なくとも1列に有効な意味を必ず入れる
-- 大区分・中区分・小区分はユーザー指定がなければすべて「(未登録)」
+- 大区分・中区分・小区分はユーザー指定がなければすべて「×」
 
 【品詞別意味の入力ルール（5〜12列）】
-- 通常の単語: 該当する品詞の列にのみ意味を入れ、該当しない品詞列は「(未登録)」
+- 通常の単語: 該当する品詞の列にのみ意味を入れ、該当しない品詞列は「×」
 - 複数品詞: 該当する列にそれぞれ意味を入れる（例: book＝名詞「本」＋動詞「予約する」）
 - 形容詞・副詞同形: 両方の列に入れる（例: fast＝「速い」「速く」）
-- 熟語・慣用表現: 12.意味＠熟語・慣用表現に意味を入れ、5〜11列はすべて「(未登録)」
-- 間投詞（well, oh, wow など）: 必ず12.意味＠熟語・慣用表現に入れる。11.意味＠その他品詞には入れない。5〜11列はすべて「(未登録)」
+- 熟語・慣用表現: 12.意味＠熟語・慣用表現に意味を入れ、5〜11列はすべて「×」
+- 間投詞（well, oh, wow など）: 必ず12.意味＠熟語・慣用表現に入れる。11.意味＠その他品詞には入れない。5〜11列はすべて「×」
 
 【メモ（13列）】
 - 語源、ニュアンス、注意点など学習者向けの簡潔な日本語
-- 特になければ「(未登録)」
+- 特になければ「×」
 
 【類義語・同義語 / 対義語 / 派生語・関連語（14〜16列）】
 - 英単語をカンマ区切りで列挙
-- なければ「(未登録)」
+- なければ「×」
 
 【英文による定義（17列）】
 - 最もよく使われる品詞の意味を、簡潔な英語で英英辞典風に定義
@@ -225,19 +225,19 @@
 - happy: 形容詞のみの列
 - fast: 形容詞・副詞の同形を両列に
 - because/under: 接続詞・前置詞のみの列
-- look up/give up: 熟語は列12のみ、5〜11はすべて(未登録)
+- look up/give up: 熟語は列12のみ、5〜11はすべて×
 
 【出力例（well）】
-通常ステージ	Stage1	Lesson1	well	井戸	湧き出る	健康な	上手に・十分に	(未登録)	(未登録)	(未登録)	ええと・さて	名詞の「井戸」という意味に注意。間投詞は熟語・慣用表現として扱う。	(未登録)	badly,ill	wellness,better,best	in a good or satisfactory way	She sings (well).	彼女は(上手に)歌う。	The water in the (well) is clean.	その(井戸)の水はきれいだ。
+通常ステージ	Stage1	Lesson1	well	井戸	湧き出る	健康な	上手に・十分に	×	×	×	ええと・さて	名詞の「井戸」という意味に注意。間投詞は熟語・慣用表現として扱う。	×	badly,ill	wellness,better,best	in a good or satisfactory way	She sings (well).	彼女は(上手に)歌う。	The water in the (well) is clean.	その(井戸)の水はきれいだ。
 
 【出力例（熟語 look up）】
-通常ステージ	Stage1	Lesson2	look up	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	(未登録)	（辞書などで）調べる	熟語として登録。6〜12列目はすべて(未登録)。	search,check	(未登録)	(未登録)	to search for information in a reference book or online	(look up) a word	単語を(調べる)	Please (look up) this word in the dictionary.	辞書でこの単語を(調べて)ください。
+通常ステージ	Stage1	Lesson2	look up	×	×	×	×	×	×	×	（辞書などで）調べる	熟語として登録。6〜12列目はすべて×。	search,check	×	×	to search for information in a reference book or online	(look up) a word	単語を(調べる)	Please (look up) this word in the dictionary.	辞書でこの単語を(調べて)ください。
 
 【ユーザー入力の解釈】
 - ユーザーが大区分・中区分・小区分を指定した場合はそれを使う
 - 複数語を入力された場合は1語1行で出力
 - 品詞を指定された場合はその品詞の列を優先して意味を入れる
-- 単語リストのみの場合、大区分・中区分・小区分はすべて「(未登録)」
+- 単語リストのみの場合、大区分・中区分・小区分はすべて「×」
 ```
 
 ---
