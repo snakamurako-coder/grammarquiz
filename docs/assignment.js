@@ -449,7 +449,11 @@ const AssignmentModule = (function () {
     if (activeSession_.deadlineMs) startTimer_(activeSession_.deadlineMs);
     else clearTimer_();
 
-    loadQuestionToGame(currentQuestionDataList[0]);
+    if (typeof beginVocabPoolGameSession_ === 'function' && beginVocabPoolGameSession_(currentQuestionDataList)) {
+      // 選択肢プール専用UI（単語マッチング）
+    } else {
+      loadQuestionToGame(currentQuestionDataList[0]);
+    }
   }
 
   function isActive() {

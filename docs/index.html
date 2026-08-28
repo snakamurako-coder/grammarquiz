@@ -3683,8 +3683,13 @@ function matchesAcceptedSentences(user, acceptedSentences) {
   return false;
 }
 
+function assignmentQuizDeferFeedback_() {
+  return currentAppMode === 'assignment-quiz';
+}
+window.assignmentQuizDeferFeedback_ = assignmentQuizDeferFeedback_;
+
 function setResultVerdict(el, status, text) {
-  if (!el) return;
+  if (!el || assignmentQuizDeferFeedback_()) return;
   el.innerHTML = '';
   el.style.color = '';
   const v = document.createElement('div');
@@ -3695,7 +3700,7 @@ function setResultVerdict(el, status, text) {
 
 /** 空所に当てはめた全文を作り、当てはめた語句だけ赤字にする */
 function appendJoinedEnglishHighlighted(parent, prefix, inner, suffix) {
-  if (!parent) return;
+  if (!parent || assignmentQuizDeferFeedback_()) return;
   const sentence = document.createElement('div');
   sentence.className = 'result-filled-sentence';
   const p = prefix || '';
@@ -4582,6 +4587,18 @@ function vocabSessionIsPoolMatch_(questions) {
     return vocabIsPoolFormat(q.format) && q.sharedPool && q.sharedPool.length;
   }));
 }
+
+/** 選択肢プール専用UIを起動。起動したら true */
+function beginVocabPoolGameSession_(questions) {
+  if (typeof VocabPoolSession !== 'undefined') VocabPoolSession.reset();
+  if (vocabSessionIsPoolMatch_(questions) && (!window.PoolLayout || PoolLayout.get() === 'phone')) {
+    VocabPoolMatchModule.start(questions);
+    return true;
+  }
+  if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
+  return false;
+}
+window.beginVocabPoolGameSession_ = beginVocabPoolGameSession_;
 
 const VocabPoolMatchModule = (() => {
   let questions = [];
@@ -7848,10 +7865,7 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
       screens.settings.style.display = 'none';
       document.getElementById('result-screen').style.display = 'none';
       screens.game.style.display = 'block';
-      if (vocabSessionIsPoolMatch_(questions) && (!window.PoolLayout || PoolLayout.get() === 'phone')) {
-        VocabPoolMatchModule.start(questions);
-      } else {
-        VocabPoolMatchModule.stop();
+      if (!beginVocabPoolGameSession_(questions)) {
         loadQuestionToGame(currentQuestionDataList[0]);
       }
     } catch (error) {
@@ -8235,12 +8249,13 @@ window.onQuestionCompleted = (isCorrect, meta) => {
   BackendSyncStatus.refresh();
 
   const assignmentActive = window.AssignmentModule && AssignmentModule.isActive();
+  const deferQuizFeedback = assignmentQuizDeferFeedback_();
   if (assignmentActive) {
     const itemId = currentQ && (currentQ._assignmentItemId || currentQ.questionId || currentQ.itemId
       || currentQ.wordId || currentQ.rowId);
     AssignmentModule.onAnswered(itemId, isCorrect, currentQ && currentQ._pointsPerQuestion);
     AssignmentModule.persistHomeworkProgress();
-    if (currentQ && currentQ.rowId) showExplanation(currentQ);
+    if (currentQ && currentQ.rowId && !deferQuizFeedback) showExplanation(currentQ);
   } else if (currentAppMode === 'vocab') {
     if (window.SrsModule && currentQ.wordId) {
       window.SrsModule.update(currentQ.wordId, isCorrect, meta.answerMs || 0, !!meta.isUnknown);
@@ -8253,9 +8268,20 @@ window.onQuestionCompleted = (isCorrect, meta) => {
   }
   if (isCorrect) currentScore++;
 
-  if (window.TtsModule) TtsModule.setResultSpeakText(getTtsEnglish_(currentQ));
-  const answerFeedback = document.getElementById('answer-feedback');
-  if (answerFeedback) answerFeedback.classList.add('is-visible');
+  if (deferQuizFeedback) {
+    const resultMsg = document.getElementById('result-msg');
+    if (resultMsg) {
+      resultMsg.innerHTML = '';
+      resultMsg.textContent = '';
+    }
+    const answerFeedback = document.getElementById('answer-feedback');
+    if (answerFeedback) answerFeedback.classList.remove('is-visible');
+    if (window.TtsModule) TtsModule.setResultSpeakText('');
+  } else {
+    if (window.TtsModule) TtsModule.setResultSpeakText(getTtsEnglish_(currentQ));
+    const answerFeedback = document.getElementById('answer-feedback');
+    if (answerFeedback) answerFeedback.classList.add('is-visible');
+  }
   document.getElementById('next-btn').style.display = 'block';
 };
 
