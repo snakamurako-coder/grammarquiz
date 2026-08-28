@@ -215,7 +215,8 @@ body.pool-match-active {
   background: #fff;
 }
 body.pool-match-active .question-box,
-body.pool-match-active #game-feedback-host { display: none !important; }
+body.pool-match-active #game-feedback-host,
+body.pool-match-active #assignment-session-banner { display: none !important; }
 body.pool-match-active #vocab-pool-match-ui {
   position: fixed;
   inset: 0;
@@ -4588,18 +4589,6 @@ function vocabSessionIsPoolMatch_(questions) {
   }));
 }
 
-/** 選択肢プール専用UIを起動。起動したら true */
-function beginVocabPoolGameSession_(questions) {
-  if (typeof VocabPoolSession !== 'undefined') VocabPoolSession.reset();
-  if (vocabSessionIsPoolMatch_(questions) && (!window.PoolLayout || PoolLayout.get() === 'phone')) {
-    VocabPoolMatchModule.start(questions);
-    return true;
-  }
-  if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
-  return false;
-}
-window.beginVocabPoolGameSession_ = beginVocabPoolGameSession_;
-
 const VocabPoolMatchModule = (() => {
   let questions = [];
   let poolOptions = [];
@@ -4608,6 +4597,8 @@ const VocabPoolMatchModule = (() => {
   let currentFilter = 'all';
   let isSummaryView = false;
   let bound = false;
+  let listIndices_ = null;
+  let onComplete_ = null;
 
   function lemmaKey_(text) {
     return String(text || '').trim().toLowerCase();
@@ -4799,10 +4790,8 @@ const VocabPoolMatchModule = (() => {
   }
 
   function finishAndScore_() {
-    sessionAnswerLog = [];
-    currentScore = 0;
     questions.forEach(function (q, i) {
-      currentQuestionIndex = i;
+      currentQuestionIndex = listIndices_ ? listIndices_[i] : i;
       const user = userAnswers[String(q.id)] || '';
       const correct = correctOf_(q);
       const ok = !!user && lemmaKey_(user) === lemmaKey_(correct);
@@ -4812,8 +4801,10 @@ const VocabPoolMatchModule = (() => {
     });
     const nextBtn = document.getElementById('next-btn');
     if (nextBtn) nextBtn.style.display = 'none';
-    showResultScreen();
+    const done = onComplete_;
     stop();
+    if (done) done();
+    else showResultScreen();
   }
 
   function bind_() {
@@ -4828,8 +4819,11 @@ const VocabPoolMatchModule = (() => {
     });
   }
 
-  function start(qs) {
+  function start(qs, options) {
+    options = options || {};
     bind_();
+    listIndices_ = options.listIndices || null;
+    onComplete_ = typeof options.onComplete === 'function' ? options.onComplete : null;
     questions = (qs || []).map(function (q, i) {
       const copy = Object.assign({}, q);
       copy.id = i + 1;
@@ -4857,6 +4851,8 @@ const VocabPoolMatchModule = (() => {
     document.body.classList.remove('pool-match-active');
     const root = document.getElementById('vocab-pool-match-ui');
     if (root) root.style.display = 'none';
+    listIndices_ = null;
+    onComplete_ = null;
   }
 
   function isActive() {
@@ -4867,6 +4863,136 @@ const VocabPoolMatchModule = (() => {
   return { start, stop, isActive };
 })();
 window.VocabPoolMatchModule = VocabPoolMatchModule;
+
+/** 選択肢プール専用UIを起動。起動したら true */
+function beginVocabPoolGameSession_(questions, options) {
+  options = options || {};
+  if (typeof VocabPoolSession !== 'undefined') VocabPoolSession.reset();
+  if (!vocabSessionIsPoolMatch_(questions)) {
+    if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
+    return false;
+  }
+  if (window.PoolLayout && PoolLayout.get() !== 'phone') {
+    if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
+    return false;
+  }
+  VocabPoolMatchModule.start(questions, options);
+  return true;
+}
+
+/** 通常単語学習・課題共通: プールブロックと逐次ブロックに分けて再生 */
+const GameSessionPlay = (() => {
+  let segments = [];
+  let segmentIndex = 0;
+  let linearPos = 0;
+  let active = false;
+
+  function isPoolBlockAt_(all, start) {
+    if (!all[start] || !vocabIsPoolFormat(all[start].format) || !all[start].sharedPool || !all[start].sharedPool.length) {
+      return null;
+    }
+    const indices = [];
+    let j = start;
+    while (j < all.length) {
+      const q = all[j];
+      if (!vocabIsPoolFormat(q.format) || !q.sharedPool || !q.sharedPool.length) break;
+      indices.push(j);
+      j++;
+    }
+    const block = indices.map(function (idx) { return all[idx]; });
+    return vocabSessionIsPoolMatch_(block) ? { indices: indices, questions: block } : null;
+  }
+
+  function buildSegments_(questions) {
+    const out = [];
+    let i = 0;
+    while (i < questions.length) {
+      const poolBlock = isPoolBlockAt_(questions, i);
+      if (poolBlock) {
+        out.push({ type: 'pool', indices: poolBlock.indices, questions: poolBlock.questions });
+        i = poolBlock.indices[poolBlock.indices.length - 1] + 1;
+        continue;
+      }
+      const indices = [];
+      let j = i;
+      while (j < questions.length && !isPoolBlockAt_(questions, j)) {
+        indices.push(j);
+        j++;
+      }
+      if (!indices.length) {
+        indices.push(i);
+        j = i + 1;
+      }
+      out.push({ type: 'linear', indices: indices });
+      i = j;
+    }
+    return out;
+  }
+
+  function playCurrent_() {
+    if (segmentIndex >= segments.length) {
+      active = false;
+      showResultScreen();
+      return;
+    }
+    const seg = segments[segmentIndex];
+    if (seg.type === 'pool') {
+      beginVocabPoolGameSession_(seg.questions, {
+        listIndices: seg.indices,
+        onComplete: function () {
+          segmentIndex++;
+          linearPos = 0;
+          playCurrent_();
+        }
+      });
+      return;
+    }
+    if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
+    currentQuestionIndex = seg.indices[linearPos];
+    loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
+  }
+
+  function start(questions) {
+    reset();
+    segments = buildSegments_(questions || []);
+    segmentIndex = 0;
+    linearPos = 0;
+    active = segments.length > 0;
+    if (!active) return;
+    playCurrent_();
+  }
+
+  function reset() {
+    segments = [];
+    segmentIndex = 0;
+    linearPos = 0;
+    active = false;
+    if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
+  }
+
+  function isActive() {
+    return active;
+  }
+
+  function advanceLinear() {
+    if (!active) return false;
+    const seg = segments[segmentIndex];
+    if (!seg || seg.type !== 'linear') return false;
+    linearPos++;
+    if (linearPos < seg.indices.length) {
+      currentQuestionIndex = seg.indices[linearPos];
+      loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
+      return true;
+    }
+    segmentIndex++;
+    linearPos = 0;
+    playCurrent_();
+    return true;
+  }
+
+  return { start, reset, isActive, advanceLinear };
+})();
+window.GameSessionPlay = GameSessionPlay;
 
 function isVocabFormat(format) {
   return !!VOCAB_FORMAT_MAP[format];
@@ -7865,9 +7991,7 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
       screens.settings.style.display = 'none';
       document.getElementById('result-screen').style.display = 'none';
       screens.game.style.display = 'block';
-      if (!beginVocabPoolGameSession_(questions)) {
-        loadQuestionToGame(currentQuestionDataList[0]);
-      }
+      GameSessionPlay.start(questions);
     } catch (error) {
       console.error(error);
       alert('通信エラーが発生しました: ' + error.message);
@@ -7877,6 +8001,7 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
 
 elements.backBtn.addEventListener('click', () => {
   if (window.TtsModule) TtsModule.stop();
+  if (window.GameSessionPlay) GameSessionPlay.reset();
   if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
   screens.game.style.display = 'none';
   screens.settings.style.display = 'block';
@@ -8378,6 +8503,9 @@ window.tryAdvanceToNextQuestion_ = tryAdvanceToNextQuestion_;
 
 document.getElementById('next-btn').addEventListener('click', () => {
   document.getElementById('next-btn').style.display = 'none';
+  if (window.GameSessionPlay && GameSessionPlay.isActive()) {
+    if (GameSessionPlay.advanceLinear()) return;
+  }
   currentQuestionIndex++;
   if (currentQuestionIndex < currentQuestionDataList.length) {
     loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
@@ -8413,6 +8541,7 @@ function getResultSavedMessage_(saveResult) {
 
 function showResultScreen() {
   if (window.TtsModule) TtsModule.stop();
+  if (window.GameSessionPlay) GameSessionPlay.reset();
   screens.game.style.display = 'none';
   const resultScreen = document.getElementById('result-screen');
   resultScreen.style.display = 'block';

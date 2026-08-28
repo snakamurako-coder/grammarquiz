@@ -294,7 +294,10 @@ const AssignmentModule = (function () {
         const words = (wordsPayload && wordsPayload.words) || wordsPayload || [];
         const pool = (wordsPayload && wordsPayload.pool) || words;
         const bookPool = (wordsPayload && wordsPayload.bookPool) || pool;
-        const formats = (sec.formats && sec.formats.length) ? sec.formats.slice(0, 4) : ['vocab-enja'];
+        if (!sec.formats || !sec.formats.length) {
+          throw new Error('セクション' + (si + 1) + ': 出題形式（formats）が必要です。課題を再作成してください。');
+        }
+        const formats = sec.formats.slice(0, 4);
         const per = parseInt(sec.questionCount, 10) || 5;
         qs = VocabQuizGenerator.buildQuestions(words, pool, bookPool, {
           formats: formats,
@@ -449,11 +452,7 @@ const AssignmentModule = (function () {
     if (activeSession_.deadlineMs) startTimer_(activeSession_.deadlineMs);
     else clearTimer_();
 
-    if (typeof beginVocabPoolGameSession_ === 'function' && beginVocabPoolGameSession_(currentQuestionDataList)) {
-      // 選択肢プール専用UI（単語マッチング）
-    } else {
-      loadQuestionToGame(currentQuestionDataList[0]);
-    }
+    GameSessionPlay.start(currentQuestionDataList);
   }
 
   function isActive() {
