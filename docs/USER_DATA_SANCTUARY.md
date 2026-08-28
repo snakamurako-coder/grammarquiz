@@ -157,6 +157,40 @@ const result = await UserBridge.call('registerVocabWords', { sheetName, rows });
 
 ---
 
+## 4-a. プリセット教材の IndexedDB 契約（2026-08-28）
+
+### 保管場所の分離
+
+| データ | 保管 | キー例 |
+|---|---|---|
+| プリセット manifest | **IndexedDB** `digitaldrill_presets` | `manifests`: `{mode}:{hash}` / `meta`: `active`・`pending` |
+| マイ単語帳 | **localStorage** | `dd_user_vocab_set:{シート名}` |
+| 学習状態 | **localStorage** | `digitaldrill_item_state` |
+| UI 設定・認証 | **localStorage** | 各 SETTINGS_KEY / `dd_google_*` |
+
+**`dd_preset_*`（localStorage）は廃止。** 初回起動時に `PresetStore.migrateFromLegacyLocalStorage()` で削除する。
+
+### 静的ファイル
+
+`scripts/export-static.ps1` が生成:
+
+- `docs/data/manifest-index.json` … 版と各モードの hash/path
+- `docs/data/manifest-{mode}.{hash}.json` … manifest 本体（内容ハッシュ付き URL）
+
+### 更新ポリシー
+
+1. 起動後 `PresetModule.revalidate()` … index の版と active を比較
+2. 新版あり → pending manifest をバックグラウンド取得（**active は維持**）
+3. 設定画面バナー表示 → ユーザーが「キャッシュ更新」で pending → active
+4. 学習セッション中は active を差し替えない
+
+### 実装
+
+- `docs/preset-store.js` … IndexedDB ラッパー
+- `docs/index.html` … `PresetModule`
+
+---
+
 ## 4-b. マイ単語帳のローカルキャッシュ契約（通信量抑制・2026-08-26）
 
 ### 方針

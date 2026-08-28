@@ -10,24 +10,22 @@ DigitalDrill 教材スプレッドシート → GitHub 用データエクスポ�
 5. 次のいずれかを実行
    - 「① バンドルJSONをダウンロード」… 1ファイルで全部取得（手動マージ用）
    - 「② Driveにファイル一式を書き出し」… GitHub にそのまま置ける複数 JSON
-   - 「④ manifest.jsonをダウンロード」… 学習モード別 manifest を一発取得（推奨）
+   - 「④ manifestをダウンロード」… 学習モード別 manifest を一発取得（中間成果物。本番は export-static.ps1 推奨）
 
-【GitHub への配置イメージ】（学習モードごとに専用 manifest を1つ）
+【GitHub への配置イメージ】（export-static.ps1 実行後）
   docs/data/
-    manifest-grammar.json          … 文法・語法演習（catalog + questions）
-    manifest-vocab.json            … 単語学習（vocabCatalog + vocabWords）
-    manifest-reading.json          … 音読練習（将来用・本 GAS では未生成）
-    manifest-ai-conversation.json  … AI英会話（将来用・本 GAS では未生成）
-    sources/{スプレッドシートID}.json   … 元SSとの紐づけ（これがあると本体はSSを読まない）
-    grammar/{ブック名}/{シート名}.json  … 文法問題配列（getQuestions と同じ）
-    vocab/{ブック名}/{シート名}.json    … { words, pool, bookPool }（getVocabWords と同じ）
-    vocab/{ブック名}/_catalog.json      … 単語カタログ用シート情報
+    manifest-index.json            … 版・各モードの hash/path（必須・小さい）
+    manifest-grammar.{hash}.json   … 文法 manifest 本体
+    manifest-vocab.{hash}.json     … 単語 manifest 本体
+    manifest-reading.{hash}.json   … 音読（空スタブ可）
+    manifest-ai-conversation.{hash}.json … AI（空スタブ可）
+    sources/{スプレッドシートID}.json   … 元SSとの紐づけ（オプション）
+    grammar/ vocab/ … 分割 JSON（② の Drive 書き出し・オプション）
 
-【本体側の想定】（今後の微調整）
-- 学習モード別 manifest（manifest-grammar.json 等）または sources/*.json が
-  GitHub/Pages に存在すれば、対応する spreadsheetId の Drive 読み込みをスキップする
-- manifestKey（文法: "科目::単元" / 単語: "ブック::シート"）でデータを引く
-- 複数ブックがある場合は、同じ mode の manifest をマージして1ファイルにまとめる
+【本体側の想定】
+- manifest-index.json + ハッシュ付き manifest が Pages にあれば GAS② を叩かず IndexedDB に保存
+- クライアントは IndexedDB の active manifest から catalog / vocabWords / questions を切り出す
+- 版更新は pending 取得 → ユーザーが「キャッシュ更新」で適用
 
 【オプション設定】スクリプトプロパティ（任意）
   BOOK_NAME_OVERRIDE … ブック名（科目名）を SS ファイル名と違う名前で出す
@@ -800,18 +798,18 @@ function ddExport_writeOrReplaceFile_(folder, fileName, blob) {
 ================================================================================
 
 【GitHub マージ手順（複数ブックがある場合）】
-1. 各 SS で「④ manifest.jsonをダウンロード」
-2. 同じ学習モードの manifest をマージして docs/data/ に1ファイルずつ配置
-   - 文法ブック複数 → manifest-grammar.json（catalog / questions を結合）
-   - 単語ブック複数 → manifest-vocab.json（vocabCatalog.presets / vocabWords を結合）
-3. 分割 JSON も使う場合は「② Driveに書き出し」で grammar/ vocab/ sources/ も配置
-4. version はマージ後に再計算するか、GAS② の presetVersion に揃える（本体キャッシュの無効化用）
+1. 各 SS で「④ manifestをダウンロード」で中間 JSON を取得
+2. 同じ学習モードの manifest をマージ
+3. **本番配置は `scripts/export-static.ps1` を実行**（GAS② exportStatic → manifest-index + ハッシュ付きファイル）
+   - 手動マージのみの場合も、マージ後に export-static.ps1 で hash 付き出力すること
+4. version は GAS② の presetVersion と index.version を一致させる
 
-【学習モードと manifest ファイル名】
-  文法・語法演習  → manifest-grammar.json
-  単語学習        → manifest-vocab.json
-  音読練習        → manifest-reading.json（将来用・export-static で空スタブのみ）
-  AI英会話        → manifest-ai-conversation.json（本 GAS では未対応・将来用）
+【学習モードと manifest ファイル名】（export-static.ps1 出力）
+  文法・語法演習  → manifest-grammar.{hash}.json（index.modes.grammar.path）
+  単語学習        → manifest-vocab.{hash}.json
+  音読練習        → manifest-reading.{hash}.json（空スタブ可）
+  AI英会話        → manifest-ai-conversation.{hash}.json（空スタブ可）
+  索引            → manifest-index.json（必須）
 
 【source-map の意味】
   sources/{spreadsheetId}.json が GitHub にある → その SS は Drive から読まない

@@ -864,6 +864,9 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
   <!-- Game Settings & Modes -->
   <div id="settings-screen" style="display: none;">
     <div class="header-title">DigitalDrill（デジドリ） 学習</div>
+    <div id="preset-update-banner" style="display:none;margin:0 0 10px;padding:10px 12px;background:#fff8e1;border:1px solid #ffe082;border-radius:8px;font-size:0.9em;color:#5d4037;">
+      新しい教材版が利用可能です。「キャッシュ更新」で適用できます（学習中は現在の版を維持します）。
+    </div>
     <p style="text-align:center;margin:-8px 0 12px;font-size:0.9em;">
       <button type="button" id="cache-refresh-btn" class="btn-small">キャッシュ更新</button>
       <span style="display:block;margin-top:6px;font-size:0.8em;color:#666;">古い／未取得の学習セットだけ再取得します。すべて強制的に取り直す場合は マイページ → 詳細設定 を使います。</span>
@@ -1644,6 +1647,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
 <script src="user-drive.js"></script>
 <script src="assignment.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+<script src="preset-store.js"></script>
 <script>
 /** true: GAS① 認証ゲート必須（短命 auth トークン） */
 const AUTH_ENABLED = true;
@@ -2379,111 +2383,151 @@ async function flushSendOutbox_() {
 /**
  * プリセット取得（ハイブリッド）
  *
- *   1. localStorage キャッシュ … 教材の版が変わるまで再利用。ネットワークに出ない
- *   2. Pages のモード別 manifest … 初回でも待たずに表示できる。GAS② に触らない
- *   3. GAS② の JSON API        … manifest が古い・manifest に無い教材だけ
+ *   1. IndexedDB … active manifest をモード×ハッシュ単位で保持（ネットワーク不要）
+ *   2. Pages manifest-index + ハッシュ付き manifest … 初回取得用
+ *   3. GAS② JSON API … manifest が無い／絞り込み指定あり
  *
- * manifest ファイル（docs/data/）:
- *   manifest-grammar.json / manifest-vocab.json / manifest-reading.json / manifest-ai-conversation.json
- *
- * 教材が更新されたかどうかは GAS② の presetVersion で判定する。
- * 版が変わったときだけキャッシュを捨て、'digitaldrill:presets-updated' を通知する。
+ * 版更新: revalidate で pending をバックグラウンド取得。適用は「キャッシュ更新」時のみ。
  */
 const PresetModule = (() => {
-  const CACHE_PREFIX = 'dd_preset_';
-  const VERSION_KEY = 'dd_preset_version';
-
-  const MANIFEST_MODE_PATHS = {
-    grammar: 'data/manifest-grammar.json',
-    vocab: 'data/manifest-vocab.json',
-    reading: 'data/manifest-reading.json',
-    ai: 'data/manifest-ai-conversation.json'
-  };
+  const DEFAULT_INDEX_PATH = 'data/manifest-index.json';
+  const MODES = ['grammar', 'vocab', 'reading', 'ai'];
 
   const manifestsByMode = {};
-  const manifestPromisesByMode = {};
+  const manifestLoadPromises = {};
+  let indexCache = null;
+  let indexPromise = null;
   let revalidatePromise = null;
-
-  function manifestPaths_() {
-    const cfg = window.DIGITALDRILL_CONFIG || {};
-    const urls = cfg.STATIC_MANIFEST_URLS;
-    if (urls && typeof urls === 'object') {
-      return Object.assign({}, MANIFEST_MODE_PATHS, urls);
-    }
-    return MANIFEST_MODE_PATHS;
-  }
+  let storeReadyPromise = null;
 
   function baseUrl_() {
     return window.location.pathname.replace(/\/[^/]*$/, '/');
   }
 
-  function currentVersion_() {
-    try { return localStorage.getItem(VERSION_KEY) || ''; } catch (e) { return ''; }
+  function indexPath_() {
+    const cfg = window.DIGITALDRILL_CONFIG || {};
+    return cfg.STATIC_MANIFEST_INDEX || DEFAULT_INDEX_PATH;
   }
 
-  function setVersion_(version) {
-    try { localStorage.setItem(VERSION_KEY, version); } catch (e) {}
+  function ensureStore_() {
+    if (!window.PresetStore) {
+      return Promise.reject(new Error('PresetStore が読み込まれていません'));
+    }
+    if (!storeReadyPromise) {
+      storeReadyPromise = (async function () {
+        PresetStore.migrateFromLegacyLocalStorage();
+        await PresetStore.open();
+      })();
+    }
+    return storeReadyPromise;
   }
 
-  /** 版が変わったらキャッシュを捨てて採用する。捨てたら true */
-  function adoptVersion_(version) {
-    if (!version || currentVersion_() === version) return false;
-    clearAll();
-    setVersion_(version);
-    return true;
+  function resetMemoryCache_() {
+    MODES.forEach(function (m) { delete manifestsByMode[m]; });
+    Object.keys(manifestLoadPromises).forEach(function (k) { delete manifestLoadPromises[k]; });
+    indexCache = null;
+    indexPromise = null;
   }
 
-  function readCache_(key) {
-    try {
-      const raw = localStorage.getItem(CACHE_PREFIX + key);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
-  }
-
-  function writeCache_(key, data) {
-    try { localStorage.setItem(CACHE_PREFIX + key, JSON.stringify(data)); } catch (e) {}
-  }
-
-  function clearAll() {
-    try {
-      Object.keys(localStorage).forEach(function (k) {
-        if (k.indexOf(CACHE_PREFIX) === 0) localStorage.removeItem(k);
-      });
-      localStorage.removeItem(VERSION_KEY);
-    } catch (e) {}
-  }
-
-  async function fetchManifestJson_(path) {
+  async function fetchJson_(path) {
     const res = await fetch(baseUrl_() + path);
     if (!res.ok) return null;
     try { return await res.json(); } catch (e) { return null; }
   }
 
-  /** 学習モード別 manifest を1回だけ読む。未生成なら null */
-  function loadManifestForMode_(mode) {
-    if (!manifestPromisesByMode[mode]) {
-      manifestPromisesByMode[mode] = (async () => {
-        const paths = manifestPaths_();
-        const manifest = await fetchManifestJson_(paths[mode]);
-        if (!manifest) {
-          console.warn('manifest (' + mode + ') がありません。GAS② API から取得します。');
-          return null;
+  async function fetchManifestIndex_() {
+    if (indexCache) return indexCache;
+    if (!indexPromise) {
+      indexPromise = (async function () {
+        const index = await fetchJson_(indexPath_());
+        if (index && index.schemaVersion >= 2 && index.modes) {
+          indexCache = index;
+          return index;
         }
-        manifestsByMode[mode] = manifest;
-        if (!currentVersion_() && manifest.version) adoptVersion_(manifest.version);
-        return manifest;
+        return null;
       })();
     }
-    return manifestPromisesByMode[mode];
+    return indexPromise;
   }
 
-  /** manifest が現行版と一致していれば静的データを使える */
+  function metaFromIndex_(index) {
+    if (!index) return null;
+    const modes = {};
+    Object.keys(index.modes || {}).forEach(function (mode) {
+      const entry = index.modes[mode];
+      if (entry && entry.hash) modes[mode] = entry.hash;
+    });
+    return {
+      version: index.version || '',
+      modes: modes,
+      exportedAt: index.exportedAt || '',
+      appliedAt: Date.now()
+    };
+  }
+
+  async function fetchAndStoreManifest_(mode, hash, path) {
+    const data = await fetchJson_(path);
+    if (!data) return null;
+    await PresetStore.putManifest(mode, hash, data);
+    return data;
+  }
+
+  async function ensureManifestForMeta_(mode, meta, sourceLabel) {
+    if (!meta || !meta.modes || !meta.modes[mode]) return null;
+    const hash = meta.modes[mode];
+    if (manifestsByMode[mode]) return manifestsByMode[mode];
+
+    const cacheKey = mode + ':' + hash;
+    if (!manifestLoadPromises[cacheKey]) {
+      manifestLoadPromises[cacheKey] = (async function () {
+        let manifest = await PresetStore.getManifest(mode, hash);
+        if (manifest) {
+          manifestsByMode[mode] = manifest;
+          if (sourceLabel) notifyDataSource_(sourceLabel === 'github' ? 'github' : 'cache');
+          return manifest;
+        }
+
+        const index = await fetchManifestIndex_();
+        const entry = index && index.modes ? index.modes[mode] : null;
+        if (entry && entry.hash === hash && entry.path) {
+          manifest = await fetchAndStoreManifest_(mode, hash, entry.path);
+          if (manifest) {
+            manifestsByMode[mode] = manifest;
+            notifyDataSource_('github');
+            return manifest;
+          }
+        }
+
+        return null;
+      })();
+    }
+    return manifestLoadPromises[cacheKey];
+  }
+
+  async function loadActiveManifestForMode_(mode) {
+    await ensureStore_();
+    const active = await PresetStore.getActiveMeta();
+    if (active) {
+      const manifest = await ensureManifestForMeta_(mode, active, 'cache');
+      if (manifest) return manifest;
+    }
+
+    const index = await fetchManifestIndex_();
+    if (!index) return null;
+
+    const meta = metaFromIndex_(index);
+    const manifest = await ensureManifestForMeta_(mode, meta, 'github');
+    if (manifest && meta.version) {
+      const currentActive = await PresetStore.getActiveMeta();
+      if (!currentActive || currentActive.version !== meta.version) {
+        await PresetStore.setActiveMeta(meta);
+      }
+    }
+    return manifest;
+  }
+
   async function usableManifestForMode_(mode) {
-    const manifest = await loadManifestForMode_(mode);
-    if (!manifest || !manifest.version) return null;
-    const current = currentVersion_();
-    if (!current) return manifest;
-    return manifest.version === current ? manifest : null;
+    return loadActiveManifestForMode_(mode);
   }
 
   async function fetchRemoteVersion_() {
@@ -2494,17 +2538,71 @@ const PresetModule = (() => {
     return res.status === 'success' ? (res.version || '') : '';
   }
 
+  async function downloadPendingManifests_(index) {
+    const meta = metaFromIndex_(index);
+    if (!meta || !meta.modes) return meta;
+    const tasks = MODES.map(async function (mode) {
+      const entry = index.modes[mode];
+      if (!entry || !entry.hash || !entry.path) return;
+      const existing = await PresetStore.getManifest(mode, entry.hash);
+      if (existing) return;
+      await fetchAndStoreManifest_(mode, entry.hash, entry.path);
+    });
+    await Promise.all(tasks);
+    return meta;
+  }
+
+  function syncUpdateBanner_() {
+    const banner = document.getElementById('preset-update-banner');
+    if (!banner) return;
+    PresetStore.hasPendingUpdate().then(function (has) {
+      banner.style.display = has ? 'block' : 'none';
+    }).catch(function () {
+      banner.style.display = 'none';
+    });
+  }
+
+  async function stagePendingFromIndex_(index) {
+    if (!index || !index.version) return false;
+    const active = await PresetStore.getActiveMeta();
+    if (active && active.version === index.version) {
+      await PresetStore.setPendingMeta(null);
+      syncUpdateBanner_();
+      return false;
+    }
+    const pendingMeta = await downloadPendingManifests_(index);
+    if (!pendingMeta) return false;
+    await PresetStore.setPendingMeta(pendingMeta);
+    syncUpdateBanner_();
+    return true;
+  }
+
   /**
-   * GAS② に現行版を問い合わせ、教材が更新されていればキャッシュを捨てて通知する。
-   * 初回描画を遅らせないよう、画面表示のあとに1回だけ走らせる。
+   * 版を確認し、更新があれば pending としてバックグラウンド取得する（active は維持）。
    */
   function revalidate() {
     if (!revalidatePromise) {
-      revalidatePromise = (async () => {
+      revalidatePromise = (async function () {
         try {
-          if (!adoptVersion_(await fetchRemoteVersion_())) return false;
-          window.dispatchEvent(new CustomEvent('digitaldrill:presets-updated'));
-          return true;
+          await ensureStore_();
+          const remoteVersion = await fetchRemoteVersion_();
+          const index = await fetchManifestIndex_();
+          if (index && remoteVersion && index.version !== remoteVersion) {
+            console.warn('manifest-index と GAS presetVersion が不一致です。index=', index.version, 'remote=', remoteVersion);
+          }
+          const targetIndex = index;
+          if (!targetIndex) return false;
+          const active = await PresetStore.getActiveMeta();
+          if (!active) {
+            syncUpdateBanner_();
+            return false;
+          }
+          if (active.version === targetIndex.version) {
+            await PresetStore.setPendingMeta(null);
+            syncUpdateBanner_();
+            return false;
+          }
+          return stagePendingFromIndex_(targetIndex);
         } catch (e) {
           console.warn('教材の更新確認に失敗:', e);
           return false;
@@ -2514,18 +2612,51 @@ const PresetModule = (() => {
     return revalidatePromise;
   }
 
-  /** 「キャッシュ更新」ボタン用。全部捨てて版を取り直す（通知は出さない） */
+  async function applyPendingUpdate_() {
+    await ensureStore_();
+    const applied = await PresetStore.applyPending();
+    if (!applied.applied) return false;
+    resetMemoryCache_();
+    const keep = applied.meta && applied.meta.modes ? applied.meta.modes : {};
+    await PresetStore.gcExcept(keep);
+    syncUpdateBanner_();
+    window.dispatchEvent(new CustomEvent('digitaldrill:presets-updated'));
+    return true;
+  }
+
+  /** 「キャッシュ更新」: pending を適用。なければ index から再取得して active を更新 */
   async function refreshAll() {
-    clearAll();
-    Object.keys(manifestsByMode).forEach(function (k) { delete manifestsByMode[k]; });
-    Object.keys(manifestPromisesByMode).forEach(function (k) { delete manifestPromisesByMode[k]; });
-    revalidatePromise = null;
-    try {
-      const version = await fetchRemoteVersion_();
-      if (version) setVersion_(version);
-    } catch (e) {
-      console.warn('教材の版を取得できませんでした:', e);
+    await ensureStore_();
+    const hadPending = await PresetStore.hasPendingUpdate();
+    if (hadPending) {
+      await applyPendingUpdate_();
+      return;
     }
+
+    resetMemoryCache_();
+    revalidatePromise = null;
+    const index = await fetchManifestIndex_();
+    if (!index) {
+      console.warn('manifest-index.json を取得できませんでした');
+      return;
+    }
+    const meta = await downloadPendingManifests_(index);
+    if (meta) {
+      await PresetStore.setActiveMeta(meta);
+      await PresetStore.setPendingMeta(null);
+      await PresetStore.gcExcept(meta.modes || {});
+      resetMemoryCache_();
+      window.dispatchEvent(new CustomEvent('digitaldrill:presets-updated'));
+    }
+    syncUpdateBanner_();
+  }
+
+  async function clearAll() {
+    await ensureStore_();
+    resetMemoryCache_();
+    revalidatePromise = null;
+    await PresetStore.clearAll();
+    syncUpdateBanner_();
   }
 
   function notifyDataSource_(source) {
@@ -2534,40 +2665,25 @@ const PresetModule = (() => {
     }
   }
 
-  /**
-   * @param {string} key          キャッシュキー
-   * @param {string} mode         grammar | vocab | reading | ai
-   * @param {function} fromManifest manifest から該当データを取り出す（無ければ null）
-   * @param {function} fromApi     GAS② API を叩く
-   * @param {boolean} force        キャッシュと manifest を無視して API から取り直す
-   */
-  async function resolve_(key, mode, fromManifest, fromApi, force) {
+  async function resolve_(mode, fromManifest, fromApi, force) {
     if (!force) {
-      const cached = readCache_(key);
-      if (cached !== null) {
-        notifyDataSource_('cache');
-        return { status: 'success', data: cached, dataSource: 'cache' };
-      }
-
       const manifest = await usableManifestForMode_(mode);
       const staticData = manifest ? fromManifest(manifest) : null;
       if (staticData != null) {
-        writeCache_(key, staticData);
-        notifyDataSource_('github');
-        return { status: 'success', data: staticData, dataSource: 'github' };
+        const active = await PresetStore.getActiveMeta();
+        notifyDataSource_(active ? 'cache' : 'github');
+        return { status: 'success', data: staticData, dataSource: active ? 'cache' : 'github' };
       }
     }
 
     const result = await fromApi();
     if (result.status === 'success') {
-      writeCache_(key, result.data);
       notifyDataSource_('spreadsheet');
       result.dataSource = 'spreadsheet';
     }
     return result;
   }
 
-  /** manifest は絞り込み前の全件なので、絞り込みが指定されていたら API に任せる */
   function noFilters_(filtersJson) {
     if (!filtersJson) return true;
     try {
@@ -2583,7 +2699,7 @@ const PresetModule = (() => {
   }
 
   async function getVocabCatalog(force) {
-    const result = await resolve_('vocab_catalog', 'vocab',
+    const result = await resolve_('vocab',
       function (m) {
         const c = m.vocabCatalog || null;
         return isUsableVocabCatalog_(c) ? c : null;
@@ -2591,7 +2707,7 @@ const PresetModule = (() => {
       function () { return gasRun('apiGetVocabCatalog'); },
       force);
     if (!force && result.status === 'success' && !isUsableVocabCatalog_(result.data)) {
-      return resolve_('vocab_catalog', 'vocab',
+      return resolve_('vocab',
         function () { return null; },
         function () { return gasRun('apiGetVocabCatalog'); },
         true);
@@ -2600,7 +2716,7 @@ const PresetModule = (() => {
   }
 
   function getGrammarCatalog(force) {
-    return resolve_('grammar_catalog', 'grammar',
+    return resolve_('grammar',
       function (m) { return m.catalog || null; },
       function () { return gasRun('apiGetGrammarCatalog'); },
       force);
@@ -2608,7 +2724,7 @@ const PresetModule = (() => {
 
   function getVocabWords(bookName, sheetName, filtersJson, includeBookPool, force) {
     const manifestKey = bookName + '::' + sheetName;
-    return resolve_('vocab_words_' + manifestKey + '_' + (filtersJson || '{}'), 'vocab',
+    return resolve_('vocab',
       function (m) {
         if (!noFilters_(filtersJson)) return null;
         return (m.vocabWords && m.vocabWords[manifestKey]) || null;
@@ -2619,13 +2735,23 @@ const PresetModule = (() => {
 
   function getQuestions(subject, unit, force) {
     const manifestKey = subject + '::' + unit;
-    return resolve_('questions_' + manifestKey, 'grammar',
+    return resolve_('grammar',
       function (m) { return (m.questions && m.questions[manifestKey]) || null; },
       function () { return gasRun('apiGetQuestions', subject, unit); },
       force);
   }
 
-  return { getVocabCatalog, getVocabWords, getGrammarCatalog, getQuestions, clearAll, refreshAll, revalidate };
+  return {
+    getVocabCatalog: getVocabCatalog,
+    getVocabWords: getVocabWords,
+    getGrammarCatalog: getGrammarCatalog,
+    getQuestions: getQuestions,
+    clearAll: clearAll,
+    refreshAll: refreshAll,
+    revalidate: revalidate,
+    applyPendingUpdate_: applyPendingUpdate_,
+    syncUpdateBanner_: syncUpdateBanner_
+  };
 })();
 window.PresetModule = PresetModule;
 
@@ -9020,7 +9146,9 @@ function enterAppAsGuest() {
   initModeTabs();
   initVocabModules();
   if (window.VocabRegisterModule) window.VocabRegisterModule.init();
-  PresetModule.revalidate();
+  PresetModule.revalidate().then(function () {
+    if (PresetModule.syncUpdateBanner_) PresetModule.syncUpdateBanner_();
+  });
   if (AuthGateService.isValid()) {
     ItemStateModule.syncFromServer('').catch(function (e) { console.warn('学習状態の取得に失敗:', e); });
   }
@@ -9115,6 +9243,7 @@ function initModeTabs() {
           userMsg = ' マイ単語帳: 更新' + (uref.updated || []).length + '件 / スキップ' + (uref.skipped || []).length + '件';
         }
         await reloadPresetScreens_();
+        if (PresetModule.syncUpdateBanner_) PresetModule.syncUpdateBanner_();
         showToast_('教材を最新に更新しました。' + userMsg);
       } catch (e) {
         alert('更新エラー: ' + e.message);
@@ -9141,6 +9270,7 @@ function initModeTabs() {
             userMsg = ' （マイ単語帳はログイン後に更新できます）';
           }
           await reloadPresetScreens_();
+          if (PresetModule.syncUpdateBanner_) PresetModule.syncUpdateBanner_();
           if (statusEl) statusEl.textContent = '完了しました。' + userMsg;
           showToast_('全学習セットを強制更新しました。' + userMsg);
         } catch (e) {
@@ -9151,7 +9281,7 @@ function initModeTabs() {
     });
   }
 
-  // 裏側の版チェックで教材の更新を検知したら、設定画面を静かに描き直す
+  // 教材の適用完了時のみ設定画面を描き直す（検知時はバナーのみ）
   window.addEventListener('digitaldrill:presets-updated', async function () {
     if (screens.settings.style.display === 'none') return;
     try {
@@ -9306,7 +9436,9 @@ window.onLoginSuccess = function(user) {
       console.warn('ログイン後データ読込:', e.message || e);
     });
   }
-  PresetModule.revalidate();
+  PresetModule.revalidate().then(function () {
+    if (PresetModule.syncUpdateBanner_) PresetModule.syncUpdateBanner_();
+  });
   BackendSyncStatus.refresh();
 };
 

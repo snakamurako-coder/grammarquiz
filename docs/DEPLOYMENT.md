@@ -64,7 +64,7 @@ Settings → Pages → Branch: `main` / Folder: `/docs`
 window.DIGITALDRILL_CONFIG = {
   API_URL: '...GAS②.../exec',
   DASHBOARD_URL: '...GAS①.../exec',
-  STATIC_MANIFEST_URL: 'data/manifest.json',
+  STATIC_MANIFEST_INDEX: 'data/manifest-index.json',
   GOOGLE_FORM: {
     ACTION_URL: 'https://docs.google.com/forms/d/e/.../formResponse',
     ENTRIES: {
@@ -86,32 +86,43 @@ window.DIGITALDRILL_CONFIG = {
 
 `ACTION_URL` が空のときはフォーム送信をスキップします（フォーム未作成でもアプリは動作します）。
 
-### プリセット取得はハイブリッド（`PresetModule`）
+### プリセット取得はハイブリッド（`PresetModule` + `PresetStore`）
 
 取得元の切り替え設定はありません。次の順に、使えるものを使います。
 
 | 順 | 取得元 | 速さ | 使う条件 |
 |---|---|---|---|
-| 1 | localStorage キャッシュ | 即時・通信なし | 教材の版が変わるまで |
-| 2 | Pages の `manifest.json` | 即時（CDN・GAS② に触らない） | manifest の版が現行版と一致 |
-| 3 | GAS② JSON API | 通信あり | manifest が古い／manifest に無い教材／絞り込み指定あり |
+| 1 | IndexedDB（active manifest） | 即時・通信なし | 適用済みの版が端末に存在 |
+| 2 | Pages の `manifest-index.json` + ハッシュ付き manifest | 初回のみ通信 | index から該当 hash の JSON を取得 |
+| 3 | GAS② JSON API | 通信あり | manifest が無い／絞り込み指定あり |
 
-初回アクセスでも `manifest.json` から即座に描画され、教材を更新しない限り
-2回目以降はキャッシュのみで完結します（GAS② への通信は版チェック 1 回だけ）。
+**localStorage はプリセット教材に使いません**（マイ単語帳・設定・学習状態のみ）。
+
+静的ファイル構成（`scripts/export-static.ps1` 生成）:
+
+```text
+docs/data/manifest-index.json
+docs/data/manifest-grammar.{hash}.json
+docs/data/manifest-vocab.{hash}.json
+docs/data/manifest-reading.{hash}.json
+docs/data/manifest-ai-conversation.{hash}.json
+```
+
+初回アクセスで index + 各モード manifest を取得し IndexedDB に保存します。
+2回目以降は IndexedDB の active manifest から読み出します（GAS② への通信は版チェック 1 回だけ）。
 
 ### 教材更新の検知
 
 - GAS② `?action=presetVersion` が **教材の版**（grammarquizzes / vocabulary 配下の
   スプレッドシートの最終更新時刻から算出した MD5）を返します。
-- サーバー側は CacheService に 120 秒キャッシュするため、同時接続数が増えても
-  Drive の走査は最大 30回/時 に収まります。
-- クライアントは画面表示後に 1 回だけ問い合わせ、版が変わっていたときだけ
-  キャッシュを破棄して再取得し、設定画面を描き直します（学習中は次にセット選択へ
-  戻ったときに反映）。
-- 手動で更新したい場合は学習画面の「キャッシュ更新」ボタン。
+- クライアントは画面表示後に 1 回だけ index の版と active を比較します。
+- **版が新しい場合**: バックグラウンドで pending manifest を IndexedDB に取得するが、
+  **active は即時切り替えしない**（学習中も現行版を維持）。
+- 設定画面に更新バナーが出る。**「キャッシュ更新」** で pending → active に適用。
+- 手動で更新したい場合も同じ「キャッシュ更新」ボタン。
 
-教材を更新したら `scripts/export-static.ps1` を再実行して `manifest.json` も作り直してください。
-再生成するまでは版が食い違うため、その教材だけ GAS② API 経由になります。
+教材を更新したら `scripts/export-static.ps1` を再実行して `manifest-index.json` と
+ハッシュ付き manifest を作り直し、GitHub Pages に push してください。
 
 ---
 
@@ -187,7 +198,9 @@ User_ID, Mode, Set_ID, Set_Name, Attempt_No, Correct, Total, Score, Duration_Sec
 .\scripts\deploy-all.ps1 -ExportStatic
 ```
 
-GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成します。
+GAS② `?action=exportStatic` から `docs/data/manifest-index.json` と
+ハッシュ付き `manifest-{mode}.{hash}.json` を生成します。
+旧固定名（`manifest-vocab.json` 等）は生成されません。
 
 ---
 
@@ -220,7 +233,7 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 | タスク | 内容 |
 |---|---|
 | Deploy All | clasp push → GAS①② → git push |
-| `-ExportStatic` | 上記 + manifest.json 生成 |
+| `-ExportStatic` | 上記 + manifest-index.json とハッシュ付き manifest 生成 |
 
 ---
 
@@ -232,7 +245,7 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 |---|---|
 | Pages → GAS②（版チェック・プリセット取得・認証） | HTTP 429 / 5xx とネットワークエラーに限り、指数バックオフで最大4回リトライ（約1s / 2s / 4s + ジッター） |
 | Pages → Google フォーム（プリセット概要） | GAS `submitFormSummary`（fbzx）。Drive とは独立。詳細は FORM_AGGREGATION_SANCTUARY |
-| 教材の配布 | 通常は Pages の `manifest.json`（CDN）とローカルキャッシュで完結し、GAS② には版チェックの 1 リクエストしか出さない |
+| 教材の配布 | 通常は Pages の manifest-index + IndexedDB で完結し、GAS② には版チェックの 1 リクエストだけ |
 | 学習状態の Drive 同期 | 送信に失敗した Item_ID は dirty のまま残り、次のセッション終了時に再送 |
 
 ---
@@ -247,4 +260,4 @@ GAS② `?action=exportStatic` から `docs/data/manifest.json` を生成しま�
 - **セッション集約が空**: フォーム回答先 SS に行が入っているか、`config.js` の `GOOGLE_FORM` が正しいか確認。**GAS①・GAS② を再デプロイ**（`submitFormSummary` 必須）。プリセット学習（マイ単語帳以外）で終了しているか。詳細は [FORM_AGGREGATION_SANCTUARY.md](FORM_AGGREGATION_SANCTUARY.md)
 - **マイページ／マイ単語帳が空**: ユーザー Drive は Pages の `UserDriveModule`（GAS① ではない）。[USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §0・HANDOVER「ユーザー Drive — 動作確認済み」
 - **教材の更新が反映されない**: サーバー側の版キャッシュ（120秒）が切れるのを待つか「キャッシュ更新」ボタン
-- **初回表示が遅い**: `docs/data/manifest.json` が未生成。`scripts/export-static.ps1` を実行
+- **初回表示が遅い**: `docs/data/manifest-index.json` が未生成。`scripts/export-static.ps1` を実行

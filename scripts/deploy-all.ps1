@@ -114,7 +114,7 @@ if (-not $PagesOnly) {
 }
 if (-not $GasOnly) {
   if ($ExportStatic) {
-    Write-Step '静的プリセット export（docs/data/manifest-*.json）'
+    Write-Step '静的プリセット export（docs/data/manifest-index.json + ハッシュ付き manifest）'
     & (Join-Path $Root 'scripts\export-static.ps1')
   }
   Deploy-Pages
