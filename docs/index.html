@@ -101,6 +101,23 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .result-review-answer, .result-review-correct { font-size: 0.95em; margin-top: 4px; word-break: break-word; }
 .result-review-explanation { background: #fff8e1; border-left: 3px solid #ffb300; padding: 10px 12px; border-radius: 8px; margin-top: 8px; font-size: 0.88em; line-height: 1.55; color: var(--c-text); }
 .result-review-explanation .result-review-grammar-area { font-weight: bold; display: block; margin-bottom: 4px; color: var(--c-text-sub); font-size: 0.92em; }
+#result-vocab-sort { text-align: left; margin-bottom: 16px; }
+.result-vocab-sort-summary { font-size: 0.9em; font-weight: bold; color: #4a5568; margin: 0 0 10px; }
+.result-vocab-sort-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px; margin-bottom: 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+}
+.result-vocab-sort-label { flex: 1; min-width: 0; }
+.result-vocab-sort-word { font-weight: bold; color: #1e293b; word-break: break-word; }
+.result-vocab-sort-sub { display: block; font-size: 0.85em; color: #64748b; margin-top: 2px; word-break: break-word; }
+.result-vocab-sort-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.result-vocab-mark {
+  width: 44px; height: 44px; font-size: 20px; border-radius: 10px; border: 2px solid #e2e8f0;
+  background: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.result-vocab-mark.known.active { background: #f0fff4; border-color: #9ae6b4; }
+.result-vocab-mark.unknown.active { background: #fff5f5; border-color: #feb2b2; }
+.result-vocab-mark:active { transform: scale(0.95); }
 
 .btn-primary:active { background-color: var(--c-primary-dark); transform: scale(0.98); }
 .btn-primary:disabled { background-color: #b0bec5; }
@@ -1502,6 +1519,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
       <h2 id="result-score" style="font-size: 2em; color: #2196f3; margin-bottom: 20px;"></h2>
       <p id="result-details" style="font-size: 1.1em; color: #555; margin-bottom: 0;"></p>
     </div>
+    <div id="result-vocab-sort" class="setting-section" style="display: none;"></div>
     <div id="result-review-list" class="setting-section"></div>
     <button id="return-settings-btn" class="btn-primary">学習設定に戻る</button>
   </div>
@@ -7813,6 +7831,7 @@ let currentScore = 0;
 let currentUserId = "Guest";
 let sessionStartTime = null;
 let sessionAnswerLog = [];
+let vocabResultMarks_ = {};
 /** 現在の演習結果がサーバーへ保存済みか（sessionAnswerLog が空なら true 扱い） */
 let sessionPersistedToServer = true;
 let currentAppMode = 'grammar';
@@ -8486,6 +8505,7 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
       currentQuestionIndex = 0;
       currentScore = 0;
       sessionAnswerLog = [];
+      vocabResultMarks_ = {};
       sessionPersistedToServer = true;
       sessionStartTime = Date.now();
       currentSessionIsPreset = bookType === 'preset';
@@ -8843,6 +8863,83 @@ function normalizeExplanationField_(value) {
   return text;
 }
 
+function collectVocabWordsFromSession_() {
+  const byId = {};
+  (currentQuestionDataList || []).forEach(function (q) {
+    if (!q || !q.wordId) return;
+    if (byId[q.wordId]) return;
+    let label = '';
+    let sub = '';
+    if (q.wordObj) {
+      vocabCanonicalizeWordObj(q.wordObj);
+      label = vocabNorm(q.wordObj['英単語・熟語の表現']);
+      const meanings = vocabGetMeanings(q.wordObj);
+      sub = meanings.length ? meanings[0].meaning : '';
+    } else {
+      label = q.word || q.japanese || getQuestionPrompt_(q);
+    }
+    if (!label || label === VOCAB_UNREGISTERED) label = String(q.wordId);
+    byId[q.wordId] = { wordId: q.wordId, label: label, sub: sub };
+  });
+  return Object.keys(byId).map(function (k) { return byId[k]; });
+}
+
+function applyVocabResultMark_(wordId, isKnown) {
+  vocabResultMarks_[wordId] = isKnown ? 'known' : 'unknown';
+  if (window.SrsModule) {
+    window.SrsModule.update(wordId, !!isKnown, 0, !isKnown);
+  }
+  if (window.ItemStateModule) {
+    window.ItemStateModule.syncToServer().catch(function (e) {
+      console.warn('学習状態の同期:', e.message || e);
+    });
+  }
+  sessionPersistedToServer = false;
+  BackendSyncStatus.refresh();
+  renderVocabResultWordSort_();
+}
+
+function renderVocabResultWordSort_() {
+  const container = document.getElementById('result-vocab-sort');
+  if (!container) return;
+  if (currentAppMode !== 'vocab') {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+  const words = collectVocabWordsFromSession_();
+  if (!words.length) {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+  let known = 0;
+  let unknown = 0;
+  words.forEach(function (w) {
+    const m = vocabResultMarks_[w.wordId];
+    if (m === 'known') known++;
+    else if (m === 'unknown') unknown++;
+  });
+  let html = '<div class="section-title">単語の仕分け</div>';
+  html += '<p class="filter-axis-hint" style="margin-top:0;">👍 覚えている / 😫 まだ難しい、で学習状態を登録できます。</p>';
+  html += '<p class="result-vocab-sort-summary">👍 ' + known + ' | 😫 ' + unknown + ' / ' + words.length + ' 語</p>';
+  words.forEach(function (w) {
+    const mark = vocabResultMarks_[w.wordId];
+    const safeId = escapeHtml_(w.wordId);
+    html += '<div class="result-vocab-sort-item">';
+    html += '<div class="result-vocab-sort-label">';
+    html += '<span class="result-vocab-sort-word">' + escapeHtml_(w.label) + '</span>';
+    if (w.sub) html += '<span class="result-vocab-sort-sub">' + escapeHtml_(w.sub) + '</span>';
+    html += '</div>';
+    html += '<div class="result-vocab-sort-actions">';
+    html += '<button type="button" class="result-vocab-mark unknown' + (mark === 'unknown' ? ' active' : '') + '" data-word-id="' + safeId + '" data-mark="unknown" title="まだ覚えていない">😫</button>';
+    html += '<button type="button" class="result-vocab-mark known' + (mark === 'known' ? ' active' : '') + '" data-word-id="' + safeId + '" data-mark="known" title="覚えている">👍</button>';
+    html += '</div></div>';
+  });
+  container.innerHTML = html;
+  container.style.display = 'block';
+}
+
 function renderResultReviewList_() {
   const el = document.getElementById('result-review-list');
   if (!el) return;
@@ -9109,6 +9206,7 @@ function showResultScreen() {
 
   document.getElementById('result-score').textContent = `スコア: ${currentScore} / ${totalQuestionsCount}`;
   renderResultReviewList_();
+  renderVocabResultWordSort_();
 
   const detailsEl = document.getElementById('result-details');
   if (!AuthGateService.isValid()) {
@@ -9145,11 +9243,25 @@ function showResultScreen() {
   });
 }
 
+(function bindVocabResultSortUi_() {
+  const container = document.getElementById('result-vocab-sort');
+  if (!container) return;
+  container.addEventListener('click', function (e) {
+    const btn = e.target.closest('.result-vocab-mark');
+    if (!btn) return;
+    const wordId = btn.getAttribute('data-word-id');
+    const mark = btn.getAttribute('data-mark');
+    if (!wordId || !mark) return;
+    applyVocabResultMark_(wordId, mark === 'known');
+  });
+})();
+
 document.getElementById('return-settings-btn').addEventListener('click', () => {
   document.getElementById('result-screen').style.display = 'none';
   screens.settings.style.display = 'block';
   if (sessionPersistedToServer || !AuthGateService.isValid()) {
     sessionAnswerLog = [];
+    vocabResultMarks_ = {};
   }
   BackendSyncStatus.refresh();
   const assignmentPanel = document.getElementById('assignment-panel');
