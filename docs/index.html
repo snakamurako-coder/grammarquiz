@@ -2885,14 +2885,39 @@ const PresetModule = (() => {
     return result;
   }
 
-  function noFilters_(filtersJson) {
-    if (!filtersJson) return true;
+  function parseFiltersJson_(filtersJson) {
+    if (!filtersJson) return {};
     try {
       const f = JSON.parse(filtersJson);
-      return Object.keys(f).every(function (k) {
-        return !f[k] || f[k].length === 0;
-      });
-    } catch (e) { return false; }
+      return f && typeof f === 'object' ? f : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function applyVocabFilters_(rows, filters) {
+    const daiFilter = (filters && filters.dai) || [];
+    const chuFilter = (filters && filters.chu) || [];
+    const shoFilter = (filters && filters.sho) || [];
+    return (rows || []).filter(function (rowObj) {
+      const dai = vocabNorm(rowObj['大区分']);
+      const chu = vocabNorm(rowObj['中区分']);
+      const sho = vocabNorm(rowObj['小区分']);
+      if (daiFilter.length && daiFilter.indexOf(dai) === -1) return false;
+      if (chuFilter.length && chuFilter.indexOf(chu) === -1) return false;
+      if (shoFilter.length && shoFilter.indexOf(sho) === -1) return false;
+      return true;
+    });
+  }
+
+  function vocabWordsFromManifest_(manifest, manifestKey, filtersJson) {
+    const entry = manifest.vocabWords && manifest.vocabWords[manifestKey];
+    if (!entry) return null;
+    const words = entry.words || [];
+    const pool = entry.pool || words;
+    const bookPool = entry.bookPool || pool;
+    const filtered = applyVocabFilters_(words, parseFiltersJson_(filtersJson));
+    return { words: filtered, pool: pool, bookPool: bookPool };
   }
 
   function isUsableVocabCatalog_(data) {
@@ -2927,8 +2952,7 @@ const PresetModule = (() => {
     const manifestKey = bookName + '::' + sheetName;
     return resolve_('vocab',
       function (m) {
-        if (!noFilters_(filtersJson)) return null;
-        return (m.vocabWords && m.vocabWords[manifestKey]) || null;
+        return vocabWordsFromManifest_(m, manifestKey, filtersJson);
       },
       function () { return gasRun('apiGetVocabWords', bookName, sheetName, filtersJson, includeBookPool); },
       force);
