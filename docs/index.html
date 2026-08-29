@@ -6384,7 +6384,7 @@ const VocabSettingsModule = (() => {
     if (countWrap) countWrap.style.display = (response === 'choice' && style !== 'pool') ? '' : 'none';
     if (poolWrap) poolWrap.style.display = (response === 'choice' && style === 'pool') ? '' : 'none';
     const specials = unknownList && unknownList.closest('.check-list');
-    if (specials) specials.style.display = (response === 'choice' && style !== 'pool') ? '' : 'none';
+    if (specials) specials.style.display = response === 'choice' ? '' : 'none';
     if (dummySection) dummySection.style.display = response === 'choice' ? '' : 'none';
   }
 
@@ -6491,8 +6491,13 @@ const VocabQuizGenerator = (() => {
           if (q) questions.push(q);
         });
       } else {
+        const noneRate = 0.25 + Math.random() * 0.0833;
         allocated.forEach(function (wordObj) {
-          const q = buildQuestionForFormat(wordObj, formatKey, pool, bookPool, options, qIdx++);
+          const extra = {};
+          if (formatSupportsForceNone_(formatKey)) {
+            extra.forceNone = options.includeNone && Math.random() < noneRate;
+          }
+          const q = buildQuestionForFormat(wordObj, formatKey, pool, bookPool, options, qIdx++, null, extra);
           if (q) questions.push(q);
         });
       }
@@ -6535,7 +6540,7 @@ const VocabQuizGenerator = (() => {
     const questions = [];
     planned.forEach(function (p, idx) {
       const extra = {};
-      if (p.formatKey === 'vocab-enja' || p.formatKey === 'enja-ph' || p.formatKey === 'enja-ex') {
+      if (formatSupportsForceNone_(p.formatKey)) {
         extra.forceNone = options.includeNone && Math.random() < noneRate;
       }
       let shared = null;
@@ -6549,6 +6554,20 @@ const VocabQuizGenerator = (() => {
 
   function lemmaKey_(text) {
     return vocabNorm(text).toLowerCase();
+  }
+
+  function formatSupportsForceNone_(formatKey) {
+    return formatKey === 'vocab-enja' || formatKey === 'enja-ph' || formatKey === 'enja-ex'
+      || formatKey === 'vocab-jaen' || formatKey === 'C1' || formatKey === 'C2';
+  }
+
+  function appendVocabMcqSpecials_(choices, options, forceNone) {
+    if (options.includeNone) {
+      choices.push({ text: VOCAB_OPTION_NONE, isCorrect: !!forceNone, isSpecial: true });
+    }
+    if (options.includeUnknown) {
+      choices.push({ text: VOCAB_OPTION_UNKNOWN, isCorrect: false, isUnknown: true, isSpecial: true });
+    }
   }
 
   function buildEnLemmaSharedPool_(wordObjs, pool, bookPool, dummyCount) {
@@ -6644,9 +6663,9 @@ const VocabQuizGenerator = (() => {
     if (formatKey === 'W4') return buildW4(wordObj, base);
     if (formatKey === 'W5') return buildW5W6(wordObj, base, 'chunk');
     if (formatKey === 'W6') return buildW5W6(wordObj, base, 'example');
-    if (formatKey === 'C1') return buildC1C2(wordObj, base, pool, bookPool, options, 'chunk');
-    if (formatKey === 'C2') return buildC1C2(wordObj, base, pool, bookPool, options, 'example');
-    if (formatKey === 'vocab-jaen') return buildJaEnWordMcq(wordObj, base, pool, bookPool, options);
+    if (formatKey === 'C1') return buildC1C2(wordObj, base, pool, bookPool, options, 'chunk', !!extra.forceNone);
+    if (formatKey === 'C2') return buildC1C2(wordObj, base, pool, bookPool, options, 'example', !!extra.forceNone);
+    if (formatKey === 'vocab-jaen') return buildJaEnWordMcq(wordObj, base, pool, bookPool, options, !!extra.forceNone);
     if (formatKey === 'enja-ph') return buildEnJaTextMcq(wordObj, base, pool, bookPool, options, 'chunk', !!extra.forceNone);
     if (formatKey === 'enja-ex') return buildEnJaTextMcq(wordObj, base, pool, bookPool, options, 'example', !!extra.forceNone);
     if (formatKey === 'PPW') return buildEnLemmaPoolQuestion(wordObj, base, poolCards, 'word');
@@ -6703,50 +6722,54 @@ const VocabQuizGenerator = (() => {
     });
   }
 
-  function buildC1C2(wordObj, base, pool, bookPool, options, kind) {
+  function buildC1C2(wordObj, base, pool, bookPool, options, kind, forceNone) {
     const mat = kind === 'example' ? vocabGetExampleMaterial(wordObj) : vocabGetChunkMaterial(wordObj);
     if (!mat.enCloze) return null;
     const baseWord = vocabNorm(wordObj['英単語・熟語の表現']);
     const n = Math.max(2, parseInt(options.choiceCount, 10) || 4);
-    const dummies = vocabPickEnglishWordDummies(wordObj, pool, bookPool, n - 1);
-    const choicesRaw = vocabShuffle([baseWord].concat(dummies.filter(Boolean))).slice(0, n);
+    const dummiesNeeded = Math.max(0, n - (forceNone ? 0 : 1));
+    const dummies = vocabPickEnglishWordDummies(wordObj, pool, bookPool, dummiesNeeded);
+    let choicesRaw = forceNone
+      ? vocabShuffle(dummies.filter(Boolean)).slice(0, n)
+      : vocabShuffle([baseWord].concat(dummies.filter(Boolean))).slice(0, n);
     while (choicesRaw.length < n) choicesRaw.push('');
     const choices = choicesRaw.map(function (text) {
-      return { text: text, isCorrect: text === baseWord };
+      return { text: text, isCorrect: !forceNone && text === baseWord };
     });
-    if (options.includeUnknown) {
-      choices.push({ text: VOCAB_OPTION_UNKNOWN, isCorrect: false, isUnknown: true, isSpecial: true });
-    }
+    appendVocabMcqSpecials_(choices, options, forceNone);
     return Object.assign(base, {
       japanese: mat.jaHint,
       mcqPrefix: mat.enCloze.prefix,
       mcqSuffix: mat.enCloze.suffix,
       mcqAnswer: mat.enCloze.answer,
-      correctText: baseWord,
+      correctText: forceNone ? VOCAB_OPTION_NONE : baseWord,
+      forceNone: !!forceNone,
       choices: choices
     });
   }
 
-  function buildJaEnWordMcq(wordObj, base, pool, bookPool, options) {
+  function buildJaEnWordMcq(wordObj, base, pool, bookPool, options, forceNone) {
     const meaning = vocabPickPrimaryMeaning(wordObj);
     if (!meaning) return null;
     const baseWord = vocabNorm(wordObj['英単語・熟語の表現']);
     const n = Math.max(2, parseInt(options.choiceCount, 10) || 4);
-    const dummies = vocabPickEnglishWordDummies(wordObj, pool, bookPool, n - 1);
-    const choicesRaw = vocabShuffle([baseWord].concat(dummies.filter(Boolean))).slice(0, n);
+    const dummiesNeeded = Math.max(0, n - (forceNone ? 0 : 1));
+    const dummies = vocabPickEnglishWordDummies(wordObj, pool, bookPool, dummiesNeeded);
+    let choicesRaw = forceNone
+      ? vocabShuffle(dummies.filter(Boolean)).slice(0, n)
+      : vocabShuffle([baseWord].concat(dummies.filter(Boolean))).slice(0, n);
     const choices = choicesRaw.map(function (text) {
-      return { text: text, isCorrect: text === baseWord };
+      return { text: text, isCorrect: !forceNone && text === baseWord };
     });
-    if (options.includeUnknown) {
-      choices.push({ text: VOCAB_OPTION_UNKNOWN, isCorrect: false, isUnknown: true, isSpecial: true });
-    }
+    appendVocabMcqSpecials_(choices, options, forceNone);
     return Object.assign(base, {
       japanese: meaning.meaning,
       posLabel: meaning.posLabel,
       mcqPrefix: '',
       mcqSuffix: '',
       mcqAnswer: '',
-      correctText: baseWord,
+      correctText: forceNone ? VOCAB_OPTION_NONE : baseWord,
+      forceNone: !!forceNone,
       choices: choices
     });
   }
@@ -6763,12 +6786,7 @@ const VocabQuizGenerator = (() => {
     const choiceObjects = choiceTexts.map(function (text) {
       return { text: text, isCorrect: !forceNone && text === correct };
     });
-    if (options.includeNone) {
-      choiceObjects.push({ text: VOCAB_OPTION_NONE, isCorrect: !!forceNone, isSpecial: true });
-    }
-    if (options.includeUnknown) {
-      choiceObjects.push({ text: VOCAB_OPTION_UNKNOWN, isCorrect: false, isUnknown: true, isSpecial: true });
-    }
+    appendVocabMcqSpecials_(choiceObjects, options, forceNone);
     return Object.assign(base, {
       word: vocabNorm(kind === 'example' ? mat.enFull : mat.enFull),
       posLabel: kind === 'example' ? '例文' : '句',
@@ -6878,12 +6896,7 @@ const VocabQuizGenerator = (() => {
     const choiceObjects = choiceTexts.map(function (text) {
       return { text: text, isCorrect: !forceNone && text === targetMeaning.meaning };
     });
-    if (options.includeNone) {
-      choiceObjects.push({ text: VOCAB_OPTION_NONE, isCorrect: forceNone, isSpecial: true });
-    }
-    if (options.includeUnknown) {
-      choiceObjects.push({ text: VOCAB_OPTION_UNKNOWN, isCorrect: false, isSpecial: true });
-    }
+    appendVocabMcqSpecials_(choiceObjects, options, forceNone);
     return Object.assign(base, {
       id: wordObj['通し番号'] + '-' + targetMeaning.key + '-' + idx,
       format: 'vocab-enja',
