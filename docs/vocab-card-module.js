@@ -117,22 +117,113 @@ const VocabCardModule = (() => {
     });
   }
 
-  /** 👍習得済み（Step_Index>=1）以外＝未登録・😫 */
-  function isMasteredWord_(wordObj, bookName, sheetName) {
-    if (!window.SrsModule) return false;
-    const wordId = window.SrsModule.buildWordId(bookName, sheetName, wordObj['通し番号']);
-    const state = window.SrsModule.getState(wordId);
-    return (parseInt(state.Step_Index, 10) || 0) >= 1;
+  /** ユーザーが 👍/😫 で明示登録したマーク（単語テスト結果画面・単語カード） */
+  function getUserMarkCategory_(state) {
+    const mark = state && state.User_Mark ? String(state.User_Mark) : '';
+    if (mark === 'known') return 'known';
+    if (mark === 'unknown') return 'unknown';
+    return 'none';
   }
 
-  function pickWordsForCard_(words, scope, bookName, sheetName) {
-    let target = (words || []).slice();
-    if (scope === 'unmastered') {
-      target = target.filter(function (w) {
-        return !isMasteredWord_(w, bookName, sheetName);
-      });
+  function getWordState_(wordObj, bookName, sheetName) {
+    if (!window.SrsModule || !window.ItemStateModule) return null;
+    const wordId = window.SrsModule.buildWordId(bookName, sheetName, wordObj['通し番号']);
+    return window.ItemStateModule.getState(wordId);
+  }
+
+  function recentWrongRank_(state) {
+    if (!state) return -1;
+    const wrong = parseInt(state.Total_Wrong, 10) || 0;
+    if (!wrong) return -1;
+    const bits = parseInt(state.Recent_Bits, 10) || 0;
+    const last = parseInt(state.Last_Seen, 10) || 0;
+    if (!last) return -1;
+    for (let b = 0; b < 8; b++) {
+      if (((bits >> b) & 1) === 0) {
+        return last - b;
+      }
     }
-    return target;
+    return last;
+  }
+
+  function matchesMarkFilters_(category, target) {
+    const flags = {
+      known: !!target.markKnown,
+      unknown: !!target.markUnknown,
+      none: !!target.markNone
+    };
+    if (!flags.known && !flags.unknown && !flags.none) return false;
+    if (category === 'known' && flags.known) return true;
+    if (category === 'unknown' && flags.unknown) return true;
+    if (category === 'none' && flags.none) return true;
+    return false;
+  }
+
+  function pickWordsByTarget_(words, bookName, sheetName, target) {
+    target = target || {};
+    const source = target.source || 'quiz';
+    let list = (words || []).slice();
+
+    if (source === 'mark') {
+      const mode = target.markMode === 'include' ? 'include' : 'exclude';
+      list = list.filter(function (w) {
+        const st = getWordState_(w, bookName, sheetName);
+        const cat = getUserMarkCategory_(st);
+        const hit = matchesMarkFilters_(cat, target);
+        return mode === 'include' ? hit : !hit;
+      });
+      return list;
+    }
+
+    const strategy = target.quizStrategy || 'recentWrong';
+    if (strategy === 'unseen') {
+      list = list.filter(function (w) {
+        const st = getWordState_(w, bookName, sheetName);
+        return !st || (parseInt(st.Total_Attempts, 10) || 0) === 0;
+      });
+      list.sort(function () { return Math.random() - 0.5; });
+      return list;
+    }
+
+    if (strategy === 'historicalWrong') {
+      list = list.filter(function (w) {
+        const st = getWordState_(w, bookName, sheetName);
+        return st && (parseInt(st.Total_Wrong, 10) || 0) > 0;
+      });
+      list.sort(function (a, b) {
+        const sa = getWordState_(a, bookName, sheetName) || {};
+        const sb = getWordState_(b, bookName, sheetName) || {};
+        const wa = parseInt(sa.Total_Wrong, 10) || 0;
+        const wb = parseInt(sb.Total_Wrong, 10) || 0;
+        const ta = parseInt(sa.Total_Attempts, 10) || 0;
+        const tb = parseInt(sb.Total_Attempts, 10) || 0;
+        const ra = ta > 0 ? wa / ta : 0;
+        const rb = tb > 0 ? wb / tb : 0;
+        if (rb !== ra) return rb - ra;
+        if (wb !== wa) return wb - wa;
+        return Math.random() - 0.5;
+      });
+      return list;
+    }
+
+    // recentWrong
+    list = list.filter(function (w) {
+      return recentWrongRank_(getWordState_(w, bookName, sheetName)) >= 0;
+    });
+    list.sort(function (a, b) {
+      const ra = recentWrongRank_(getWordState_(a, bookName, sheetName));
+      const rb = recentWrongRank_(getWordState_(b, bookName, sheetName));
+      if (rb !== ra) return rb - ra;
+      return Math.random() - 0.5;
+    });
+    return list;
+  }
+
+  function pickWordsForCard_(words, scope, bookName, sheetName, cardTarget) {
+    if (scope === 'targeted') {
+      return pickWordsByTarget_(words, bookName, sheetName, cardTarget);
+    }
+    return (words || []).slice();
   }
 
   async function loadWordsForCard_(options) {
@@ -449,6 +540,9 @@ const VocabCardModule = (() => {
         const isKnown = marks[id];
         const wordId = window.SrsModule.buildWordId(bookName, sheetName, id);
         window.SrsModule.update(wordId, !!isKnown, 0, !isKnown);
+        if (window.ItemStateModule) {
+          window.ItemStateModule.patchState(wordId, { User_Mark: isKnown ? 'known' : 'unknown' });
+        }
       });
     }
     if (typeof window.applyVocabCardSessionScore_ === 'function') {
@@ -628,33 +722,33 @@ const VocabCardModule = (() => {
     if (window.BackendSyncStatus) window.BackendSyncStatus.refresh();
   }
 
-  function countPreview_(words, bookName, sheetName) {
+  function countPreview_(words, bookName, sheetName, cardTarget) {
     const pickedAll = pickWordsForCard_(words, 'all', bookName, sheetName);
-    const pickedUnm = pickWordsForCard_(words, 'unmastered', bookName, sheetName);
+    const pickedTarget = pickWordsForCard_(words, 'targeted', bookName, sheetName, cardTarget);
     const previewAxes = { axes: { grains: ['WD', 'PH', 'EX'], directions: ['jaen', 'enja'] } };
     return {
       allCards: buildCardItemsFromWords_(pickedAll, previewAxes).length,
-      unmasteredCards: buildCardItemsFromWords_(pickedUnm, previewAxes).length
+      unmasteredCards: buildCardItemsFromWords_(pickedTarget, previewAxes).length
     };
   }
 
   async function previewDivisionCounts(options) {
     if (!options || !options.bookName || !options.sheetName) return null;
     const words = await loadWordsForCard_(options);
-    return countPreview_(words, options.bookName, options.sheetName);
+    return countPreview_(words, options.bookName, options.sheetName, options.cardTarget);
   }
 
   async function loadAndStart(options, scope) {
     scope = scope || 'all';
-    if (scope === 'unmastered' && window.ItemStateModule) {
+    if (scope === 'targeted' && window.ItemStateModule) {
       await window.ItemStateModule.syncFromServer('').catch(function () {});
     }
     const words = await loadWordsForCard_(options);
     if (!words.length) throw new Error('条件に合う単語がありません。');
-    const picked = pickWordsForCard_(words, scope, options.bookName, options.sheetName);
+    const picked = pickWordsForCard_(words, scope, options.bookName, options.sheetName, options.cardTarget);
     if (!picked.length) {
-      throw new Error(scope === 'unmastered'
-        ? '未習得の単語がありません（👍で習得済みの語だけが対象範囲にあります）。'
+      throw new Error(scope === 'targeted'
+        ? '条件に合う特定語がありません。選び方やチェックを見直してください。'
         : '条件に合う単語がありません。');
     }
     const cardItems = buildCardItemsFromWords_(picked, options);
@@ -672,13 +766,15 @@ const VocabCardModule = (() => {
   }
 
   function syncHomeworkUi_(homework) {
-    ['vocab-card-start-unmastered-btn', 'vocab-card-start-all-btn'].forEach(function (id) {
+    ['vocab-card-start-targeted-btn', 'vocab-card-start-all-btn'].forEach(function (id) {
       const btn = el_(id);
       if (!btn) return;
       btn.disabled = !!homework;
       btn.title = homework ? '宿題・小テストモードでは利用できません' : '';
       btn.style.opacity = homework ? '0.5' : '';
     });
+    const panel = el_('vocab-card-target-panel');
+    if (panel) panel.style.opacity = homework ? '0.5' : '';
   }
 
   return {

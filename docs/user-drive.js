@@ -45,9 +45,9 @@ const UserDriveModule = (function () {
   const ITEM_STATE_HEADERS = [
     'Item_ID', 'Kind', 'Set_ID', 'Total_Attempts', 'Total_Wrong',
     'Recent_Bits', 'Last_Seen', 'Step_Index', 'EF', 'Next_Review', 'Avg_Time',
-    'First_Seen', 'Review_Streak', 'Review_Clear'
+    'First_Seen', 'Review_Streak', 'Review_Clear', 'User_Mark'
   ];
-  const ITEM_STATE_COL_END = 'N';
+  const ITEM_STATE_COL_END = 'O';
   /** 過渡期: ユーザー手作業シートの余分列を読むための上限列 */
   const ITEM_STATE_LEGACY_SCAN_COL_END = 'ZZ';
 
@@ -926,6 +926,7 @@ const UserDriveModule = (function () {
 
   function itemStateFieldDefault_(fieldName) {
     if (fieldName === 'EF') return 2.5;
+    if (fieldName === 'User_Mark') return '';
     return 0;
   }
 
@@ -950,6 +951,7 @@ const UserDriveModule = (function () {
       }
       const raw = row[col];
       if (h === 'EF') obj[h] = parseFloat(raw) || 2.5;
+      else if (h === 'User_Mark') obj[h] = normField_(raw) || '';
       else obj[h] = parseInt(raw, 10) || 0;
     });
     return obj;

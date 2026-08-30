@@ -161,6 +161,7 @@ UserBridge.call(op, payload)
 | Last_Seen | UNIX秒 |
 | Step_Index, EF, Next_Review, Avg_Time | SRS（単語） |
 | First_Seen, Review_Streak, Review_Clear | 復習単語セット（初回学習日・連続正解・卒業） |
+| User_Mark | 単語の明示マーク（`known` / `unknown` / 空）— 結果画面・単語カードの 👍/😫 |
 
 クライアント側の保管場所は `localStorage['digitaldrill_item_state']` の1箇所のみです。
 `ItemStateModule` が唯一の読み書き口で、`SrsModule` は出題間隔の計算だけを担当します。
