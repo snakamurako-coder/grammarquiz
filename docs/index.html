@@ -83,6 +83,9 @@ button:active { opacity: 0.9; }
 .slide-switch-slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
 .slide-switch input:checked + .slide-switch-slider { background: #42a5f5; }
 .slide-switch input:checked + .slide-switch-slider:before { transform: translateX(22px); }
+.vocab-session-resume-banner { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin:0 0 12px; padding:10px 12px; background:#e3f2fd; border-radius:8px; color:#1565c0; font-size:0.9em; }
+.vocab-session-resume-actions { display:flex; gap:8px; flex-shrink:0; }
+.vocab-session-resume-actions .btn-secondary { padding:6px 12px; font-size:0.85em; }
 .register-manual-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid #eceff1; padding-bottom: 6px; }
 .register-manual-header .section-title { margin-bottom: 0; border-bottom: none; padding-bottom: 0; flex: 1; min-width: 0; }
 #register-mode-toggle {
@@ -1096,16 +1099,6 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           <select id="vocab-sheet-select"></select>
         </div>
       </div>
-      <div class="setting-section" id="vocab-review-set-section">
-        <button type="button" class="review-set-toggle" id="vocab-review-set-toggle" aria-expanded="false" aria-controls="vocab-review-set-body">
-          <span class="section-title">復習単語セット</span>
-          <span class="review-set-toggle-icon" id="vocab-review-set-toggle-icon" aria-hidden="true">▼</span>
-        </button>
-        <div id="vocab-review-set-body" style="display:none;">
-          <p class="filter-axis-hint" style="margin:0 0 10px;">初回学習からの経過日数で分類します。今日学習した語は翌日以降に表示されます。3回連続正解した語は復習セットから除外されます（通常の単語学習・SRSには影響しません）。</p>
-          <div id="vocab-review-set-list" class="review-set-list" aria-live="polite"></div>
-        </div>
-      </div>
       <div class="setting-section vocab-division-section">
         <div class="section-title section-title-with-meta">
           <span>2. 区分で絞り込み（任意）</span>
@@ -1126,7 +1119,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
       </div>
       <div class="setting-section" id="vocab-card-section">
         <div class="section-title">単語カード【3A】</div>
-        <p class="filter-axis-hint vocab-3a-note">※「3B 単語学習」以降の設定（出題形式・出題数など）は単語カードには反映されません。</p>
+        <p class="filter-axis-hint vocab-3a-note">※「3C 単語クイズ」以降の設定（出題形式・出題数など）は単語カードには反映されません。</p>
         <p class="filter-axis-hint" style="margin:0 0 12px;">フラッシュカードで語・句・例文をめくり、👍/😫 で仕分けます。一巡後に学習状態をまとめて登録します。</p>
         <div class="vocab-card-target-panel" id="vocab-card-target-panel">
           <div class="form-group" style="margin-bottom:10px;">
@@ -1163,10 +1156,27 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         <button type="button" id="vocab-card-start-all-btn" class="btn-primary" style="width:100%;">全単語に取り組む</button>
       </div>
       <div class="setting-section" id="vocab-quiz-section">
-        <div class="section-title">単語学習【3B】</div>
+        <div class="section-title">単語クイズ【3C】</div>
         <p class="filter-axis-hint" style="margin:0 0 12px;">クイズ形式の単語学習です。下の出題形式・出題設定が反映されます。</p>
+        <div id="session-resume-banner" class="vocab-session-resume-banner" style="display:none;" role="status">
+          <span id="session-resume-text"></span>
+          <span class="vocab-session-resume-actions">
+            <button type="button" class="btn-secondary" id="session-resume-btn">続きから</button>
+            <button type="button" class="btn-secondary" id="session-resume-discard-btn">破棄</button>
+          </span>
+        </div>
+        <div class="vocab-3b-subsection" id="vocab-review-set-section">
+          <button type="button" class="review-set-toggle" id="vocab-review-set-toggle" aria-expanded="false" aria-controls="vocab-review-set-body">
+            <span class="subsection-title" style="margin:0;border:none;padding:0;">3B 復習モード</span>
+            <span class="review-set-toggle-icon" id="vocab-review-set-toggle-icon" aria-hidden="true">▼</span>
+          </button>
+          <div id="vocab-review-set-body" style="display:none;">
+            <p class="filter-axis-hint" style="margin:0 0 10px;">初回学習からの経過日数で分類します。今日学習した語は翌日以降に表示されます。3回連続正解した語は復習セットから除外されます（通常の単語クイズ・SRSには影響しません）。<strong>出題形式・解答方法は下の「3. 出題形式」の設定に準じます。</strong></p>
+            <div id="vocab-review-set-list" class="review-set-list" aria-live="polite"></div>
+          </div>
+        </div>
         <div class="vocab-3b-subsection">
-        <div class="subsection-title">出題形式</div>
+        <div class="subsection-title">3. 出題形式</div>
         <p id="vocab-homework-banner" class="filter-axis-hint" style="display:none;margin:0 0 10px;padding:8px 10px;background:#fff8e1;border-radius:8px;color:#6d4c00;"></p>
         <div class="form-group">
           <label>① 和英 / 英和</label>
@@ -1279,7 +1289,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           </select>
         </div>
         </div>
-      <button id="vocab-start-btn" class="btn-primary">単語学習を開始する</button>
+      <button id="vocab-start-btn" class="btn-primary">単語クイズを開始する</button>
       </div>
 
     <div id="reading-info-panel" style="display: none;">
@@ -1301,6 +1311,13 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           <button type="button" id="assignment-refresh-btn" class="btn-small" style="font-weight:normal;">更新</button>
         </div>
         <p style="font-size:0.9em;color:#666;margin:0 0 12px;">管理者が出した課題に取り組みます。A宿題は範囲を分割して消化できます。B小テストは制限時間・合格ラインがあります。</p>
+        <div id="assignment-session-resume-banner" class="vocab-session-resume-banner" style="display:none;" role="status">
+          <span id="assignment-session-resume-text"></span>
+          <span class="vocab-session-resume-actions">
+            <button type="button" class="btn-secondary session-resume-btn">続きから</button>
+            <button type="button" class="btn-secondary session-resume-discard-btn">破棄</button>
+          </span>
+        </div>
         <div id="assignment-list"><p>タブを開くと読み込みます</p></div>
       </div>
     </div>
@@ -1777,6 +1794,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script src="preset-store.js"></script>
 <script src="review-set-module.js"></script>
+<script src="vocab-session-draft.js"></script>
 <script>
 /** true: GAS① 認証ゲート必須（短命 auth トークン） */
 const AUTH_ENABLED = true;
@@ -9178,6 +9196,8 @@ async function runVocabQuizSession_(options, btn, reviewSetId) {
       document.getElementById('result-screen').style.display = 'none';
       screens.game.style.display = 'block';
       GameSessionPlay.start(questions);
+      if (window.clearSessionDraft_) window.clearSessionDraft_();
+      if (window.persistSessionDraft_) window.persistSessionDraft_();
     } catch (error) {
       console.error(error);
       currentReviewSetId = null;
@@ -9255,9 +9275,14 @@ elements.backBtn.addEventListener('click', () => {
   if (window.GameSessionPlay) GameSessionPlay.reset();
   if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
   if (window.KeyboardModule) KeyboardModule.deactivate();
+  if (window.persistSessionDraft_) window.persistSessionDraft_();
+  if (window.AssignmentModule && AssignmentModule.abandonActiveSession) {
+    AssignmentModule.abandonActiveSession();
+  }
   screens.game.style.display = 'none';
   screens.settings.style.display = 'block';
   currentReviewSetId = null;
+  if (window.VocabSessionDraftModule) VocabSessionDraftModule.updateResumeBanner();
 });
 
 function normalizeGrammarRow(row) {
@@ -9710,6 +9735,7 @@ window.onQuestionCompleted = (isCorrect, meta) => {
     if (answerFeedback) answerFeedback.classList.add('is-visible');
   }
   document.getElementById('next-btn').style.display = 'block';
+  if (window.persistSessionDraft_) window.persistSessionDraft_();
 };
 
 async function buildSessionSummary_(modeOverride, setNameOverride) {
@@ -9806,11 +9832,15 @@ window.tryAdvanceToNextQuestion_ = tryAdvanceToNextQuestion_;
 document.getElementById('next-btn').addEventListener('click', () => {
   document.getElementById('next-btn').style.display = 'none';
   if (window.GameSessionPlay && GameSessionPlay.isActive()) {
-    if (GameSessionPlay.advanceLinear()) return;
+    if (GameSessionPlay.advanceLinear()) {
+      if (window.persistSessionDraft_) window.persistSessionDraft_();
+      return;
+    }
   }
   currentQuestionIndex++;
   if (currentQuestionIndex < currentQuestionDataList.length) {
     loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
+    if (window.persistSessionDraft_) window.persistSessionDraft_();
   } else {
     showResultScreen();
   }
@@ -9849,6 +9879,7 @@ function showResultScreen() {
   if (window.TtsModule) TtsModule.stop();
   if (window.KeyboardModule) KeyboardModule.deactivate();
   if (window.GameSessionPlay) GameSessionPlay.reset();
+  if (window.clearSessionDraft_) window.clearSessionDraft_();
   screens.game.style.display = 'none';
   const resultScreen = document.getElementById('result-screen');
   resultScreen.style.display = 'block';
@@ -9909,6 +9940,7 @@ document.getElementById('return-settings-btn').addEventListener('click', () => {
   document.getElementById('result-screen').style.display = 'none';
   screens.settings.style.display = 'block';
   currentReviewSetId = null;
+  if (window.clearSessionDraft_) window.clearSessionDraft_();
   if (window.VocabSettingsModule && VocabSettingsModule.refreshReviewSetCounts) {
     VocabSettingsModule.refreshReviewSetCounts();
   }
@@ -9952,6 +9984,7 @@ function enterAppAsGuest() {
   GrammarSettingsModule.init();
   initModeTabs();
   initVocabModules();
+  if (window.VocabSessionDraftModule) VocabSessionDraftModule.init();
   if (window.VocabRegisterModule) window.VocabRegisterModule.init();
   PresetModule.revalidate().then(function () {
     if (PresetModule.syncUpdateBanner_) PresetModule.syncUpdateBanner_();
@@ -10006,6 +10039,7 @@ function initModeTabs() {
         AssignmentModule.bindUi();
         AssignmentModule.refreshList().catch(function (e) { console.warn('課題一覧:', e); });
       }
+      if (window.VocabSessionDraftModule) VocabSessionDraftModule.updateResumeBanner();
     });
   });
 
@@ -10242,6 +10276,7 @@ window.onLoginSuccess = function(user) {
   if (window.VocabRegisterModule) window.VocabRegisterModule.init();
   try { sessionStorage.removeItem('dd_my_vocab_book_url'); } catch (e) {}
   initVocabModules();
+  if (window.VocabSessionDraftModule) VocabSessionDraftModule.init();
   if (window.UserDriveModule && UserDriveModule.isEnabled()) {
     prepareDriveAfterLogin_();
   } else {
@@ -11101,6 +11136,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
   BackendSyncStatus.refresh();
+  if (window.VocabSessionDraftModule) VocabSessionDraftModule.init();
 });
 </script>
 <script src="vocab-card-module.js"></script>

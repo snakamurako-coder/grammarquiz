@@ -576,6 +576,106 @@ const AssignmentModule = (function () {
     else clearTimer_();
 
     GameSessionPlay.start(currentQuestionDataList);
+    if (window.clearSessionDraft_) window.clearSessionDraft_();
+    if (window.persistSessionDraft_) window.persistSessionDraft_();
+  }
+
+  function abandonActiveSession_() {
+    clearTimer_();
+    activeSession_ = null;
+    const banner = document.getElementById('assignment-session-banner');
+    if (banner) banner.hidden = true;
+  }
+
+  async function restoreFromDraft(draft) {
+    if (!draft || !draft.questions || !draft.questions.length) return false;
+
+    let assignment = draft.assignment || null;
+    if (!assignment && draft.assignmentId) {
+      const row = listCache_.find(function (r) {
+        return r.assignment && r.assignment.Assignment_ID === draft.assignmentId;
+      });
+      assignment = row ? row.assignment : {
+        Assignment_ID: draft.assignmentId,
+        Title: draft.assignmentTitle || '',
+        Kind: draft.assignmentKind || 'homework',
+        Time_Limit_Sec: 0,
+        Pass_Score: 0,
+        Pass_Mode: 'percent',
+        Required_Pass_Count: 1,
+        Max_Attempts: 1,
+        Weakness_Review: false
+      };
+    }
+    if (!assignment) {
+      alert('課題情報を復元できませんでした。宿題・小テスト一覧を開いてから再度お試しください。');
+      return false;
+    }
+
+    activeSession_ = {
+      assignment: assignment,
+      submissionId: draft.submissionId,
+      attemptNo: draft.attemptNo,
+      startedAtMs: draft.startedAtMs || Date.now(),
+      deadlineMs: draft.deadlineMs || 0,
+      rangeIds: draft.rangeIds || [],
+      pointsMax: draft.pointsMax || 0,
+      pointsEarned: draft.pointsEarned || 0,
+      reviewWrong: !!draft.reviewWrong,
+      answerLog: (draft.answerLog || []).slice()
+    };
+
+    currentAppMode = draft.appMode || (assignment.Kind === 'quiz' ? 'assignment-quiz' : 'assignment-homework');
+    currentSessionIsPreset = false;
+    currentSessionSettings = draft.currentSessionSettings || {
+      kind: 'assignment',
+      assignmentId: assignment.Assignment_ID,
+      assignmentKind: assignment.Kind,
+      title: assignment.Title,
+      reviewWrong: !!draft.reviewWrong
+    };
+    currentQuestionDataList = draft.questions;
+    totalQuestionsCount = draft.totalQuestionsCount || draft.questions.length;
+    const resumeAt = draft.resumeIndex != null
+      ? draft.resumeIndex
+      : (draft.sessionAnswerLog || []).length;
+    currentQuestionIndex = Math.min(resumeAt, draft.questions.length);
+    currentScore = draft.currentScore || 0;
+    sessionAnswerLog = (draft.sessionAnswerLog || []).slice();
+    vocabResultMarks_ = draft.vocabResultMarks || {};
+    sessionPersistedToServer = false;
+    sessionStartTime = draft.sessionStartTime || Date.now();
+    currentReviewSetId = null;
+
+    screens.login.style.display = 'none';
+    screens.settings.style.display = 'none';
+    const resultScreen = document.getElementById('result-screen');
+    if (resultScreen) resultScreen.style.display = 'none';
+    const readingScreen = document.getElementById('reading-screen');
+    if (readingScreen) readingScreen.style.display = 'none';
+    screens.game.style.display = 'block';
+
+    const banner = document.getElementById('assignment-session-banner');
+    if (banner) {
+      banner.hidden = false;
+      banner.textContent = (assignment.Kind === 'quiz' ? '【小テスト】' : '【宿題】') + assignment.Title
+        + (draft.reviewWrong ? '（ニガテ復習）' : '');
+    }
+
+    if (activeSession_.deadlineMs) startTimer_(activeSession_.deadlineMs);
+    else clearTimer_();
+
+    if (currentQuestionIndex >= currentQuestionDataList.length) {
+      if (typeof showResultScreen === 'function') showResultScreen();
+      return true;
+    }
+
+    GameSessionPlay.start(currentQuestionDataList);
+    if (typeof loadQuestionToGame === 'function') {
+      loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
+    }
+    if (window.persistSessionDraft_) window.persistSessionDraft_();
+    return true;
   }
 
   function isActive() {
@@ -714,6 +814,7 @@ const AssignmentModule = (function () {
     activeSession_ = null;
     const banner = document.getElementById('assignment-session-banner');
     if (banner) banner.hidden = true;
+    if (window.clearSessionDraft_) window.clearSessionDraft_();
 
     if (!opts.timedOut && !sessionSnap.reviewWrong && a.Weakness_Review
         && local.wrongIds && local.wrongIds.length
@@ -769,7 +870,9 @@ const AssignmentModule = (function () {
     finalizeIfActive: finalizeIfActive,
     reportAchievement: reportAchievement_,
     persistHomeworkProgress: persistHomeworkProgress_,
-    loadLocalProgress: loadLocalProgress_
+    loadLocalProgress: loadLocalProgress_,
+    restoreFromDraft: restoreFromDraft,
+    abandonActiveSession: abandonActiveSession_
   };
 })();
 window.AssignmentModule = AssignmentModule;
