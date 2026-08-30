@@ -154,14 +154,29 @@ const VocabCardModule = (() => {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
-      return Object.assign({}, DEFAULT_SETTINGS, parsed && typeof parsed === 'object' ? parsed : {});
+      const merged = Object.assign({}, DEFAULT_SETTINGS, parsed && typeof parsed === 'object' ? parsed : {});
+      merged.intervalFrontBack = parseFloat(merged.intervalFrontBack) || DEFAULT_SETTINGS.intervalFrontBack;
+      merged.intervalNextWord = parseFloat(merged.intervalNextWord) || DEFAULT_SETTINGS.intervalNextWord;
+      return merged;
     } catch (e) {
       return Object.assign({}, DEFAULT_SETTINGS);
     }
   }
 
+  function hasSavedSettings_() {
+    try { return !!localStorage.getItem(SETTINGS_KEY); } catch (e) { return false; }
+  }
+
   function writeSettings_() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        contentType: settings.contentType,
+        firstLang: settings.firstLang,
+        shuffle: !!settings.shuffle,
+        intervalFrontBack: settings.intervalFrontBack,
+        intervalNextWord: settings.intervalNextWord
+      }));
+    } catch (e) {}
   }
 
   function el_(id) { return document.getElementById(id); }
@@ -531,14 +546,15 @@ const VocabCardModule = (() => {
     if (settings.contentType !== newType) setContentType_(newType);
     settings.firstLang = el_('vc-cfg-first-lang').value;
     const newShuffle = el_('vc-cfg-shuffle').checked;
+    const shuffleChanged = settings.shuffle !== newShuffle;
+    settings.shuffle = newShuffle;
     if (window.TtsModule && typeof window.TtsModule.save === 'function' && typeof window.TtsModule.readTtsForm_ === 'function') {
       window.TtsModule.save(window.TtsModule.readTtsForm_('vc'));
     }
     settings.intervalFrontBack = parseFloat(el_('vc-cfg-interval-fb').value) || 1;
     settings.intervalNextWord = parseFloat(el_('vc-cfg-interval-nw').value) || 1;
     writeSettings_();
-    if (settings.shuffle !== newShuffle) {
-      settings.shuffle = newShuffle;
+    if (shuffleChanged) {
       applyModeAndShuffle_();
     } else {
       updateCardUI_();
@@ -577,9 +593,11 @@ const VocabCardModule = (() => {
     currentIndex = 0;
     resultsCommitted = false;
 
-    if (meta.defaultContentType) settings.contentType = meta.defaultContentType;
-    if (meta.defaultFirstLang) settings.firstLang = meta.defaultFirstLang;
-    writeSettings_();
+    if (!hasSavedSettings_()) {
+      if (meta.defaultContentType) settings.contentType = meta.defaultContentType;
+      if (meta.defaultFirstLang) settings.firstLang = meta.defaultFirstLang;
+      writeSettings_();
+    }
 
     if (window.SrsModule && window.ItemStateModule) {
       window.ItemStateModule.syncFromServer('').catch(function () {});
@@ -592,6 +610,12 @@ const VocabCardModule = (() => {
     document.querySelectorAll('.vocab-card-content-btn').forEach(function (btn) {
       btn.classList.toggle('active', btn.getAttribute('data-vc-type') === settings.contentType);
     });
+    if (el_('vc-cfg-content-type')) el_('vc-cfg-content-type').value = settings.contentType;
+    if (el_('vc-cfg-first-lang')) el_('vc-cfg-first-lang').value = settings.firstLang;
+    if (el_('vc-cfg-shuffle')) el_('vc-cfg-shuffle').checked = !!settings.shuffle;
+    if (window.TtsModule && typeof window.TtsModule.syncVocabCardTtsForm_ === 'function') {
+      window.TtsModule.syncVocabCardTtsForm_();
+    }
 
     applyModeAndShuffle_();
     showScreen_();

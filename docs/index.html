@@ -38,13 +38,13 @@ button:active { opacity: 0.9; }
 .header-title { font-size: clamp(1.3em, 5vw, 1.8em); font-weight: bold; color: #2c3e50; text-align: center; margin: 4px 0 16px; }
 .backend-sync-status {
   position: fixed;
-  top: max(8px, env(safe-area-inset-top));
-  right: max(8px, env(safe-area-inset-right));
+  top: 0;
+  right: 0;
   z-index: 10000;
   font-size: 0.68em;
   font-weight: bold;
-  padding: 6px 10px;
-  border-radius: 8px;
+  padding: calc(env(safe-area-inset-top, 0px) + 2px) calc(env(safe-area-inset-right, 0px) + 6px) 4px 8px;
+  border-radius: 0 0 0 8px;
   box-shadow: var(--shadow);
   max-width: min(210px, 46vw);
   text-align: center;
@@ -8066,6 +8066,7 @@ const GrammarSettingsModule = (() => {
   let rows = [];
   let loadedKey = '';
   let grammarCatalog = {};
+  let restoring_ = false;
 
   function emptyBookState() {
     return { units: null, dai: [], sho: [], area: [] };
@@ -8092,17 +8093,85 @@ const GrammarSettingsModule = (() => {
     return (subject && all.books[subject]) ? all.books[subject] : emptyBookState();
   }
 
-  function persistCurrent() {
-    const subject = getSelectedSubjectName();
-    if (!subject) return;
-    const all = readSettings();
-    all.subject = subject;
-    all.books[subject] = {
-      units: getSelectedUnits(),
-      dai: selectedDivisions(daiContainer),
-      sho: selectedDivisions(shoContainer),
-      area: selectedDivisions(areaContainer)
+  function collectQuizOptions_() {
+    const specify = document.getElementById('grammar-question-count-specify');
+    const customInput = document.getElementById('grammar-question-count-custom');
+    const playEl = document.querySelector('input[name="play-mode"]:checked');
+    const sortVariantEl = document.getElementById('e-sort-variant');
+    return {
+      formatKeys: getCheckedFormatKeys(),
+      eSortVariant: sortVariantEl ? sortVariantEl.value : 'E',
+      choiceCount: parseInt((document.getElementById('g-choice-count') || {}).value, 10) || 4,
+      includeNone: !!(document.getElementById('g-include-none') || {}).checked,
+      includeUnknown: !!(document.getElementById('include-unknown') || {}).checked,
+      playMode: playEl ? playEl.value : 'normal',
+      questionCount: getQuestionCount(),
+      questionCountSpecify: !!(specify && specify.checked),
+      questionCountCustom: customInput ? String(customInput.value || '') : ''
     };
+  }
+
+  function applyQuizOptions_(opts) {
+    if (!opts) return;
+    restoring_ = true;
+    try {
+      const formatKeys = opts.formatKeys || [];
+      formatList.querySelectorAll('input[type="checkbox"]').forEach(function (inp) {
+        if (inp.value.length === 1) inp.checked = formatKeys.indexOf(inp.value) >= 0;
+      });
+      updateFormatOptions();
+      const sortVariantEl = document.getElementById('e-sort-variant');
+      if (sortVariantEl && opts.eSortVariant) sortVariantEl.value = opts.eSortVariant;
+      const choiceEl = document.getElementById('g-choice-count');
+      if (choiceEl && opts.choiceCount) choiceEl.value = String(opts.choiceCount);
+      const noneEl = document.getElementById('g-include-none');
+      if (noneEl && opts.includeNone != null) noneEl.checked = !!opts.includeNone;
+      const unkEl = document.getElementById('include-unknown');
+      if (unkEl && opts.includeUnknown != null) unkEl.checked = !!opts.includeUnknown;
+      if (opts.playMode) {
+        const playRadio = document.querySelector('input[name="play-mode"][value="' + opts.playMode + '"]');
+        if (playRadio) playRadio.checked = true;
+      }
+      const specify = document.getElementById('grammar-question-count-specify');
+      const select = document.getElementById('grammar-question-count');
+      const customInput = document.getElementById('grammar-question-count-custom');
+      if (specify) {
+        specify.checked = !!opts.questionCountSpecify;
+        if (opts.questionCountSpecify && customInput) {
+          customInput.value = String(clampGrammarCount_(opts.questionCountCustom || opts.questionCount || '10'));
+        } else if (select && opts.questionCount) {
+          if (Array.from(select.options).some(function (o) { return o.value === String(opts.questionCount); })) {
+            select.value = String(opts.questionCount);
+          } else if (opts.questionCount !== 'all') {
+            specify.checked = true;
+            if (customInput) customInput.value = String(clampGrammarCount_(opts.questionCount));
+          }
+        }
+        syncGrammarQuestionCountUi_();
+      }
+    } finally {
+      restoring_ = false;
+    }
+  }
+
+  function applySavedQuizOptions_() {
+    applyQuizOptions_(readSettings());
+  }
+
+  function persistCurrent() {
+    if (restoring_) return;
+    const all = readSettings();
+    const subject = getSelectedSubjectName();
+    if (subject) {
+      all.subject = subject;
+      all.books[subject] = {
+        units: getSelectedUnits(),
+        dai: selectedDivisions(daiContainer),
+        sho: selectedDivisions(shoContainer),
+        area: selectedDivisions(areaContainer)
+      };
+    }
+    Object.assign(all, collectQuizOptions_());
     writeSettings(all);
   }
 
@@ -8190,7 +8259,10 @@ const GrammarSettingsModule = (() => {
       input.type = 'checkbox';
       input.value = f.key;
       input.checked = false;
-      input.addEventListener('change', updateFormatOptions);
+      input.addEventListener('change', function () {
+        updateFormatOptions();
+        persistCurrent();
+      });
       const span = document.createElement('span');
       span.textContent = `【形式${f.key}】${f.label}（難易度 ${f.difficultyLabel}）`;
       lbl.appendChild(input);
@@ -8400,14 +8472,19 @@ const GrammarSettingsModule = (() => {
     const downBtn = document.getElementById('grammar-count-down');
     if (!specify || !select || !customInput) return;
 
-    specify.addEventListener('change', syncGrammarQuestionCountUi_);
+    specify.addEventListener('change', function () {
+      syncGrammarQuestionCountUi_();
+      persistCurrent();
+    });
     select.addEventListener('change', function () {
       if (!specify.checked && select.value !== 'all') {
         customInput.value = select.value;
       }
+      persistCurrent();
     });
     customInput.addEventListener('change', function () {
       customInput.value = String(clampGrammarCount_(customInput.value));
+      persistCurrent();
     });
     customInput.addEventListener('input', function () {
       if (customInput.value === '') return;
@@ -8421,6 +8498,7 @@ const GrammarSettingsModule = (() => {
           syncGrammarQuestionCountUi_();
         }
         customInput.value = String(clampGrammarCount_((parseInt(customInput.value, 10) || 1) + 1));
+        persistCurrent();
       });
     }
     if (downBtn) {
@@ -8430,14 +8508,31 @@ const GrammarSettingsModule = (() => {
           syncGrammarQuestionCountUi_();
         }
         customInput.value = String(clampGrammarCount_((parseInt(customInput.value, 10) || 1) - 1));
+        persistCurrent();
       });
     }
     syncGrammarQuestionCountUi_();
   }
 
+  function bindQuizOptionListeners_() {
+    const sortVariantEl = document.getElementById('e-sort-variant');
+    const choiceEl = document.getElementById('g-choice-count');
+    const noneEl = document.getElementById('g-include-none');
+    const unkEl = document.getElementById('include-unknown');
+    if (sortVariantEl) sortVariantEl.addEventListener('change', persistCurrent);
+    if (choiceEl) choiceEl.addEventListener('change', persistCurrent);
+    if (noneEl) noneEl.addEventListener('change', persistCurrent);
+    if (unkEl) unkEl.addEventListener('change', persistCurrent);
+    document.querySelectorAll('input[name="play-mode"]').forEach(function (inp) {
+      inp.addEventListener('change', persistCurrent);
+    });
+  }
+
   function init() {
     renderFormatChecks();
     bindQuestionCountUi_();
+    bindQuizOptionListeners_();
+    applySavedQuizOptions_();
     loadCatalog(false).then(function () {
       return refreshDivisions();
     }).catch(function (e) {
@@ -8462,25 +8557,12 @@ const GrammarSettingsModule = (() => {
   }
 
   function getSessionSettings() {
-    const specify = document.getElementById('grammar-question-count-specify');
-    const customInput = document.getElementById('grammar-question-count-custom');
-    const playEl = document.querySelector('input[name="play-mode"]:checked');
-    const sortVariantEl = document.getElementById('e-sort-variant');
-    return {
+    return Object.assign({
       kind: 'grammar',
       subject: getSelectedSubjectName(),
       units: getSelectedUnits(),
-      filters: getSessionFilters_(),
-      formatKeys: getCheckedFormatKeys(),
-      eSortVariant: sortVariantEl ? sortVariantEl.value : 'E',
-      choiceCount: parseInt((document.getElementById('g-choice-count') || {}).value, 10) || 4,
-      includeNone: !!(document.getElementById('g-include-none') || {}).checked,
-      includeUnknown: !!(document.getElementById('include-unknown') || {}).checked,
-      playMode: playEl ? playEl.value : 'normal',
-      questionCount: getQuestionCount(),
-      questionCountSpecify: !!(specify && specify.checked),
-      questionCountCustom: customInput ? String(customInput.value || '') : ''
-    };
+      filters: getSessionFilters_()
+    }, collectQuizOptions_());
   }
 
   async function applySessionSettings(settings) {
@@ -8506,41 +8588,7 @@ const GrammarSettingsModule = (() => {
     renderUnits();
     await refreshDivisions();
 
-    const formatKeys = settings.formatKeys || [];
-    formatList.querySelectorAll('input[type="checkbox"]').forEach(function (inp) {
-      inp.checked = formatKeys.indexOf(inp.value) >= 0;
-    });
-    updateFormatOptions();
-    const sortVariantEl = document.getElementById('e-sort-variant');
-    if (sortVariantEl && settings.eSortVariant) sortVariantEl.value = settings.eSortVariant;
-    const choiceEl = document.getElementById('g-choice-count');
-    if (choiceEl && settings.choiceCount) choiceEl.value = String(settings.choiceCount);
-    const noneEl = document.getElementById('g-include-none');
-    if (noneEl && settings.includeNone != null) noneEl.checked = !!settings.includeNone;
-    const unkEl = document.getElementById('include-unknown');
-    if (unkEl && settings.includeUnknown != null) unkEl.checked = !!settings.includeUnknown;
-
-    if (settings.playMode) {
-      const playRadio = document.querySelector('input[name="play-mode"][value="' + settings.playMode + '"]');
-      if (playRadio) playRadio.checked = true;
-    }
-    const specify = document.getElementById('grammar-question-count-specify');
-    const select = document.getElementById('grammar-question-count');
-    const customInput = document.getElementById('grammar-question-count-custom');
-    if (specify) {
-      specify.checked = !!settings.questionCountSpecify;
-      if (settings.questionCountSpecify && customInput) {
-        customInput.value = String(settings.questionCountCustom || settings.questionCount || '10');
-      } else if (select && settings.questionCount) {
-        if (Array.from(select.options).some(function (o) { return o.value === String(settings.questionCount); })) {
-          select.value = String(settings.questionCount);
-        } else {
-          specify.checked = true;
-          if (customInput) customInput.value = String(settings.questionCount);
-        }
-      }
-      syncGrammarQuestionCountUi_();
-    }
+    applyQuizOptions_(settings);
     persistCurrent();
     return true;
   }
