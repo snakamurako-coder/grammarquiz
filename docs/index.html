@@ -86,6 +86,12 @@ button:active { opacity: 0.9; }
 .vocab-session-resume-banner { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin:0 0 12px; padding:10px 12px; background:#e3f2fd; border-radius:8px; color:#1565c0; font-size:0.9em; }
 .vocab-session-resume-actions { display:flex; gap:8px; flex-shrink:0; }
 .vocab-session-resume-actions .btn-secondary { padding:6px 12px; font-size:0.85em; }
+.register-import-hint { font-size:0.82em; color:#2e7d32; margin:4px 0 0; line-height:1.4; }
+.register-form-grid [data-field].register-field-imported,
+.register-simple-meanings input.register-meaning-imported {
+  background: #e8f5e9;
+  border-color: #81c784;
+}
 .register-manual-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid #eceff1; padding-bottom: 6px; }
 .register-manual-header .section-title { margin-bottom: 0; border-bottom: none; padding-bottom: 0; flex: 1; min-width: 0; }
 #register-mode-toggle {
@@ -3042,6 +3048,43 @@ const PresetModule = (() => {
     return { words: filtered, pool: pool, bookPool: bookPool };
   }
 
+  function normalizePresetWordKey_(expression) {
+    return String(expression || '').trim().toLowerCase();
+  }
+
+  function findPresetVocabWordInManifest_(manifest, expression) {
+    const key = normalizePresetWordKey_(expression);
+    if (!key || !manifest || !manifest.vocabWords) return null;
+    let found = null;
+    Object.keys(manifest.vocabWords).forEach(function (manifestKey) {
+      if (found) return;
+      const entry = manifest.vocabWords[manifestKey];
+      const pool = entry.pool || entry.words || [];
+      for (let i = 0; i < pool.length; i++) {
+        const row = pool[i];
+        if (normalizePresetWordKey_(row['英単語・熟語の表現']) !== key) continue;
+        const parts = manifestKey.split('::');
+        found = {
+          bookName: parts[0] || '',
+          sheetName: parts[1] || '',
+          manifestKey: manifestKey,
+          row: row
+        };
+        break;
+      }
+    });
+    return found;
+  }
+
+  async function findPresetVocabWord(expression) {
+    const result = await resolve_('vocab',
+      function (m) { return findPresetVocabWordInManifest_(m, expression); },
+      function () { return Promise.resolve({ status: 'success', data: null }); },
+      false);
+    if (result.status === 'success' && result.data) return result.data;
+    return null;
+  }
+
   function isUsableVocabCatalog_(data) {
     return !!(data && Array.isArray(data.presets) && data.presets.length > 0);
   }
@@ -3093,6 +3136,7 @@ const PresetModule = (() => {
     getVocabWords: getVocabWords,
     getGrammarCatalog: getGrammarCatalog,
     getQuestions: getQuestions,
+    findPresetVocabWord: findPresetVocabWord,
     clearAll: clearAll,
     refreshAll: refreshAll,
     revalidate: revalidate,
@@ -7483,14 +7527,208 @@ const VocabRegisterModule = (() => {
   const CARD_COUNT = 2;
   const DRAFT_KEY = 'dd_vocab_register_draft';
   const BOOK_URL_CACHE_KEY = 'dd_my_vocab_book_url';
+  const DIVISION_FIELDS = ['大区分', '中区分', '小区分'];
+  const IMPORTABLE_FIELDS = VOCAB_REGISTER_FIELDS.filter(function (field) {
+    return DIVISION_FIELDS.indexOf(field) < 0;
+  });
+  const LOOKUP_DEBOUNCE_MS = 450;
   let previewRows = [];
   let registerMode = 'simple';
   let cardStates = [];
   let draftTimer = null;
   let draftReady = false;
 
+  function normalizeWordKey_(text) {
+    return String(text || '').trim().toLowerCase();
+  }
+
   function emptyMeanings() {
     return [{ meaning: '', posKey: '' }];
+  }
+
+  function emptyCardState_() {
+    return {
+      meanings: emptyMeanings(),
+      submitting: false,
+      importedRow: null,
+      importSource: '',
+      importDeclinedWord: '',
+      lastPromptWord: '',
+      lookupTimer: null
+    };
+  }
+
+  function extractImportableRow_(sourceRow) {
+    const out = {};
+    IMPORTABLE_FIELDS.forEach(function (field) {
+      const v = vocabNorm(sourceRow[field]);
+      if (field === '英単語・熟語の表現') {
+        if (v !== VOCAB_UNREGISTERED) out[field] = v;
+        return;
+      }
+      if (vocabHasMeaning(v)) out[field] = v;
+    });
+    return out;
+  }
+
+  function showImportHint_(cardIndex, sourceLabel) {
+    const hint = qsCard(cardIndex, '.register-import-hint');
+    if (!hint) return;
+    if (!sourceLabel) {
+      hint.style.display = 'none';
+      hint.textContent = '';
+      return;
+    }
+    hint.textContent = 'プリセット教材からインポート済み（' + sourceLabel + '）。不足分は追加入力できます。';
+    hint.style.display = 'block';
+  }
+
+  function clearCardImport_(cardIndex, clearDeclined) {
+    if (!cardStates[cardIndex]) return;
+    cardStates[cardIndex].importedRow = null;
+    cardStates[cardIndex].importSource = '';
+    cardStates[cardIndex].lastPromptWord = '';
+    if (clearDeclined) cardStates[cardIndex].importDeclinedWord = '';
+    showImportHint_(cardIndex, '');
+    const card = cardEl(cardIndex);
+    if (!card) return;
+    card.querySelectorAll('.register-field-imported, .register-meaning-imported').forEach(function (el) {
+      el.classList.remove('register-field-imported', 'register-meaning-imported');
+    });
+  }
+
+  function importedTextForPos_(cardIndex, posKey) {
+    const imported = cardStates[cardIndex] && cardStates[cardIndex].importedRow;
+    if (!imported || !posKey) return '';
+    const text = vocabNorm(imported[posKey]);
+    return vocabHasMeaning(text) ? text : '';
+  }
+
+  function applyImportedMeaningForPos_(cardIndex, meaningIndex, posKey) {
+    const importedText = importedTextForPos_(cardIndex, posKey);
+    if (!importedText) return;
+    const row = cardStates[cardIndex].meanings[meaningIndex];
+    if (!row) return;
+    const current = String(row.meaning || '');
+    if (!current.trim()) {
+      row.meaning = importedText;
+      return;
+    }
+    if (current.indexOf(importedText) >= 0) return;
+    row.meaning = current + importedText;
+  }
+
+  function applyDetailImport_(cardIndex, imported) {
+    IMPORTABLE_FIELDS.forEach(function (field) {
+      if (field === '英単語・熟語の表現') return;
+      const val = imported[field];
+      if (!vocabHasMeaning(val)) return;
+      const el = qsCard(cardIndex, '[data-field="' + field + '"]');
+      if (!el) return;
+      el.value = val;
+      el.classList.add('register-field-imported');
+    });
+  }
+
+  function applySimpleImport_(cardIndex, imported) {
+    const existing = (cardStates[cardIndex].meanings || []).slice();
+    const byPos = {};
+    existing.forEach(function (row, i) {
+      if (row.posKey) byPos[row.posKey] = i;
+    });
+    VOCAB_MEANING_KEYS.forEach(function (posKey) {
+      const text = imported[posKey];
+      if (!vocabHasMeaning(text)) return;
+      if (byPos[posKey] !== undefined) {
+        const row = existing[byPos[posKey]];
+        if (!String(row.meaning || '').trim()) row.meaning = text;
+      } else {
+        existing.push({ meaning: text, posKey: posKey });
+      }
+    });
+    cardStates[cardIndex].meanings = existing.length ? existing : emptyMeanings();
+    renderSimpleMeanings(cardIndex);
+  }
+
+  function applyPresetImport_(cardIndex, match) {
+    const imported = extractImportableRow_(match.row || {});
+    if (!imported['英単語・熟語の表現']) return;
+    cardStates[cardIndex].importedRow = imported;
+    cardStates[cardIndex].importSource = (match.bookName || '') + ' / ' + (match.sheetName || '');
+    cardStates[cardIndex].lastPromptWord = normalizeWordKey_(imported['英単語・熟語の表現']);
+    showImportHint_(cardIndex, cardStates[cardIndex].importSource);
+    if (registerMode === 'detail') applyDetailImport_(cardIndex, imported);
+    else applySimpleImport_(cardIndex, imported);
+    saveDraftSoon_();
+  }
+
+  async function maybePromptPresetImport_(cardIndex, word) {
+    const trimmed = String(word || '').trim();
+    if (!trimmed || cardStates[cardIndex].submitting) return;
+    const key = normalizeWordKey_(trimmed);
+    if (!key) return;
+    if (cardStates[cardIndex].importDeclinedWord === key) return;
+    if (cardStates[cardIndex].lastPromptWord === key && cardStates[cardIndex].importedRow) return;
+    if (!window.PresetModule || !PresetModule.findPresetVocabWord) return;
+
+    let match;
+    try {
+      match = await PresetModule.findPresetVocabWord(trimmed);
+    } catch (e) {
+      console.warn('プリセット語検索:', e.message || e);
+      return;
+    }
+    if (!match || !match.row) return;
+
+    const currentWord = qsCard(cardIndex, '.register-simple-word');
+    const detailWord = qsCard(cardIndex, '[data-field="英単語・熟語の表現"]');
+    const activeWord = (registerMode === 'detail' && detailWord)
+      ? detailWord.value.trim()
+      : (currentWord ? currentWord.value.trim() : '');
+    if (normalizeWordKey_(activeWord) !== key) return;
+
+    cardStates[cardIndex].lastPromptWord = key;
+    const sourceLabel = (match.bookName || 'プリセット教材') + (match.sheetName ? ' / ' + match.sheetName : '');
+    const quoted = '"' + trimmed + '"';
+    const ok = window.confirm(
+      quoted + ' はプリセット教材（' + sourceLabel + '）に登録されています。\n'
+      + '内容をインポートして登録を進めますか？\n'
+      + '（大・中・小区分は除き、既存の意味などを取り込みます）'
+    );
+    if (!ok) {
+      cardStates[cardIndex].importDeclinedWord = key;
+      return;
+    }
+    applyPresetImport_(cardIndex, match);
+  }
+
+  function schedulePresetLookup_(cardIndex, word) {
+    clearTimeout(cardStates[cardIndex].lookupTimer);
+    const key = normalizeWordKey_(word);
+    if (!key) {
+      clearCardImport_(cardIndex, true);
+      return;
+    }
+    if (cardStates[cardIndex].importedRow
+        && normalizeWordKey_(cardStates[cardIndex].importedRow['英単語・熟語の表現']) !== key) {
+      clearCardImport_(cardIndex, true);
+    }
+    cardStates[cardIndex].lookupTimer = setTimeout(function () {
+      maybePromptPresetImport_(cardIndex, word);
+    }, LOOKUP_DEBOUNCE_MS);
+  }
+
+  function bindWordLookup_(cardIndex, inputEl) {
+    if (!inputEl || inputEl._presetLookupBound) return;
+    inputEl._presetLookupBound = true;
+    inputEl.addEventListener('input', function () {
+      schedulePresetLookup_(cardIndex, inputEl.value);
+      saveDraftSoon_();
+    });
+    inputEl.addEventListener('blur', function () {
+      clearTimeout(cardStates[cardIndex].lookupTimer);
+      maybePromptPresetImport_(cardIndex, inputEl.value);
+    });
   }
 
   function cardEl(index) {
@@ -7518,6 +7756,13 @@ const VocabRegisterModule = (() => {
     if (toggle) {
       toggle.setAttribute('aria-pressed', registerMode === 'detail' ? 'true' : 'false');
       toggle.textContent = registerMode === 'simple' ? '簡易登録 ⇔ 詳細登録' : '詳細登録 ⇔ 簡易登録';
+    }
+    if (registerMode === 'detail') {
+      for (let ci = 0; ci < CARD_COUNT; ci++) {
+        if (cardStates[ci] && cardStates[ci].importedRow) {
+          applyDetailImport_(ci, cardStates[ci].importedRow);
+        }
+      }
     }
     saveDraftSoon_();
   }
@@ -7560,6 +7805,12 @@ const VocabRegisterModule = (() => {
       input.type = 'text';
       input.placeholder = '意味（和訳）';
       input.value = row.meaning;
+      if (cardStates[cardIndex].importedRow && row.posKey) {
+        const importedText = importedTextForPos_(cardIndex, row.posKey);
+        if (importedText && row.meaning && row.meaning.indexOf(importedText) >= 0) {
+          input.classList.add('register-meaning-imported');
+        }
+      }
       input.addEventListener('input', function () {
         cardStates[cardIndex].meanings[index].meaning = input.value;
         saveDraftSoon_();
@@ -7578,7 +7829,9 @@ const VocabRegisterModule = (() => {
         select.appendChild(opt);
       });
       select.addEventListener('change', function () {
-        cardStates[cardIndex].meanings[index].posKey = select.value;
+        const newPos = select.value;
+        applyImportedMeaningForPos_(cardIndex, index, newPos);
+        cardStates[cardIndex].meanings[index].posKey = newPos;
         renderSimpleMeanings(cardIndex);
         saveDraftSoon_();
       });
@@ -7603,7 +7856,10 @@ const VocabRegisterModule = (() => {
   }
 
   function resetCard(cardIndex) {
-    cardStates[cardIndex].meanings = emptyMeanings();
+    const submitting = cardStates[cardIndex].submitting;
+    clearTimeout(cardStates[cardIndex].lookupTimer);
+    cardStates[cardIndex] = emptyCardState_();
+    cardStates[cardIndex].submitting = submitting;
     const wordEl = qsCard(cardIndex, '.register-simple-word');
     if (wordEl) wordEl.value = '';
     VOCAB_REGISTER_FIELDS.forEach(function (field) {
@@ -7646,6 +7902,7 @@ const VocabRegisterModule = (() => {
       input.dataset.field = field;
       input.placeholder = field === '英単語・熟語の表現' ? '必須' : '';
       input.addEventListener('input', saveDraftSoon_);
+      if (field === '英単語・熟語の表現') bindWordLookup_(cardIndex, input);
       wrap.appendChild(input);
       grid.appendChild(wrap);
     });
@@ -7803,7 +8060,11 @@ const VocabRegisterModule = (() => {
       cards.push({
         word: wordEl ? wordEl.value : '',
         meanings: (cardStates[i] && cardStates[i].meanings) ? cardStates[i].meanings : emptyMeanings(),
-        detail: detail
+        detail: detail,
+        importedRow: cardStates[i] ? cardStates[i].importedRow : null,
+        importSource: cardStates[i] ? cardStates[i].importSource : '',
+        importDeclinedWord: cardStates[i] ? cardStates[i].importDeclinedWord : '',
+        lastPromptWord: cardStates[i] ? cardStates[i].lastPromptWord : ''
       });
     }
     const tsvEl = document.getElementById('register-tsv-input');
@@ -7841,6 +8102,10 @@ const VocabRegisterModule = (() => {
     (draft.cards || []).forEach(function (card, i) {
       if (i >= CARD_COUNT) return;
       cardStates[i].meanings = (card.meanings && card.meanings.length) ? card.meanings : emptyMeanings();
+      cardStates[i].importedRow = card.importedRow || null;
+      cardStates[i].importSource = card.importSource || '';
+      cardStates[i].importDeclinedWord = card.importDeclinedWord || '';
+      cardStates[i].lastPromptWord = card.lastPromptWord || '';
       const wordEl = qsCard(i, '.register-simple-word');
       if (wordEl) wordEl.value = card.word || '';
       const detail = card.detail || {};
@@ -7848,6 +8113,10 @@ const VocabRegisterModule = (() => {
         const el = qsCard(i, '[data-field="' + field + '"]');
         if (el) el.value = detail[field] || '';
       });
+      if (cardStates[i].importedRow && registerMode === 'detail') {
+        applyDetailImport_(i, cardStates[i].importedRow);
+      }
+      showImportHint_(i, cardStates[i].importSource);
       renderSimpleMeanings(i);
     });
   }
@@ -7856,6 +8125,7 @@ const VocabRegisterModule = (() => {
     return ''
       + '<article class="register-card" data-card="' + index + '">'
       + '<div class="register-card-title">カード ' + (index + 1) + '</div>'
+      + '<p class="register-import-hint" style="display:none;"></p>'
       + '<div class="register-simple-panel">'
       + '<div class="form-group"><label>英単語・熟語の表現 *</label>'
       + '<input type="text" class="register-simple-word" placeholder="単語または熟語"></div>'
@@ -7921,7 +8191,7 @@ const VocabRegisterModule = (() => {
     cardStates = [];
     let html = '';
     for (let i = 0; i < CARD_COUNT; i++) {
-      cardStates.push({ meanings: emptyMeanings(), submitting: false });
+      cardStates.push(emptyCardState_());
       html += buildCardHtml_(i);
     }
     grid.innerHTML = html;
@@ -7932,10 +8202,10 @@ const VocabRegisterModule = (() => {
       (function (cardIndex) {
         const wordEl = qsCard(cardIndex, '.register-simple-word');
         if (wordEl) {
+          bindWordLookup_(cardIndex, wordEl);
           wordEl.addEventListener('input', function () {
             applyIdiomIfMultiWord(cardIndex);
             renderSimpleMeanings(cardIndex);
-            saveDraftSoon_();
           });
         }
         qsCard(cardIndex, '.register-add-meaning-btn').addEventListener('click', function () {
