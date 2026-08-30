@@ -557,6 +557,27 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
   border-radius: 8px; font-weight: 600; cursor: pointer;
 }
 .division-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 180px; overflow-y: auto; }
+.vocab-division-section .division-grid {
+  gap: 2px 8px;
+  max-height: 168px;
+  padding: 4px 6px;
+  background: #f0f2f5;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+.vocab-division-section .division-grid .check-item {
+  min-height: 26px;
+  padding: 0 4px;
+  gap: 6px;
+  font-size: 0.88em;
+  line-height: 1.2;
+  border-radius: 4px;
+}
+.vocab-division-section .division-grid .check-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
 
 /* =========================================
    ゲーム画面（並び替えUI & 不足語入力）
@@ -1045,7 +1066,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           <select id="vocab-sheet-select"></select>
         </div>
       </div>
-      <div class="setting-section">
+      <div class="setting-section vocab-division-section">
         <div class="section-title">2. 区分で絞り込み（任意）</div>
         <div class="form-group">
           <label>大区分</label>
