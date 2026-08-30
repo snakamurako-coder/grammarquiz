@@ -2680,6 +2680,10 @@ const PresetModule = (() => {
     const data = await fetchJson_(path);
     if (!data) return null;
     await PresetStore.putManifest(mode, hash, data);
+    const active = await PresetStore.getActiveMeta();
+    if (active && active.modes && active.modes[mode] === hash) {
+      await PresetStore.gcExceptMode(mode, hash);
+    }
     return data;
   }
 

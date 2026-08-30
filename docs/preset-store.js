@@ -120,6 +120,9 @@ const PresetStore = (() => {
 
   async function setActiveMeta(meta) {
     await putMetaRecord_('active', meta);
+    if (meta && meta.modes) {
+      await gcExcept(meta.modes);
+    }
   }
 
   async function setPendingMeta(meta) {
@@ -199,6 +202,25 @@ const PresetStore = (() => {
     });
   }
 
+  /** 指定モードのうち keepHash 以外の manifest を IndexedDB から削除する */
+  async function gcExceptMode(mode, keepHash) {
+    if (!mode || !keepHash) return;
+    const keepId = manifestKey_(mode, keepHash);
+    const prefix = String(mode) + ':';
+    const allKeys = await listManifestKeys_();
+    await runTx_(['manifests'], 'readwrite', function (tx) {
+      const store = tx.objectStore('manifests');
+      const tasks = [];
+      for (let i = 0; i < allKeys.length; i++) {
+        const id = allKeys[i];
+        if (id.indexOf(prefix) === 0 && id !== keepId) {
+          tasks.push(reqPromise_(store.delete(id)));
+        }
+      }
+      return Promise.all(tasks);
+    });
+  }
+
   async function clearAll() {
     await runTx_(['manifests', 'meta'], 'readwrite', function (tx) {
       return Promise.all([
@@ -242,6 +264,7 @@ const PresetStore = (() => {
     getPendingManifest: getPendingManifest,
     applyPending: applyPending,
     gcExcept: gcExcept,
+    gcExceptMode: gcExceptMode,
     clearAll: clearAll,
     migrateFromLegacyLocalStorage: migrateFromLegacyLocalStorage,
     hasPendingUpdate: hasPendingUpdate
