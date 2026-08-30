@@ -558,7 +558,6 @@ function ddExport_parseGrammarSheet_(sheet) {
         available: {
           A: true,
           B: hasSort,
-          L: hasSort,
           C: sortTokens.length >= 2,
           D: hasSort && sortDummy !== '',
           E: hasSort,
