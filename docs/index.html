@@ -56,6 +56,8 @@ button:active { opacity: 0.9; }
 .backend-sync-status.info { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9; }
 .setting-section { background: #fff; padding: 16px; border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 16px; }
 .section-title { font-size: 1.05em; font-weight: bold; color: #455a64; margin-bottom: 12px; border-bottom: 2px solid #eceff1; padding-bottom: 6px; }
+.section-title-with-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.section-title-meta { font-size: 0.82em; font-weight: 600; color: #1565c0; white-space: nowrap; }
 .register-manual-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid #eceff1; padding-bottom: 6px; }
 .register-manual-header .section-title { margin-bottom: 0; border-bottom: none; padding-bottom: 0; flex: 1; min-width: 0; }
 #register-mode-toggle {
@@ -968,7 +970,10 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
       <div class="unit-grid" id="unit-container"></div>
     </div>
     <div class="setting-section">
-      <div class="section-title">3. 絞り込み</div>
+      <div class="section-title section-title-with-meta">
+        <span>3. 絞り込み</span>
+        <span id="grammar-filter-count" class="section-title-meta" aria-live="polite"></span>
+      </div>
       <p class="filter-axis-hint">シート内の各見出し列の値で絞り込みます。大単元・小単元・ターゲット文法領域は包括関係ではなく、チェックした条件をすべて満たす問題（AND）が残ります。同じ軸で複数チェックした場合はその軸ではいずれかに一致。未チェックの軸は絞り込みなしです。</p>
       <div class="form-group">
         <label>大単元</label>
@@ -1067,7 +1072,10 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         </div>
       </div>
       <div class="setting-section vocab-division-section">
-        <div class="section-title">2. 区分で絞り込み（任意）</div>
+        <div class="section-title section-title-with-meta">
+          <span>2. 区分で絞り込み（任意）</span>
+          <span id="vocab-card-division-count" class="section-title-meta" aria-live="polite"></span>
+        </div>
         <div class="form-group">
           <label>大区分</label>
           <div class="division-grid" id="vocab-dai-container"></div>
@@ -5922,6 +5930,8 @@ const VocabSettingsModule = (() => {
   const SETTINGS_KEY = 'dd_vocab_quiz_settings';
   let catalog = { presets: [], userBooks: [] };
   let restoring_ = false;
+  let divisionCountToken_ = 0;
+  let divisionCountTimer_ = null;
 
   function readSettings() {
     try {
@@ -6301,6 +6311,54 @@ const VocabSettingsModule = (() => {
     refreshDivisionFilters();
   }
 
+  function getVocabCardCountOptions_() {
+    return {
+      bookName: (document.getElementById('vocab-book-select') || {}).value || '',
+      sheetName: (document.getElementById('vocab-sheet-select') || {}).value || '',
+      filters: {
+        dai: getSelectedDivisions('dai'),
+        chu: getSelectedDivisions('chu'),
+        sho: getSelectedDivisions('sho')
+      }
+    };
+  }
+
+  function scheduleVocabCardDivisionCount_() {
+    const panel = document.getElementById('vocab-settings-panel');
+    if (panel && panel.style.display === 'none') return;
+    if (divisionCountTimer_) clearTimeout(divisionCountTimer_);
+    divisionCountTimer_ = setTimeout(function () { refreshVocabCardDivisionCount_(); }, 250);
+  }
+
+  async function refreshVocabCardDivisionCount_() {
+    const el = document.getElementById('vocab-card-division-count');
+    if (!el) return;
+    const options = getVocabCardCountOptions_();
+    if (!options.bookName || !options.sheetName) {
+      el.textContent = '';
+      return;
+    }
+    const token = ++divisionCountToken_;
+    el.textContent = '取得中…';
+    if (!window.VocabCardModule || typeof VocabCardModule.previewDivisionCounts !== 'function') {
+      el.textContent = '';
+      return;
+    }
+    try {
+      const counts = await VocabCardModule.previewDivisionCounts(options);
+      if (token !== divisionCountToken_) return;
+      if (!counts) {
+        el.textContent = '';
+        return;
+      }
+      el.textContent = '全 ' + counts.allCards + ' 語 / 未習得 ' + counts.unmasteredCards + ' 語';
+    } catch (e) {
+      if (token !== divisionCountToken_) return;
+      const msg = e && e.message ? String(e.message) : '';
+      el.textContent = msg.indexOf('キャッシュ') >= 0 ? 'キャッシュ未作成' : '—';
+    }
+  }
+
   function renderDivisionCheckboxes(containerId, items, prefix, savedChecked) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -6315,7 +6373,10 @@ const VocabSettingsModule = (() => {
       input.value = item;
       input.dataset.prefix = prefix;
       input.checked = saved.indexOf(item) >= 0;
-      input.addEventListener('change', persistSettings_);
+      input.addEventListener('change', function () {
+        persistSettings_();
+        scheduleVocabCardDivisionCount_();
+      });
       lbl.appendChild(input);
       lbl.appendChild(document.createTextNode(' ' + item));
       container.appendChild(lbl);
@@ -6340,6 +6401,7 @@ const VocabSettingsModule = (() => {
     renderDivisionCheckboxes('vocab-dai-container', div.dai, 'dai', sameSheet ? filters.dai : []);
     renderDivisionCheckboxes('vocab-chu-container', div.chu, 'chu', sameSheet ? filters.chu : []);
     renderDivisionCheckboxes('vocab-sho-container', div.sho, 'sho', sameSheet ? filters.sho : []);
+    scheduleVocabCardDivisionCount_();
   }
 
   function getSelectedDivisions(prefix) {
@@ -6460,13 +6522,14 @@ const VocabSettingsModule = (() => {
     bindVocabQuestionCountUi_();
     syncChoiceUi_();
     syncHomeworkUi_();
+    scheduleVocabCardDivisionCount_();
   }
 
   function getUserBooks() {
     return catalog.userBooks || [];
   }
 
-  return { loadCatalog, init, getQuizOptions, getQuestionCount: getQuestionCount_, refreshBookSelect, getUserBooks, applySettings: applySavedSettings_ };
+  return { loadCatalog, init, getQuizOptions, getQuestionCount: getQuestionCount_, refreshBookSelect, getUserBooks, applySettings: applySavedSettings_, refreshVocabCardDivisionCount: refreshVocabCardDivisionCount_ };
 })();
 
 window.VocabSettingsModule = VocabSettingsModule;
@@ -8378,7 +8441,31 @@ const GrammarSettingsModule = (() => {
     });
   }
 
+  function updateGrammarFilterCount_() {
+    const el = document.getElementById('grammar-filter-count');
+    if (!el) return;
+    if (!getSelectedSubjectName() || getSelectedUnits().length === 0) {
+      el.textContent = '';
+      return;
+    }
+    const key = selectionKey();
+    if (loadedKey !== key) {
+      el.textContent = '取得中…';
+      return;
+    }
+    if (!rows.length) {
+      el.textContent = '0 問';
+      return;
+    }
+    const filtered = getFilteredRows().length;
+    const total = rows.length;
+    el.textContent = filtered === total
+      ? (filtered + ' 問')
+      : (filtered + ' 問（全 ' + total + ' 問）');
+  }
+
   function updateFilterNote() {
+    updateGrammarFilterCount_();
     if (!rows.length) return;
     const filtered = getFilteredRows();
     const broken = rows.filter(r => (r.warnings || []).length > 0);
@@ -8404,6 +8491,7 @@ const GrammarSettingsModule = (() => {
 
   async function refreshDivisions() {
     resetRows();
+    updateGrammarFilterCount_();
     if (!getSelectedSubjectName()) {
       note.textContent = 'grammarquizzes フォルダに学習セット（Googleスプレッドシート／Pages の JSON）を置いてください。';
       return;
@@ -8413,10 +8501,14 @@ const GrammarSettingsModule = (() => {
       return;
     }
     note.textContent = 'データを読み込み中...';
+    updateGrammarFilterCount_();
     try {
       await loadRows();
     } catch (e) {
       note.textContent = 'データの読み込みに失敗しました: ' + e.message;
+      loadedKey = selectionKey();
+      rows = [];
+      updateGrammarFilterCount_();
     }
   }
 
@@ -8618,7 +8710,7 @@ const GrammarSettingsModule = (() => {
     return true;
   }
 
-  return { init, refreshDivisions, reloadCatalog, prepareForStart, getSelectedUnits, getFilteredRows, getQuizOptions, getQuestionCount, getSessionSettings, applySessionSettings };
+  return { init, refreshDivisions, reloadCatalog, prepareForStart, getSelectedUnits, getFilteredRows, getQuizOptions, getQuestionCount, getSessionSettings, applySessionSettings, refreshGrammarFilterCount: updateGrammarFilterCount_ };
 })();
 
 window.GrammarSettingsModule = GrammarSettingsModule;
@@ -9544,6 +9636,12 @@ function initModeTabs() {
     if (startBtn) startBtn.style.display = mode === 'grammar' ? 'block' : 'none';
     if (profileEl) profileEl.style.display = mode === 'manage' ? 'block' : 'none';
     if (mypageEl) mypageEl.style.display = mode === 'manage' ? 'block' : 'none';
+    if (mode === 'vocab' && window.VocabSettingsModule && VocabSettingsModule.refreshVocabCardDivisionCount) {
+      VocabSettingsModule.refreshVocabCardDivisionCount();
+    }
+    if (mode === 'grammar' && window.GrammarSettingsModule && GrammarSettingsModule.refreshGrammarFilterCount) {
+      GrammarSettingsModule.refreshGrammarFilterCount();
+    }
   }
 
   tabs.forEach(function (tab) {

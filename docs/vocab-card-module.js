@@ -628,6 +628,22 @@ const VocabCardModule = (() => {
     if (window.BackendSyncStatus) window.BackendSyncStatus.refresh();
   }
 
+  function countPreview_(words, bookName, sheetName) {
+    const pickedAll = pickWordsForCard_(words, 'all', bookName, sheetName);
+    const pickedUnm = pickWordsForCard_(words, 'unmastered', bookName, sheetName);
+    const previewAxes = { axes: { grains: ['WD', 'PH', 'EX'], directions: ['jaen', 'enja'] } };
+    return {
+      allCards: buildCardItemsFromWords_(pickedAll, previewAxes).length,
+      unmasteredCards: buildCardItemsFromWords_(pickedUnm, previewAxes).length
+    };
+  }
+
+  async function previewDivisionCounts(options) {
+    if (!options || !options.bookName || !options.sheetName) return null;
+    const words = await loadWordsForCard_(options);
+    return countPreview_(words, options.bookName, options.sheetName);
+  }
+
   async function loadAndStart(options, scope) {
     scope = scope || 'all';
     if (scope === 'unmastered' && window.ItemStateModule) {
@@ -667,6 +683,7 @@ const VocabCardModule = (() => {
 
   return {
     loadAndStart: loadAndStart,
+    previewDivisionCounts: previewDivisionCounts,
     startSession: startSession,
     backToSettings: backToSettings,
     syncHomeworkUi_: syncHomeworkUi_
