@@ -58,6 +58,14 @@ button:active { opacity: 0.9; }
 .section-title { font-size: 1.05em; font-weight: bold; color: #455a64; margin-bottom: 12px; border-bottom: 2px solid #eceff1; padding-bottom: 6px; }
 .section-title-with-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .section-title-meta { font-size: 0.82em; font-weight: 600; color: #1565c0; white-space: nowrap; }
+.review-set-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; background: none; border: none; padding: 0; cursor: pointer; text-align: left; }
+.review-set-toggle .section-title { flex: 1; }
+.review-set-toggle-icon { font-size: 0.85em; color: #78909c; margin-left: 8px; }
+.review-set-list { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.review-set-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 8px 10px; background: #f8f9fa; border-radius: 8px; }
+.review-set-row-label { font-size: 0.92em; font-weight: 600; color: #37474f; }
+.review-set-row-meta { font-size: 0.82em; color: #607d8b; margin-left: 6px; font-weight: normal; }
+.review-set-row .btn-secondary { padding: 6px 12px; font-size: 0.85em; white-space: nowrap; }
 .register-manual-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid #eceff1; padding-bottom: 6px; }
 .register-manual-header .section-title { margin-bottom: 0; border-bottom: none; padding-bottom: 0; flex: 1; min-width: 0; }
 #register-mode-toggle {
@@ -1071,6 +1079,16 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           <select id="vocab-sheet-select"></select>
         </div>
       </div>
+      <div class="setting-section" id="vocab-review-set-section">
+        <button type="button" class="review-set-toggle" id="vocab-review-set-toggle" aria-expanded="false" aria-controls="vocab-review-set-body">
+          <span class="section-title">復習単語セット</span>
+          <span class="review-set-toggle-icon" id="vocab-review-set-toggle-icon" aria-hidden="true">▼</span>
+        </button>
+        <div id="vocab-review-set-body" style="display:none;">
+          <p class="filter-axis-hint" style="margin:0 0 10px;">初回学習からの経過日数で分類します。今日学習した語は翌日以降に表示されます。3回連続正解した語は復習セットから除外されます（通常の単語学習・SRSには影響しません）。</p>
+          <div id="vocab-review-set-list" class="review-set-list" aria-live="polite"></div>
+        </div>
+      </div>
       <div class="setting-section vocab-division-section">
         <div class="section-title section-title-with-meta">
           <span>2. 区分で絞り込み（任意）</span>
@@ -1706,6 +1724,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
 <script src="assignment.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script src="preset-store.js"></script>
+<script src="review-set-module.js"></script>
 <script>
 /** true: GAS① 認証ゲート必須（短命 auth トークン） */
 const AUTH_ENABLED = true;
@@ -3320,6 +3339,34 @@ const ItemStateModule = (() => {
   const STORAGE_KEY = 'digitaldrill_item_state';
   const DIRTY_KEY = 'digitaldrill_item_state_dirty';
   const HISTORY_MASK = 0xFFFF;
+  let migrateDone_ = false;
+
+  function migrateReviewFields_(states) {
+    if (!states || typeof states !== 'object') return states;
+    const nowSec = Math.floor(Date.now() / 1000);
+    let changed = false;
+    Object.keys(states).forEach(function (id) {
+      const st = states[id];
+      if (!st) return;
+      if (st.First_Seen == null) { st.First_Seen = 0; changed = true; }
+      if (st.Review_Streak == null) { st.Review_Streak = 0; changed = true; }
+      if (st.Review_Clear == null) { st.Review_Clear = 0; changed = true; }
+      const attempts = parseInt(st.Total_Attempts, 10) || 0;
+      const first = parseInt(st.First_Seen, 10) || 0;
+      if (attempts > 0 && !first) {
+        st.First_Seen = parseInt(st.Last_Seen, 10) || nowSec;
+        changed = true;
+      }
+    });
+    if (changed) saveLocal(states);
+    return states;
+  }
+
+  function ensureMigrated_() {
+    if (migrateDone_) return;
+    migrateDone_ = true;
+    migrateReviewFields_(loadLocal());
+  }
 
   let dirtyIds = {};
 
@@ -3361,7 +3408,8 @@ const ItemStateModule = (() => {
     return {
       Item_ID: itemId, Kind: kind || 'grammar', Set_ID: setId || '',
       Total_Attempts: 0, Total_Wrong: 0, Recent_Bits: 0, Last_Seen: 0,
-      Step_Index: 0, EF: 2.5, Next_Review: 0, Avg_Time: 0
+      Step_Index: 0, EF: 2.5, Next_Review: 0, Avg_Time: 0,
+      First_Seen: 0, Review_Streak: 0, Review_Clear: 0
     };
   }
 
@@ -3371,6 +3419,8 @@ const ItemStateModule = (() => {
     const kind = meta.kind || (String(itemId).indexOf('|') >= 0 ? 'vocab' : 'grammar');
     const setId = meta.setId || '';
     let st = states[itemId] || defaultState(itemId, kind, setId);
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (!(parseInt(st.First_Seen, 10) || 0)) st.First_Seen = nowSec;
     st.Total_Attempts = (parseInt(st.Total_Attempts, 10) || 0) + 1;
     if (!isCorrect) st.Total_Wrong = (parseInt(st.Total_Wrong, 10) || 0) + 1;
     const bit = isCorrect ? 1 : 0;
@@ -3393,6 +3443,7 @@ const ItemStateModule = (() => {
   }
 
   function getState(itemId) {
+    ensureMigrated_();
     return loadLocal()[itemId] || null;
   }
 
@@ -3401,7 +3452,8 @@ const ItemStateModule = (() => {
       Item_ID: st.Item_ID, Kind: st.Kind, Set_ID: st.Set_ID,
       Total_Attempts: st.Total_Attempts, Total_Wrong: st.Total_Wrong,
       Recent_Bits: st.Recent_Bits, Last_Seen: st.Last_Seen,
-      Step_Index: st.Step_Index, EF: st.EF, Next_Review: st.Next_Review, Avg_Time: st.Avg_Time
+      Step_Index: st.Step_Index, EF: st.EF, Next_Review: st.Next_Review, Avg_Time: st.Avg_Time,
+      First_Seen: st.First_Seen || 0, Review_Streak: st.Review_Streak || 0, Review_Clear: st.Review_Clear || 0
     };
   }
 
@@ -3420,6 +3472,7 @@ const ItemStateModule = (() => {
       local[k] = Object.assign(defaultState(k, serverStates[k].Kind, serverStates[k].Set_ID), serverStates[k]);
     });
     saveLocal(local);
+    migrateReviewFields_(local);
   }
 
   async function syncFromServer(setId) {
@@ -5932,6 +5985,9 @@ const VocabSettingsModule = (() => {
   let restoring_ = false;
   let divisionCountToken_ = 0;
   let divisionCountTimer_ = null;
+  let reviewSetCountToken_ = 0;
+  let reviewSetCountTimer_ = null;
+  let reviewSetExpanded_ = false;
 
   function readSettings() {
     try {
@@ -6328,6 +6384,114 @@ const VocabSettingsModule = (() => {
     if (panel && panel.style.display === 'none') return;
     if (divisionCountTimer_) clearTimeout(divisionCountTimer_);
     divisionCountTimer_ = setTimeout(function () { refreshVocabCardDivisionCount_(); }, 250);
+    scheduleReviewSetCount_();
+  }
+
+  function scheduleReviewSetCount_() {
+    const panel = document.getElementById('vocab-settings-panel');
+    if (panel && panel.style.display === 'none') return;
+    if (reviewSetCountTimer_) clearTimeout(reviewSetCountTimer_);
+    reviewSetCountTimer_ = setTimeout(function () { refreshReviewSetCounts_(); }, 250);
+  }
+
+  async function loadVocabWordsForSettings_(options) {
+    const bookType = (document.getElementById('vocab-book-type') || {}).value;
+    if (bookType === 'user' && window.AuthGateService && window.AuthGateService.isValid()) {
+      if (!window.UserVocabCacheModule) throw new Error('ユーザー単語キャッシュが未初期化です');
+      const res = window.UserVocabCacheModule.getWordsForStart(options.sheetName, options.filters);
+      if (res.status !== 'success') throw new Error(res.message || 'キャッシュがありません。「キャッシュ更新」を押してください。');
+      return res.data.words || [];
+    }
+    const res = await window.PresetModule.getVocabWords(
+      options.bookName, options.sheetName, JSON.stringify(options.filters || {}), true, false);
+    if (res.status !== 'success') throw new Error(res.message || '単語取得失敗');
+    return res.data.words || [];
+  }
+
+  function renderReviewSetList_(counts, loading, errMsg) {
+    const list = document.getElementById('vocab-review-set-list');
+    if (!list || !window.ReviewSetModule) return;
+    const homework = VocabLaunchConfig.isHomeworkMode();
+    if (homework) {
+      list.innerHTML = '<p class="filter-axis-hint" style="margin:0;">宿題・小テストモードでは利用できません。</p>';
+      return;
+    }
+    if (loading) {
+      list.innerHTML = '<p class="filter-axis-hint" style="margin:0;">件数を取得中…</p>';
+      return;
+    }
+    if (errMsg) {
+      list.innerHTML = '<p class="filter-axis-hint" style="margin:0;">' + escapeHtml_(errMsg) + '</p>';
+      return;
+    }
+    let html = '';
+    ReviewSetModule.BUCKETS.forEach(function (bucket) {
+      const n = counts && counts[bucket.id] != null ? counts[bucket.id] : 0;
+      const disabled = n === 0;
+      html += '<div class="review-set-row">';
+      html += '<div><span class="review-set-row-label">' + escapeHtml_(bucket.label) + '</span>';
+      html += '<span class="review-set-row-meta">(' + n + '語)</span></div>';
+      html += '<button type="button" class="btn-secondary vocab-review-start-btn" data-review-set-id="' + escapeHtml_(bucket.id) + '"';
+      if (disabled) html += ' disabled title="対象語がありません"';
+      html += '>開始</button></div>';
+    });
+    list.innerHTML = html;
+  }
+
+  async function refreshReviewSetCounts_() {
+    const section = document.getElementById('vocab-review-set-section');
+    if (!section || section.style.display === 'none') return;
+    if (!reviewSetExpanded_) return;
+    const options = getVocabCardCountOptions_();
+    if (!options.bookName || !options.sheetName) {
+      renderReviewSetList_(null, false, 'ブックと教材（シート）を選択してください。');
+      return;
+    }
+    const token = ++reviewSetCountToken_;
+    renderReviewSetList_(null, true);
+    if (!window.ReviewSetModule) {
+      renderReviewSetList_(null, false, '復習セット機能を読み込めませんでした。');
+      return;
+    }
+    try {
+      if (window.ItemStateModule && window.ItemStateModule.syncFromServer) {
+        await window.ItemStateModule.syncFromServer('').catch(function () {});
+      }
+      const words = await loadVocabWordsForSettings_(options);
+      if (token !== reviewSetCountToken_) return;
+      const counts = ReviewSetModule.countByBucket(words, options.bookName, options.sheetName);
+      renderReviewSetList_(counts, false);
+    } catch (e) {
+      if (token !== reviewSetCountToken_) return;
+      const msg = e && e.message ? String(e.message) : '取得に失敗しました';
+      renderReviewSetList_(null, false, msg);
+    }
+  }
+
+  function bindReviewSetUi_() {
+    const toggle = document.getElementById('vocab-review-set-toggle');
+    const body = document.getElementById('vocab-review-set-body');
+    const icon = document.getElementById('vocab-review-set-toggle-icon');
+    if (toggle && body) {
+      toggle.addEventListener('click', function () {
+        reviewSetExpanded_ = !reviewSetExpanded_;
+        body.style.display = reviewSetExpanded_ ? 'block' : 'none';
+        toggle.setAttribute('aria-expanded', reviewSetExpanded_ ? 'true' : 'false');
+        if (icon) icon.textContent = reviewSetExpanded_ ? '▲' : '▼';
+        if (reviewSetExpanded_) scheduleReviewSetCount_();
+      });
+    }
+    const list = document.getElementById('vocab-review-set-list');
+    if (list) {
+      list.addEventListener('click', function (ev) {
+        const btn = ev.target && ev.target.closest ? ev.target.closest('.vocab-review-start-btn') : null;
+        if (!btn || btn.disabled) return;
+        const bucketId = btn.getAttribute('data-review-set-id');
+        if (bucketId && typeof window.startVocabReviewSetQuiz_ === 'function') {
+          window.startVocabReviewSetQuiz_(bucketId);
+        }
+      });
+    }
   }
 
   async function refreshVocabCardDivisionCount_() {
@@ -6493,6 +6657,9 @@ const VocabSettingsModule = (() => {
     if (window.VocabCardModule && VocabCardModule.syncHomeworkUi_) {
       VocabCardModule.syncHomeworkUi_(homework);
     }
+    const reviewSection = document.getElementById('vocab-review-set-section');
+    if (reviewSection) reviewSection.style.display = homework ? 'none' : '';
+    if (!homework && reviewSetExpanded_) scheduleReviewSetCount_();
   }
 
   function init() {
@@ -6520,6 +6687,7 @@ const VocabSettingsModule = (() => {
       });
     }
     bindVocabQuestionCountUi_();
+    bindReviewSetUi_();
     syncChoiceUi_();
     syncHomeworkUi_();
     scheduleVocabCardDivisionCount_();
@@ -6529,7 +6697,7 @@ const VocabSettingsModule = (() => {
     return catalog.userBooks || [];
   }
 
-  return { loadCatalog, init, getQuizOptions, getQuestionCount: getQuestionCount_, refreshBookSelect, getUserBooks, applySettings: applySavedSettings_, refreshVocabCardDivisionCount: refreshVocabCardDivisionCount_ };
+  return { loadCatalog, init, getQuizOptions, getQuestionCount: getQuestionCount_, refreshBookSelect, getUserBooks, applySettings: applySavedSettings_, refreshVocabCardDivisionCount: refreshVocabCardDivisionCount_, refreshReviewSetCounts: refreshReviewSetCounts_, loadVocabWordsForSettings: loadVocabWordsForSettings_ };
 })();
 
 window.VocabSettingsModule = VocabSettingsModule;
@@ -7896,11 +8064,14 @@ function prepareVocabQuestions(words, pool, bookPool, options, srsStates) {
   }
 
   let targetWords = words;
-  if (window.SrsModule && options.bookName && options.sheetName) {
-    let limit = words.length;
-    if (options.questionCount !== 'all') {
-      limit = Math.min(parseInt(options.questionCount, 10) || words.length, words.length);
-    }
+  let limit = words.length;
+  if (options.questionCount !== 'all') {
+    limit = Math.min(parseInt(options.questionCount, 10) || words.length, words.length);
+  }
+  if (options.reviewSetId && window.ReviewSetModule) {
+    targetWords = window.ReviewSetModule.selectWords(
+      words, options.reviewSetId, options.bookName, options.sheetName, options);
+  } else if (window.SrsModule && options.bookName && options.sheetName) {
     targetWords = window.SrsModule.selectDueWords(words, options.bookName, options.sheetName, limit);
   }
 
@@ -8102,6 +8273,7 @@ let currentVocabSheetName = '';
 let currentSessionIsPreset = true;
 /** セッション開始時の出題設定スナップショット（学習記録の詳細・再現用。問題そのものは含まない） */
 let currentSessionSettings = null;
+let currentReviewSetId = null;
 /** fetchUserLogs の直近結果（再現ボタン用） */
 let lastFetchedLearningLogs_ = [];
 /** マイページ学習記録の取得中 Promise（重複起動防止） */
@@ -8784,7 +8956,21 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
   currentAppMode = 'vocab';
   const btn = document.getElementById('vocab-start-btn');
   const options = window.VocabSettingsModule.getQuizOptions();
+  await runVocabQuizSession_(options, btn, null);
+});
 
+window.startVocabReviewSetQuiz_ = async function (reviewSetId) {
+  currentAppMode = 'vocab';
+  const options = window.VocabSettingsModule.getQuizOptions();
+  options.reviewSetId = reviewSetId;
+  if (window.ReviewSetModule) {
+    options.reviewSetLabel = ReviewSetModule.getBucketLabel(reviewSetId);
+  }
+  const btn = document.querySelector('.vocab-review-start-btn[data-review-set-id="' + reviewSetId + '"]');
+  await runVocabQuizSession_(options, btn, reviewSetId);
+};
+
+async function runVocabQuizSession_(options, btn, reviewSetId) {
   if (!options.bookName || !options.sheetName) {
     alert('ブックと教材（シート）を選択してください。');
     return;
@@ -8797,7 +8983,12 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
     alert('宿題モードでは形式は最大4つまで選べます。');
     return;
   }
+  if (reviewSetId && options.homeworkMode) {
+    alert('宿題・小テストモードでは復習単語セットは利用できません。');
+    return;
+  }
 
+  const runLabel = reviewSetId ? '復習セット読込中…' : '読み込み中…';
   await BusyButton.run(btn, async function () {
     try {
       let result;
@@ -8809,9 +9000,11 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
           alert(result.message || 'キャッシュがありません。「キャッシュ更新」を押してください。');
           return;
         }
-        UserVocabCacheModule.markStudied(options.sheetName).catch(function (e) {
-          console.warn('学習セット更新記録:', e.message || e);
-        });
+        if (!reviewSetId) {
+          UserVocabCacheModule.markStudied(options.sheetName).catch(function (e) {
+            console.warn('学習セット更新記録:', e.message || e);
+          });
+        }
       } else {
         result = await PresetModule.getVocabWords(options.bookName, options.sheetName, JSON.stringify(options.filters), true, false);
       }
@@ -8826,14 +9019,26 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
         return;
       }
 
+      if (reviewSetId && window.ItemStateModule && window.ItemStateModule.syncFromServer) {
+        await window.ItemStateModule.syncFromServer('').catch(function () {});
+      }
+
       currentVocabSetName = options.bookName + ' / ' + options.sheetName;
+      if (reviewSetId && options.reviewSetLabel) {
+        currentVocabSetName += ' [' + options.reviewSetLabel + ']';
+      }
       currentVocabBookName = options.bookName;
       currentVocabSheetName = options.sheetName;
+      currentReviewSetId = reviewSetId || null;
       currentSessionSettings = captureSessionSettingsSnapshot_('vocab');
 
       const questions = prepareVocabQuestions(words, pool, bookPool, options, null);
       if (questions.length === 0) {
-        alert('出題できる問題がありません。');
+        const emptyMsg = reviewSetId
+          ? 'この復習セットに出題できる語がありません（3回連続正解済み・今日学習した語・対象期間外の可能性があります）。'
+          : '出題できる問題がありません。';
+        alert(emptyMsg);
+        currentReviewSetId = null;
         return;
       }
 
@@ -8854,10 +9059,11 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
       GameSessionPlay.start(questions);
     } catch (error) {
       console.error(error);
+      currentReviewSetId = null;
       alert('通信エラーが発生しました: ' + error.message);
     }
-  }, '読み込み中…');
-});
+  }, runLabel);
+}
 
 const vocabCardStartUnmasteredBtn = document.getElementById('vocab-card-start-unmastered-btn');
 const vocabCardStartAllBtn = document.getElementById('vocab-card-start-all-btn');
@@ -8904,6 +9110,7 @@ function applyVocabCardSessionGlobals_(meta) {
   totalQuestionsCount = (meta.cardItems || []).length;
   currentScore = 0;
   currentSessionSettings = captureSessionSettingsSnapshot_('vocab');
+  currentReviewSetId = null;
 }
 window.applyVocabCardSessionGlobals_ = applyVocabCardSessionGlobals_;
 
@@ -8920,6 +9127,7 @@ elements.backBtn.addEventListener('click', () => {
   if (window.KeyboardModule) KeyboardModule.deactivate();
   screens.game.style.display = 'none';
   screens.settings.style.display = 'block';
+  currentReviewSetId = null;
 });
 
 function normalizeGrammarRow(row) {
@@ -9340,6 +9548,9 @@ window.onQuestionCompleted = (isCorrect, meta) => {
     AssignmentModule.persistHomeworkProgress();
     if (currentQ && currentQ.rowId && !deferQuizFeedback) showExplanation(currentQ);
   } else if (currentAppMode === 'vocab') {
+    if (currentReviewSetId && window.ReviewSetModule && currentQ.wordId) {
+      window.ReviewSetModule.recordAnswer(currentQ.wordId, isCorrect, !!meta.isUnknown);
+    }
     if (window.SrsModule && currentQ.wordId) {
       window.SrsModule.update(currentQ.wordId, isCorrect, meta.answerMs || 0, !!meta.isUnknown);
     }
@@ -9564,6 +9775,10 @@ function showResultScreen() {
 document.getElementById('return-settings-btn').addEventListener('click', () => {
   document.getElementById('result-screen').style.display = 'none';
   screens.settings.style.display = 'block';
+  currentReviewSetId = null;
+  if (window.VocabSettingsModule && VocabSettingsModule.refreshReviewSetCounts) {
+    VocabSettingsModule.refreshReviewSetCounts();
+  }
   if (sessionPersistedToServer || !AuthGateService.isValid()) {
     sessionAnswerLog = [];
     vocabResultMarks_ = {};
@@ -10053,7 +10268,10 @@ function captureSessionSettingsSnapshot_(mode) {
       affixType: opts.affixType,
       affixLen: opts.affixLen,
       homeworkMode: !!opts.homeworkMode,
-      homeworkPerSection: opts.homeworkPerSection
+      homeworkPerSection: opts.homeworkPerSection,
+      reviewSetId: currentReviewSetId || '',
+      reviewSetLabel: (currentReviewSetId && window.ReviewSetModule)
+        ? ReviewSetModule.getBucketLabel(currentReviewSetId) : ''
     };
   }
   if (mode === 'reading') {
@@ -10195,6 +10413,7 @@ function formatSessionSettingsText_(log) {
     lines.push('出題数: ' + (settings.questionCount === 'all' ? 'すべて' : ((settings.questionCount || '?') + '問'))
       + (settings.questionCountSpecify ? '（手動指定）' : ''));
     if (settings.homeworkMode) lines.push('宿題モード: 各形式' + (settings.homeworkPerSection || 5) + '問');
+    if (settings.reviewSetLabel) lines.push('復習セット: ' + settings.reviewSetLabel);
   } else if (settings.kind === 'reading') {
     lines.push('ブック: ' + (settings.bookName || 'マイ単語帳'));
     lines.push('シート: ' + (settings.sheetName || '（不明）'));

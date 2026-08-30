@@ -160,10 +160,13 @@ UserBridge.call(op, payload)
 | Recent_Bits | 直近16回正誤（下位5ビットで直近5回正答率） |
 | Last_Seen | UNIX秒 |
 | Step_Index, EF, Next_Review, Avg_Time | SRS（単語） |
+| First_Seen, Review_Streak, Review_Clear | 復習単語セット（初回学習日・連続正解・卒業） |
 
 クライアント側の保管場所は `localStorage['digitaldrill_item_state']` の1箇所のみです。
 `ItemStateModule` が唯一の読み書き口で、`SrsModule` は出題間隔の計算だけを担当します。
 セッション終了時に未反映（dirty）の Item_ID だけを UserBridge 経由で Drive へ送ります。
+
+**過渡期（列マイグレーション）**: ユーザー手作業で列構成が異なる `学習状態` シート向けに、`user-drive.js` の `migrateItemStateSheetColumnsLegacy`（`@deprecated`）が不足する管理列ヘッダーを**末尾にのみ**追加します。既存セルは書き換えず、読み書きはヘッダー名で列を解決します。
 
 ### 管理者層（粗粒度）— Google フォーム回答先 SS
 

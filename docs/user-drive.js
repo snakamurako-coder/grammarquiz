@@ -44,8 +44,12 @@ const UserDriveModule = (function () {
 
   const ITEM_STATE_HEADERS = [
     'Item_ID', 'Kind', 'Set_ID', 'Total_Attempts', 'Total_Wrong',
-    'Recent_Bits', 'Last_Seen', 'Step_Index', 'EF', 'Next_Review', 'Avg_Time'
+    'Recent_Bits', 'Last_Seen', 'Step_Index', 'EF', 'Next_Review', 'Avg_Time',
+    'First_Seen', 'Review_Streak', 'Review_Clear'
   ];
+  const ITEM_STATE_COL_END = 'N';
+  /** 過渡期: ユーザー手作業シートの余分列を読むための上限列 */
+  const ITEM_STATE_LEGACY_SCAN_COL_END = 'ZZ';
 
   const SESSION_LOG_HEADERS = ['タイムスタンプ', '学習セット名', 'モード', '正答率', '解答時間', '詳細'];
 
@@ -886,6 +890,158 @@ const UserDriveModule = (function () {
     );
   }
 
+  /** 0-based列番号 → A, B, …, Z, AA */
+  function columnIndexToLetter_(index) {
+    let n = index + 1;
+    let s = '';
+    while (n > 0) {
+      const rem = (n - 1) % 26;
+      s = String.fromCharCode(65 + rem) + s;
+      n = Math.floor((n - 1) / 26);
+    }
+    return s || 'A';
+  }
+
+  function trimHeaderRow_(row) {
+    const headers = (row || []).slice();
+    while (headers.length && String(headers[headers.length - 1] || '').trim() === '') {
+      headers.pop();
+    }
+    return headers;
+  }
+
+  function buildHeaderIndexMap_(headers) {
+    const idx = {};
+    (headers || []).forEach(function (h, i) {
+      const key = String(h || '').trim();
+      if (key && idx[key] == null) idx[key] = i;
+    });
+    return idx;
+  }
+
+  function itemStateSheetColEnd_(headerCount) {
+    const n = Math.max(headerCount || 0, ITEM_STATE_HEADERS.length, 1);
+    return columnIndexToLetter_(n - 1);
+  }
+
+  function itemStateFieldDefault_(fieldName) {
+    if (fieldName === 'EF') return 2.5;
+    return 0;
+  }
+
+  function itemStateRowToObject_(headers, row, itemIdOverride) {
+    const idx = buildHeaderIndexMap_(headers);
+    const itemIdCol = idx['Item_ID'];
+    const itemId = itemIdOverride != null
+      ? itemIdOverride
+      : (itemIdCol >= 0 ? normField_(row[itemIdCol]) : UNREGISTERED);
+    if (itemId === UNREGISTERED) return null;
+    const obj = {
+      Item_ID: itemId,
+      Kind: idx['Kind'] >= 0 ? normField_(row[idx['Kind']]) : (itemId.indexOf('|') >= 0 ? 'vocab' : 'grammar'),
+      Set_ID: idx['Set_ID'] >= 0 ? normField_(row[idx['Set_ID']]) : ''
+    };
+    ITEM_STATE_HEADERS.forEach(function (h) {
+      if (h === 'Item_ID' || h === 'Kind' || h === 'Set_ID') return;
+      const col = idx[h];
+      if (col == null || col < 0) {
+        obj[h] = itemStateFieldDefault_(h);
+        return;
+      }
+      const raw = row[col];
+      if (h === 'EF') obj[h] = parseFloat(raw) || 2.5;
+      else obj[h] = parseInt(raw, 10) || 0;
+    });
+    return obj;
+  }
+
+  /** 既存行を維持しつつ、管理列だけをマージしてシート行配列を返す */
+  function mergeItemStateIntoSheetRow_(headers, existingRow, incoming) {
+    const out = existingRow ? existingRow.slice() : [];
+    while (out.length < headers.length) out.push('');
+    const itemId = normField_(incoming.Item_ID);
+    headers.forEach(function (h, i) {
+      if (ITEM_STATE_HEADERS.indexOf(h) < 0) return;
+      if (h === 'Item_ID') {
+        out[i] = itemId;
+        return;
+      }
+      if (incoming[h] !== undefined && incoming[h] !== null) {
+        out[i] = incoming[h];
+        return;
+      }
+      if (!existingRow || existingRow.length <= i || existingRow[i] === '' || existingRow[i] == null) {
+        if (h === 'Kind') out[i] = incoming.Kind || (itemId.indexOf('|') >= 0 ? 'vocab' : 'grammar');
+        else out[i] = itemStateFieldDefault_(h);
+      }
+    });
+    return out;
+  }
+
+  function newItemStateSheetRow_(headers, incoming) {
+    return mergeItemStateIntoSheetRow_(headers, null, incoming);
+  }
+
+  async function readItemStateSheet_(bookId) {
+    const headerValues = await sheetsValuesGet_(bookId, ITEM_STATE_SHEET + '!1:1');
+    const headers = trimHeaderRow_(headerValues[0] || []);
+    if (!headers.length) {
+      return { headers: [], values: [], colEnd: ITEM_STATE_COL_END };
+    }
+    const colEnd = itemStateSheetColEnd_(headers.length);
+    const values = await sheetsValuesGet_(bookId, ITEM_STATE_SHEET + '!A:' + colEnd);
+    return { headers: headers, values: values, colEnd: colEnd };
+  }
+
+  /**
+   * @deprecated 過渡期用（将来削除予定）。
+   * ユーザー側で列構成が標準と異なる「学習状態」シートに、不足する管理列ヘッダーを末尾へ追加する。
+   * 既存ヘッダー・データ行のセルは書き換えない（ヘッダー行への追記のみ）。
+   */
+  async function migrateItemStateSheetColumnsLegacy_(bookId) {
+    const result = {
+      changed: false,
+      addedHeaders: [],
+      headerCount: 0,
+      sheetCreated: false
+    };
+    const ss = await sheetsGet_(bookId);
+    const exists = (ss.sheets || []).some(function (s) { return s.properties.title === ITEM_STATE_SHEET; });
+    if (!exists) {
+      await sheetsBatchUpdate_(bookId, [{ addSheet: { properties: { title: ITEM_STATE_SHEET } } }]);
+      result.sheetCreated = true;
+    }
+
+    const headerValues = await sheetsValuesGet_(
+      bookId, ITEM_STATE_SHEET + '!A1:' + ITEM_STATE_LEGACY_SCAN_COL_END + '1');
+    let headers = trimHeaderRow_(headerValues[0] || []);
+
+    if (!headers.length) {
+      await sheetsValuesUpdate_(bookId, ITEM_STATE_SHEET + '!A1:' + ITEM_STATE_COL_END + '1', [ITEM_STATE_HEADERS]);
+      result.changed = true;
+      result.headerCount = ITEM_STATE_HEADERS.length;
+      return result;
+    }
+
+    const missing = ITEM_STATE_HEADERS.filter(function (h) { return headers.indexOf(h) < 0; });
+    if (!missing.length) {
+      result.headerCount = headers.length;
+      return result;
+    }
+
+    const nextHeaders = headers.concat(missing);
+    const colEnd = itemStateSheetColEnd_(nextHeaders.length);
+    await sheetsValuesUpdate_(bookId, ITEM_STATE_SHEET + '!A1:' + colEnd + '1', [nextHeaders]);
+    result.changed = true;
+    result.addedHeaders = missing.slice();
+    result.headerCount = nextHeaders.length;
+    return result;
+  }
+
+  async function ensureItemStateSheet_(bookId) {
+    await migrateItemStateSheetColumnsLegacy_(bookId);
+  }
+
   async function setupVocabBook_(bookId) {
     const ss = await sheetsGet_(bookId);
     let sheets = ss.sheets || [];
@@ -943,18 +1099,6 @@ const UserDriveModule = (function () {
     await ensureSetCacheLogSheet_(bookId);
   }
 
-  async function ensureItemStateSheet_(bookId) {
-    const ss = await sheetsGet_(bookId);
-    const exists = (ss.sheets || []).some(function (s) { return s.properties.title === ITEM_STATE_SHEET; });
-    if (!exists) {
-      await sheetsBatchUpdate_(bookId, [{ addSheet: { properties: { title: ITEM_STATE_SHEET } } }]);
-    }
-    const header = await sheetsValuesGet_(bookId, ITEM_STATE_SHEET + '!A1:K1');
-    if (!header.length || !header[0].length) {
-      await sheetsValuesUpdate_(bookId, ITEM_STATE_SHEET + '!A1:K1', [ITEM_STATE_HEADERS]);
-    }
-  }
-
   async function ensureSetCacheLogSheet_(bookId) {
     const ss = await sheetsGet_(bookId);
     const exists = (ss.sheets || []).some(function (s) { return s.properties.title === SET_CACHE_LOG_SHEET; });
@@ -985,6 +1129,7 @@ const UserDriveModule = (function () {
     if (!titles[SESSION_LOG_SHEET] || !titles[ITEM_STATE_SHEET] || !titles[SET_CACHE_LOG_SHEET]) {
       await setupLogBook_(bookId);
     } else {
+      await ensureItemStateSheet_(bookId);
       await ensureSetCacheLogSheet_(bookId);
     }
   }
@@ -1313,31 +1458,21 @@ const UserDriveModule = (function () {
     const setIdFilter = payload.setId || '';
     const bookId = await getLogBookId_();
     await ensureItemStateSheet_(bookId);
-    const values = await sheetsValuesGet_(bookId, ITEM_STATE_SHEET + '!A:K');
-    if (values.length <= 1) return { status: 'success', data: {} };
-    const headers = values[0];
-    const idx = {};
-    ITEM_STATE_HEADERS.forEach(function (h) { idx[h] = headers.indexOf(h); });
+    const sheet = await readItemStateSheet_(bookId);
+    const headers = sheet.headers;
+    const values = sheet.values;
+    if (!headers.length || values.length <= 1) return { status: 'success', data: {} };
+    const idx = buildHeaderIndexMap_(headers);
+    if (idx['Item_ID'] == null) return { status: 'success', data: {} };
     const states = {};
     for (let r = 1; r < values.length; r++) {
       const row = values[r];
       const itemId = normField_(row[idx['Item_ID']]);
       if (itemId === UNREGISTERED) continue;
-      const setId = normField_(row[idx['Set_ID']]);
+      const setId = idx['Set_ID'] >= 0 ? normField_(row[idx['Set_ID']]) : '';
       if (setIdFilter && setId !== setIdFilter && itemId.indexOf(setIdFilter) !== 0) continue;
-      states[itemId] = {
-        Item_ID: itemId,
-        Kind: normField_(row[idx['Kind']]),
-        Set_ID: setId,
-        Total_Attempts: parseInt(row[idx['Total_Attempts']], 10) || 0,
-        Total_Wrong: parseInt(row[idx['Total_Wrong']], 10) || 0,
-        Recent_Bits: parseInt(row[idx['Recent_Bits']], 10) || 0,
-        Last_Seen: parseInt(row[idx['Last_Seen']], 10) || 0,
-        Step_Index: parseInt(row[idx['Step_Index']], 10) || 0,
-        EF: parseFloat(row[idx['EF']]) || 2.5,
-        Next_Review: parseInt(row[idx['Next_Review']], 10) || 0,
-        Avg_Time: parseInt(row[idx['Avg_Time']], 10) || 0
-      };
+      const obj = itemStateRowToObject_(headers, row, itemId);
+      if (obj) states[itemId] = obj;
     }
     return { status: 'success', data: states };
   }
@@ -1347,39 +1482,47 @@ const UserDriveModule = (function () {
     if (!rows.length) return { status: 'success', data: { updated: 0, inserted: 0 } };
     const bookId = await getLogBookId_();
     await ensureItemStateSheet_(bookId);
-    const values = await sheetsValuesGet_(bookId, ITEM_STATE_SHEET + '!A:K');
-    const headers = values.length ? values[0] : ITEM_STATE_HEADERS;
+    const sheet = await readItemStateSheet_(bookId);
+    let headers = sheet.headers;
+    const values = sheet.values.length ? sheet.values : [headers];
+    if (!headers.length) {
+      headers = ITEM_STATE_HEADERS.slice();
+      await sheetsValuesUpdate_(bookId, ITEM_STATE_SHEET + '!A1:' + ITEM_STATE_COL_END + '1', [headers]);
+    }
     const itemIdCol = headers.indexOf('Item_ID');
+    if (itemIdCol < 0) {
+      throw new Error('学習状態シートに Item_ID 列がありません。');
+    }
     const rowMap = {};
     for (let r = 1; r < values.length; r++) {
       const id = normField_(values[r][itemIdCol]);
-      if (id !== UNREGISTERED) rowMap[id] = r + 1;
+      if (id !== UNREGISTERED) rowMap[id] = { rowNum: r + 1, row: values[r] };
     }
+    const colEnd = itemStateSheetColEnd_(headers.length);
     let updated = 0;
     let inserted = 0;
     const newRows = [];
     for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const itemId = normField_(row.Item_ID);
+      const incoming = rows[i];
+      const itemId = normField_(incoming.Item_ID);
       if (itemId === UNREGISTERED) continue;
-      const normalized = ITEM_STATE_HEADERS.map(function (h) {
-        if (h === 'Item_ID') return itemId;
-        if (h === 'Kind') return row.Kind || (itemId.indexOf('|') >= 0 ? 'vocab' : 'grammar');
-        if (row[h] != null) return row[h];
-        if (h === 'EF') return 2.5;
-        return 0;
-      });
-      const existingRow = rowMap[itemId];
-      if (existingRow) {
-        await sheetsValuesUpdate_(bookId, ITEM_STATE_SHEET + '!A' + existingRow + ':K' + existingRow, [normalized]);
+      const existing = rowMap[itemId];
+      const merged = existing
+        ? mergeItemStateIntoSheetRow_(headers, existing.row, incoming)
+        : newItemStateSheetRow_(headers, incoming);
+      if (existing) {
+        await sheetsValuesUpdate_(
+          bookId,
+          ITEM_STATE_SHEET + '!A' + existing.rowNum + ':' + colEnd + existing.rowNum,
+          [merged]);
         updated++;
       } else {
-        newRows.push(normalized);
+        newRows.push(merged);
         inserted++;
       }
     }
     if (newRows.length) {
-      await sheetsValuesAppend_(bookId, ITEM_STATE_SHEET + '!A:K', newRows);
+      await sheetsValuesAppend_(bookId, ITEM_STATE_SHEET + '!A:' + colEnd, newRows);
     }
     return { status: 'success', data: { updated: updated, inserted: inserted } };
   }
@@ -1543,7 +1686,9 @@ const UserDriveModule = (function () {
     clearAuth: clearAuth_,
     getRedirectUri: getRedirectUri_,
     refreshSoftTtlMs: getRefreshSoftTtlMs_,
-    dispatch: dispatch_
+    dispatch: dispatch_,
+    /** @deprecated 過渡期用。学習状態シートの列マイグレーション */
+    migrateItemStateSheetColumnsLegacy: migrateItemStateSheetColumnsLegacy_
   };
 })();
 
