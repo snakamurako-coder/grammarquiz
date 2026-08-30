@@ -427,6 +427,7 @@ function fetchQuestionsFromSheet(params) {
         available: {
           A: true,
           B: hasSort,
+          L: hasSort,
           C: sortTokens.length >= 2,
           D: hasSort && sortDummy !== '',
           E: hasSort,

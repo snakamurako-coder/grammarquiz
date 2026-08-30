@@ -431,6 +431,10 @@ body.pool-match-active .game-footer {
 }
 .pool-hidden { display: none !important; }
 .vocab-word-display { font-size: clamp(1.4em, 5vw, 1.8em); font-weight: bold; color: #1565c0; margin-bottom: 8px; }
+#vocab-quiz-ui.vocab-audio-mode .vocab-word-display { display: none; }
+#vocab-quiz-ui.vocab-audio-mode .vocab-audio-prompt-row { justify-content: center; margin: 8px 0 14px; }
+#vocab-quiz-ui.vocab-audio-mode .vocab-audio-replay-btn { width: 64px; min-height: 64px; font-size: 1.65em; border-radius: 12px; }
+#vocab-quiz-ui.vocab-audio-mode .vocab-audio-hint { text-align: center; font-size: 0.92em; color: var(--c-text-sub); margin: 0 0 4px; }
 .vocab-pos-hint { font-size: 0.9em; color: #666; margin-bottom: 12px; }
 
 /* 単語カードモード（Desktop index.html 由来） */
@@ -1110,9 +1114,11 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           <label>③ 解答方法</label>
           <div class="check-list" id="vocab-axis-response">
             <label class="check-item"><input type="radio" name="vocab-response" value="choice" checked> 選択</label>
+            <label class="check-item"><input type="radio" name="vocab-response" value="audio"> 音声出題（英和・語のみ）</label>
             <label class="check-item"><input type="radio" name="vocab-response" value="typing"> タイピング</label>
             <label class="check-item"><input type="radio" name="vocab-response" value="speech"> 音声入力（STT＋タイピング）</label>
           </div>
+          <p id="vocab-audio-response-hint" class="filter-axis-hint" style="display:none;margin-top:6px;">音声出題は英和・語to語・各問専用選択肢のみです。英単語は表示せず、自動読み上げと 📢 ボタンで再生できます。</p>
           <p class="filter-axis-hint" style="margin-top:6px;">音声入力は和英のみです。英和は日本語タイピングになります。</p>
         </div>
         <div class="form-group" id="vocab-choice-style-wrap">
@@ -1431,9 +1437,10 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
 
     <!-- 単語学習 N択 UI -->
     <div id="vocab-quiz-ui" style="display:none;">
-      <div class="en-with-tts sentence-tts-row">
+      <p class="vocab-audio-hint" id="vocab-audio-hint" style="display:none;">音声を聞いて、意味を選んでください</p>
+      <div class="en-with-tts sentence-tts-row vocab-audio-prompt-row">
         <div class="vocab-word-display" id="vocab-quiz-word"></div>
-        <button type="button" class="tts-btn" data-tts-target="vocab-quiz-word" aria-label="英単語を読み上げ">📢</button>
+        <button type="button" class="tts-btn vocab-audio-replay-btn" id="vocab-quiz-tts-btn" data-tts-target="vocab-quiz-word" aria-label="英単語を読み上げ">📢</button>
       </div>
       <div class="vocab-pos-hint" id="vocab-quiz-prompt">この単語の意味として正しいものを選んでください。</div>
       <div id="vocab-feedback-slot" class="answer-feedback-slot"></div>
@@ -1442,6 +1449,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
 
     <!-- タイピング（和文英訳・空所）用 UI -->
     <div id="typing-ui" style="display:none;">
+      <p id="grammar-listen-hint" class="filter-axis-hint" style="display:none;text-align:center;margin:0 0 10px;">全文を一度だけ再生しました。空所を英語で入力してください。</p>
       <div class="en-with-tts sentence-tts-row" id="typing-sentence-tts-row">
         <div id="typing-sentence-container" class="sentence-container fixed-text" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 0;"></div>
         <button type="button" class="tts-btn" data-tts-target="typing-sentence-container" aria-label="英文を読み上げ">📢</button>
@@ -4267,6 +4275,10 @@ const GRAMMAR_FORMATS = [
     instruction: '次の日本語と同じ意味を持つ英文となるように空所に英語の語句を補ってください。'
   },
   {
+    key: 'L', label: '音声聴解・空所入力', difficulty: 8, difficultyLabel: '8',
+    instruction: '英文を一度だけ聞き、表示された空所に当てはまる語句を英語で入力してください（日本語は表示しません）。'
+  },
+  {
     key: 'C', label: '並び替え（不足語句カード追加）', difficulty: 8, difficultyLabel: '8',
     instruction: '次の日本語と同じ意味を持つ英文となるように空所に以下の語句カードを並べ替え、あてはめなさい。ただし、並べ替え用カードが一枚足りないのでそのカードを自分で入力し作成し使用してください。'
   },
@@ -4488,6 +4500,12 @@ const GrammarQuizGenerator = (() => {
     }
     if (format === 'B') {
       return withAnswerFrame(q, row.sortPrefix, sortInner, row.sortSuffix);
+    }
+    if (format === 'L') {
+      withAnswerFrame(q, row.sortPrefix, sortInner, row.sortSuffix);
+      q.hideJapanese = true;
+      q.listeningTtsText = row.fullSentenceDisplay || joinEnglish(row.sortPrefix, sortInner, row.sortSuffix);
+      return q;
     }
     if (format === 'F') {
       return withAnswerFrame(q, row.mcqPrefix, row.mcqAnswer, row.mcqSuffix);
@@ -4739,6 +4757,9 @@ const TypingModule = (() => {
     resultMsg.textContent = '';
     inputDisplay.textContent = '';
     submitBtn.style.display = 'none';
+
+    const listenHint = document.getElementById('grammar-listen-hint');
+    if (listenHint) listenHint.style.display = qData.format === 'L' ? '' : 'none';
 
     // 形式A（和文英訳）は前後の英文がないため空所テンプレートを表示しない
     container.textContent = (qData.answerPrefix || qData.answerSuffix)
@@ -5152,6 +5173,7 @@ const VOCAB_FORMATS = [
   { key: 'W2', label: '和英・句・記述', instruction: '和訳を参考に、空所に入る英語を書きなさい。' },
   { key: 'W3', label: '和英・例文・記述', instruction: '和訳を参考に、空所に入る英語を書きなさい。' },
   { key: 'vocab-enja', label: '英和・語・選択', instruction: '英単語の意味として正しいものを選びなさい。' },
+  { key: 'vocab-enja-audio', label: '英和・語・音声選択', instruction: '音声で聞いた英単語の意味として正しいものを選びなさい。' },
   { key: 'vocab-jaen', label: '和英・語・選択', instruction: '日本語に対応する英単語・熟語の原形を選びなさい。' },
   { key: 'W4', label: '英和・語・記述', instruction: '次の英単語の意味を日本語で書きなさい。' },
   { key: 'W5', label: '英和・句・記述', instruction: '次の英語の句の意味を日本語で書きなさい。' },
@@ -5171,14 +5193,14 @@ const VOCAB_FORMAT_MAP = {};
 VOCAB_FORMATS.forEach(function (f) { VOCAB_FORMAT_MAP[f.key] = f; });
 const VOCAB_FORMAT_KEYS = VOCAB_FORMATS.map(function (f) { return f.key; });
 const VOCAB_FORMAT_PRIMARY = {
-  W1: 'WD', W4: 'WD', 'vocab-enja': 'WD', 'vocab-jaen': 'WD', PPW: 'WD', 'enja-wd-pool': 'WD',
+  W1: 'WD', W4: 'WD', 'vocab-enja': 'WD', 'vocab-enja-audio': 'WD', 'vocab-jaen': 'WD', PPW: 'WD', 'enja-wd-pool': 'WD',
   W2: 'PH', W5: 'PH', C1: 'PH', PPH: 'PH', 'enja-ph': 'PH', 'enja-ph-pool': 'PH',
   W3: 'EX', W6: 'EX', C2: 'EX', PEX: 'EX', 'enja-ex': 'EX', 'enja-ex-pool': 'EX'
 };
 const VOCAB_SOURCE_FALLBACK = { EX: 'PH', PH: 'WD', WD: 'EX' };
 const VOCAB_TYPING_FORMATS = { W1: true, W2: true, W3: true };
 const VOCAB_JA_FORMATS = { W4: true, W5: true, W6: true };
-const VOCAB_ENJA_MCQ_FORMATS = { 'vocab-enja': true, 'enja-ph': true, 'enja-ex': true };
+const VOCAB_ENJA_MCQ_FORMATS = { 'vocab-enja': true, 'vocab-enja-audio': true, 'enja-ph': true, 'enja-ex': true };
 const VOCAB_CHOICE_FORMATS = {
   C1: true, C2: true, PPH: true, PEX: true, PPW: true, 'vocab-jaen': true,
   'enja-wd-pool': true, 'enja-ph-pool': true, 'enja-ex-pool': true
@@ -5204,6 +5226,10 @@ function vocabResolveFormats(axes) {
   }
   dirs.forEach(function (d) {
     grains.forEach(function (g) {
+      if (response === 'audio') {
+        if (d === 'enja' && g === 'WD') add('vocab-enja-audio');
+        return;
+      }
       if (response === 'typing' || response === 'speech') {
         if (d === 'jaen') {
           if (g === 'WD') add('W1');
@@ -5764,7 +5790,7 @@ function vocabFormatAvailable(wordObj, formatKey) {
       return !!(chunk.enCloze && chunk.jaHint && chunk.jaHint !== VOCAB_UNREGISTERED);
     case 'W3': case 'C2': case 'PEX':
       return !!(ex.enCloze && ex.jaHint && ex.jaHint !== VOCAB_UNREGISTERED);
-    case 'W4': case 'vocab-enja': case 'enja-wd-pool':
+    case 'W4': case 'vocab-enja': case 'vocab-enja-audio': case 'enja-wd-pool':
       return word !== VOCAB_UNREGISTERED && meanings.length > 0;
     case 'W5': case 'enja-ph': case 'enja-ph-pool':
       return chunk.enFull !== VOCAB_UNREGISTERED && chunk.jaFull !== VOCAB_UNREGISTERED;
@@ -6393,20 +6419,53 @@ const VocabSettingsModule = (() => {
     };
   }
 
+  function syncVocabAudioAxisUi_() {
+    const isAudio = getRadio_('vocab-response', 'choice') === 'audio';
+    const hintEl = document.getElementById('vocab-audio-response-hint');
+    if (hintEl) hintEl.style.display = isAudio ? '' : 'none';
+    const dirInputs = document.querySelectorAll('#vocab-axis-direction input');
+    const grainInputs = document.querySelectorAll('#vocab-axis-grain input');
+    const poolRadio = document.querySelector('input[name="vocab-choice-style"][value="pool"]');
+    const poolItem = poolRadio ? poolRadio.closest('.check-item') : null;
+    if (isAudio) {
+      dirInputs.forEach(function (inp) {
+        if (inp.value === 'enja') inp.checked = true;
+        else inp.checked = false;
+        inp.disabled = inp.value !== 'enja';
+      });
+      grainInputs.forEach(function (inp) {
+        if (inp.value === 'WD') inp.checked = true;
+        else inp.checked = false;
+        inp.disabled = inp.value !== 'WD';
+      });
+      if (poolRadio) {
+        const dedicated = document.querySelector('input[name="vocab-choice-style"][value="dedicated"]');
+        if (dedicated) dedicated.checked = true;
+      }
+      if (poolItem) poolItem.style.display = 'none';
+    } else {
+      dirInputs.forEach(function (inp) { inp.disabled = false; });
+      grainInputs.forEach(function (inp) { inp.disabled = false; });
+      if (poolItem) poolItem.style.display = '';
+    }
+  }
+
   function syncChoiceUi_() {
     const response = getRadio_('vocab-response', 'choice');
+    const isAudio = response === 'audio';
     const style = getRadio_('vocab-choice-style', 'dedicated');
     const styleWrap = document.getElementById('vocab-choice-style-wrap');
     const countWrap = document.getElementById('vocab-choice-count-wrap');
     const poolWrap = document.getElementById('vocab-pool-dummy-wrap');
     const unknownList = document.getElementById('vocab-include-unknown');
     const dummySection = document.getElementById('vocab-dummy-options-section');
-    if (styleWrap) styleWrap.style.display = response === 'choice' ? '' : 'none';
-    if (countWrap) countWrap.style.display = (response === 'choice' && style !== 'pool') ? '' : 'none';
+    syncVocabAudioAxisUi_();
+    if (styleWrap) styleWrap.style.display = (response === 'choice' || isAudio) ? '' : 'none';
+    if (countWrap) countWrap.style.display = ((response === 'choice' || isAudio) && style !== 'pool') ? '' : 'none';
     if (poolWrap) poolWrap.style.display = (response === 'choice' && style === 'pool') ? '' : 'none';
     const specials = unknownList && unknownList.closest('.check-list');
-    if (specials) specials.style.display = response === 'choice' ? '' : 'none';
-    if (dummySection) dummySection.style.display = response === 'choice' ? '' : 'none';
+    if (specials) specials.style.display = (response === 'choice' || isAudio) ? '' : 'none';
+    if (dummySection) dummySection.style.display = (response === 'choice' || isAudio) ? '' : 'none';
   }
 
   function syncHomeworkUi_() {
@@ -6578,7 +6637,7 @@ const VocabQuizGenerator = (() => {
   }
 
   function formatSupportsForceNone_(formatKey) {
-    return formatKey === 'vocab-enja' || formatKey === 'enja-ph' || formatKey === 'enja-ex'
+    return formatKey === 'vocab-enja' || formatKey === 'vocab-enja-audio' || formatKey === 'enja-ph' || formatKey === 'enja-ex'
       || formatKey === 'vocab-jaen' || formatKey === 'C1' || formatKey === 'C2';
   }
 
@@ -6675,8 +6734,8 @@ const VocabQuizGenerator = (() => {
       useStt: !!options.useStt && !!VOCAB_TYPING_FORMATS[formatKey],
       vocabFormatLabel: (VOCAB_FORMAT_MAP[formatKey] || {}).label || formatKey
     };
-    if (formatKey === 'vocab-enja') {
-      return buildEnJaQuestion(wordObj, base, pool, bookPool, options, !!extra.forceNone, idx);
+    if (formatKey === 'vocab-enja' || formatKey === 'vocab-enja-audio') {
+      return buildEnJaQuestion(wordObj, base, pool, bookPool, options, !!extra.forceNone, idx, formatKey);
     }
     if (formatKey === 'W1') return buildW1(wordObj, base);
     if (formatKey === 'W2') return buildW2W3(wordObj, base, 'chunk');
@@ -6904,7 +6963,8 @@ const VocabQuizGenerator = (() => {
     }), kind);
   }
 
-  function buildEnJaQuestion(wordObj, base, pool, bookPool, options, forceNone, idx) {
+  function buildEnJaQuestion(wordObj, base, pool, bookPool, options, forceNone, idx, formatKey) {
+    const fmt = formatKey || 'vocab-enja';
     const meanings = vocabGetMeanings(wordObj);
     if (!meanings.length) return null;
     const targetMeaning = meanings[Math.floor(Math.random() * meanings.length)];
@@ -6920,7 +6980,7 @@ const VocabQuizGenerator = (() => {
     appendVocabMcqSpecials_(choiceObjects, options, forceNone);
     return Object.assign(base, {
       id: wordObj['通し番号'] + '-' + targetMeaning.key + '-' + idx,
-      format: 'vocab-enja',
+      format: fmt,
       word: vocabNorm(wordObj['英単語・熟語の表現']),
       posLabel: targetMeaning.posLabel,
       correctAnswer: forceNone ? VOCAB_OPTION_NONE : targetMeaning.meaning,
@@ -6983,19 +7043,63 @@ window.VocabQuizGenerator = VocabQuizGenerator;
 
 // vocabQuizModule.js
 const VocabQuizModule = (() => {
+  const uiRoot = document.getElementById('vocab-quiz-ui');
   const wordEl = document.getElementById('vocab-quiz-word');
   const promptEl = document.getElementById('vocab-quiz-prompt');
+  const audioHintEl = document.getElementById('vocab-audio-hint');
+  const ttsBtn = document.getElementById('vocab-quiz-tts-btn');
   const buttonsEl = document.getElementById('vocab-choice-buttons');
   const resultMsg = document.getElementById('result-msg');
   let qData = null;
   let questionStartTime = null;
 
+  function isAudioMode_() {
+    return !!(qData && qData.format === 'vocab-enja-audio');
+  }
+
+  function bindAudioTtsBtn_(word) {
+    if (!ttsBtn) return;
+    const text = String(word || '').trim();
+    ttsBtn.removeAttribute('data-tts-target');
+    if (text) {
+      ttsBtn.setAttribute('data-tts-text', text);
+      ttsBtn.hidden = false;
+    } else {
+      ttsBtn.removeAttribute('data-tts-text');
+      ttsBtn.hidden = true;
+    }
+  }
+
+  function restoreTextTtsBtn_() {
+    if (!ttsBtn) return;
+    ttsBtn.setAttribute('data-tts-target', 'vocab-quiz-word');
+    ttsBtn.removeAttribute('data-tts-text');
+  }
+
+  function speakPromptWord_() {
+    if (!qData || !qData.word || !window.TtsModule) return;
+    const locale = TtsModule.load ? TtsModule.load().locale : 'en-US';
+    TtsModule.speakText(qData.word, locale, { force: true });
+  }
+
   function initGame(questionData) {
     qData = questionData;
     questionStartTime = Date.now();
-    wordEl.textContent = qData.word;
-    const pos = qData.posLabel ? '（' + qData.posLabel + '）' : '';
-    promptEl.textContent = pos + 'の意味として正しいものを選んでください。';
+    const audio = isAudioMode_();
+    if (uiRoot) uiRoot.classList.toggle('vocab-audio-mode', audio);
+    if (audioHintEl) audioHintEl.style.display = audio ? '' : 'none';
+
+    if (audio) {
+      wordEl.textContent = '';
+      bindAudioTtsBtn_(qData.word);
+      const pos = qData.posLabel ? '（' + qData.posLabel + '）' : '';
+      promptEl.textContent = pos + 'の意味として正しいものを選んでください。';
+    } else {
+      restoreTextTtsBtn_();
+      wordEl.textContent = qData.word;
+      const pos = qData.posLabel ? '（' + qData.posLabel + '）' : '';
+      promptEl.textContent = pos + 'の意味として正しいものを選んでください。';
+    }
     buttonsEl.innerHTML = '';
     resultMsg.textContent = '';
 
@@ -7011,6 +7115,11 @@ const VocabQuizModule = (() => {
       btn.onclick = function () { handleChoice(choice, btn); };
       buttonsEl.appendChild(btn);
     });
+  }
+
+  function onQuestionDisplayed() {
+    if (!isAudioMode_()) return;
+    speakPromptWord_();
   }
 
   function handleChoice(choice, btn) {
@@ -7047,7 +7156,7 @@ const VocabQuizModule = (() => {
     }
   }
 
-  return { initGame };
+  return { initGame, onQuestionDisplayed };
 })();
 
 window.VocabQuizModule = VocabQuizModule;
@@ -8694,7 +8803,9 @@ document.getElementById('vocab-start-btn').addEventListener('click', async () =>
     return;
   }
   if (!options.formats || !options.formats.length) {
-    alert('①和英/英和 と ②語/句/例文 を1つ以上選んでください。');
+    alert(options.axes && options.axes.response === 'audio'
+      ? '音声出題は英和・語to語で出題できます。設定を確認してください。'
+      : '①和英/英和 と ②語/句/例文 を1つ以上選んでください。');
     return;
   }
   if (options.homeworkMode && options.formats.length > 4) {
@@ -8842,6 +8953,7 @@ function normalizeGrammarRow(row) {
     row.available = {
       A: true,
       B: hasSort,
+      L: hasSort,
       C: sortTokens.length >= 2,
       D: hasSort && sortDummy !== '',
       E: hasSort,
@@ -8849,6 +8961,8 @@ function normalizeGrammarRow(row) {
       G: hasMcq && mcqDummies.length >= 1,
       H: hasMcq && mcqDummies.length >= 1
     };
+  } else if (row.available.L === undefined) {
+    row.available.L = !!row.available.B || hasSort;
   }
   return row;
 }
@@ -8866,6 +8980,7 @@ const QUESTION_UI_IDS = ['typing-ui', 'sort-ui', 'choice-ui', 'correction-ui', '
 const QUESTION_HANDLERS = {
   A: { ui: 'typing-ui', module: TypingModule },
   B: { ui: 'typing-ui', module: TypingModule },
+  L: { ui: 'typing-ui', module: TypingModule },
   F: { ui: 'typing-ui', module: TypingModule },
   C: { ui: 'sort-ui', module: SortingModule },
   D: { ui: 'sort-ui', module: SortingModule },
@@ -8873,6 +8988,7 @@ const QUESTION_HANDLERS = {
   G: { ui: 'choice-ui', module: ChoiceModule },
   H: { ui: 'correction-ui', module: CorrectionModule },
   'vocab-enja': { ui: 'vocab-quiz-ui', module: VocabQuizModule },
+  'vocab-enja-audio': { ui: 'vocab-quiz-ui', module: VocabQuizModule },
   'enja-ph': { ui: 'vocab-quiz-ui', module: VocabQuizModule },
   'enja-ex': { ui: 'vocab-quiz-ui', module: VocabQuizModule },
   'enja-wd-pool': { ui: 'vocab-quiz-ui', module: VocabQuizModule },
@@ -8895,6 +9011,7 @@ const QUESTION_HANDLERS = {
 const FEEDBACK_SLOT_BY_FORMAT = {
   A: 'typing-feedback-slot',
   B: 'typing-feedback-slot',
+  L: 'typing-feedback-slot',
   F: 'typing-feedback-slot',
   C: 'sort-feedback-slot',
   D: 'sort-feedback-slot',
@@ -8902,6 +9019,7 @@ const FEEDBACK_SLOT_BY_FORMAT = {
   G: 'choice-feedback-slot',
   H: 'correction-feedback-slot',
   'vocab-enja': 'vocab-feedback-slot',
+  'vocab-enja-audio': 'vocab-feedback-slot',
   'enja-ph': 'vocab-feedback-slot',
   'enja-ex': 'vocab-feedback-slot',
   'enja-wd-pool': 'vocab-feedback-slot',
@@ -8961,13 +9079,13 @@ function loadQuestionToGame(qData) {
 
   updateQuestionProgressDisplay_();
 
-  if (qData.format === 'vocab-enja' || VOCAB_ENJA_MCQ_FORMATS[qData.format] || VOCAB_JA_POOL_FORMATS[qData.format]) {
+  if (qData.format === 'vocab-enja' || qData.format === 'vocab-enja-audio' || VOCAB_ENJA_MCQ_FORMATS[qData.format] || VOCAB_JA_POOL_FORMATS[qData.format]) {
     if (instructionBtn) instructionBtn.style.display = 'none';
     if (instructionEl) {
       instructionEl.textContent = '';
       instructionEl.hidden = true;
     }
-    elements.qJa.textContent = '単語学習（英日）';
+    elements.qJa.textContent = qData.format === 'vocab-enja-audio' ? '単語学習（音声・英日）' : '単語学習（英日）';
   } else if (isVocabFormat(qData.format)) {
     const def = VOCAB_FORMAT_MAP[qData.format];
     if (instructionBtn) {
@@ -8988,16 +9106,25 @@ function loadQuestionToGame(qData) {
     }
   } else {
     const def = GRAMMAR_FORMAT_MAP[qData.format];
-    if (instructionBtn) {
-      instructionBtn.style.display = '';
-      instructionBtn.textContent = '出題指示を確認する';
-      instructionBtn.setAttribute('aria-expanded', 'false');
+    if (qData.format === 'L') {
+      if (instructionBtn) instructionBtn.style.display = 'none';
+      if (instructionEl) {
+        instructionEl.textContent = '';
+        instructionEl.hidden = true;
+      }
+      elements.qJa.textContent = '文法・語法（音声・空所）';
+    } else {
+      if (instructionBtn) {
+        instructionBtn.style.display = '';
+        instructionBtn.textContent = '出題指示を確認する';
+        instructionBtn.setAttribute('aria-expanded', 'false');
+      }
+      if (instructionEl) {
+        instructionEl.textContent = `【形式${def.key}】難易度${qData.difficulty}　${def.instruction}`;
+        instructionEl.hidden = true;
+      }
+      elements.qJa.textContent = qData.japanese;
     }
-    if (instructionEl) {
-      instructionEl.textContent = `【形式${def.key}】難易度${qData.difficulty}　${def.instruction}`;
-      instructionEl.hidden = true;
-    }
-    elements.qJa.textContent = qData.japanese;
   }
 
   QUESTION_UI_IDS.forEach(id => { document.getElementById(id).style.display = 'none'; });
@@ -9022,12 +9149,21 @@ function loadQuestionToGame(qData) {
   }
   const typingRow = document.getElementById('typing-sentence-tts-row');
   if (typingRow) {
-    const typingText = (document.getElementById('typing-sentence-container').textContent || '').trim();
-    typingRow.style.display = typingText ? 'flex' : 'none';
+    if (qData.format === 'L') {
+      typingRow.style.display = 'none';
+    } else {
+      const typingText = (document.getElementById('typing-sentence-container').textContent || '').trim();
+      typingRow.style.display = typingText ? 'flex' : 'none';
+    }
   }
   if (window.TtsModule) {
     TtsModule.stop();
     TtsModule.refreshTargetButtons();
+    if (qData.format === 'vocab-enja-audio' && VocabQuizModule.onQuestionDisplayed) {
+      VocabQuizModule.onQuestionDisplayed();
+    } else if (qData.format === 'L' && qData.listeningTtsText) {
+      TtsModule.speakText(qData.listeningTtsText, TtsModule.load().locale, { force: true });
+    }
   }
 }
 
@@ -9060,6 +9196,12 @@ function escapeHtml_(value) {
 
 function getQuestionPrompt_(q) {
   if (!q) return '';
+  if (q.format === 'L') {
+    return joinEnglish(q.answerPrefix || '', BLANK_MARK, q.answerSuffix || '');
+  }
+  if (q.format === 'vocab-enja-audio') {
+    return '🔊 ' + (q.word || '（音声）') + (q.posLabel ? '（' + q.posLabel + '）' : '');
+  }
   if (q.format === 'vocab-enja') {
     return (q.word || '') + (q.posLabel ? '（' + q.posLabel + '）' : '');
   }
@@ -9080,7 +9222,7 @@ function getQuestionPrompt_(q) {
 
 function getTtsEnglish_(q) {
   if (!q) return '';
-  if (q.format === 'vocab-enja' || q.format === 'W4') return q.word || '';
+  if (q.format === 'vocab-enja' || q.format === 'vocab-enja-audio' || q.format === 'W4') return q.word || '';
   if (isVocabFormat(q.format)) {
     if (q.promptEn) return q.promptEn;
     if (q.mcqPrefix || q.mcqSuffix) return joinEnglish(q.mcqPrefix, q.mcqAnswer || q.correctText || '', q.mcqSuffix);
@@ -9096,7 +9238,7 @@ function getTtsEnglish_(q) {
 
 function getDefaultCorrectAnswer_(q) {
   if (!q) return '';
-  if (q.format === 'vocab-enja') return q.correctAnswer || '';
+  if (q.format === 'vocab-enja' || q.format === 'vocab-enja-audio') return q.correctAnswer || '';
   if (isVocabFormat(q.format)) {
     if (q.expectedAnswer) return q.expectedAnswer;
     if (q.correctText) return q.correctText;
@@ -9164,7 +9306,7 @@ function renderResultReviewList_() {
     }
     html += '</div></div>';
     html += '<div class="result-review-prompt">' + escapeHtml_(item.prompt);
-    if ((item.format === 'vocab-enja' || item.format === 'W4') && item.prompt) {
+    if ((item.format === 'vocab-enja' || item.format === 'vocab-enja-audio' || item.format === 'W4') && item.prompt) {
       html += ' <button type="button" class="tts-btn" data-tts-text="' + escapeHtml_(String(item.prompt).replace(/（.*?）/g, '')) + '" aria-label="読み上げ">📢</button>';
     }
     html += '</div>';
@@ -10063,7 +10205,7 @@ function formatSessionSettingsText_(log) {
   } else if (settings.kind === 'vocab') {
     const dirMap = { jaen: '和英', enja: '英和' };
     const grainMap = { WD: '語to語', PH: '句to句', EX: '例文to例文' };
-    const respMap = { choice: '選択', typing: 'タイピング', speech: '音声入力' };
+    const respMap = { choice: '選択', audio: '音声出題', typing: 'タイピング', speech: '音声入力' };
     const styleMap = { dedicated: '各問専用選択肢', pool: '選択肢プール' };
     const dummyMap = {
       none: 'なし', random: 'ランダム', samePos: '同品詞', diffPos: '異品詞', sameAffix: '同接辞'
@@ -10078,7 +10220,7 @@ function formatSessionSettingsText_(log) {
     lines.push('和英/英和: ' + joinSettingList_((settings.directions || []).map(function (d) { return dirMap[d] || d; }), '（未記録）'));
     lines.push('語/句/例文: ' + joinSettingList_((settings.grains || []).map(function (g) { return grainMap[g] || g; }), '（未記録）'));
     lines.push('解答方法: ' + (respMap[settings.response] || settings.response || '（未記録）'));
-    if (settings.response === 'choice' || !settings.response) {
+    if (settings.response === 'choice' || settings.response === 'audio' || !settings.response) {
       lines.push('選択の出し方: ' + (styleMap[settings.choiceStyle] || settings.choiceStyle || '（未記録）'));
       if (settings.choiceStyle === 'pool') {
         lines.push('プール用ダミー数: ' + (settings.poolDummyCount != null ? settings.poolDummyCount : '?'));
