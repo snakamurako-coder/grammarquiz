@@ -2483,6 +2483,7 @@ function openAppSpreadsheet_() {
 }
 
 function sheetRowsToObjects_(sheet) {
+  if (!sheet) return [];
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) return [];
   const headers = data[0];
@@ -2725,6 +2726,33 @@ function apiAdminUpsertAssignment_(requestData) {
   return { status: 'success', data: normalizeAssignmentRow_(rowObj) };
 }
 
+function formatSheetValueForClient_(value) {
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+  }
+  if (value == null) return '';
+  return value;
+}
+
+/** 管理ダッシュボード提出一覧用（大きな JSON 列は除外） */
+function slimSubmissionForAdmin_(row) {
+  return {
+    Submission_ID: String(row.Submission_ID || ''),
+    Assignment_ID: String(row.Assignment_ID || ''),
+    Account: String(row.Account || ''),
+    Attempt_No: row.Attempt_No,
+    Status: String(row.Status || ''),
+    Score: row.Score,
+    Correct: row.Correct,
+    Total: row.Total,
+    Points: row.Points,
+    Points_Max: row.Points_Max,
+    Duration_Sec: row.Duration_Sec,
+    Timed_Out: row.Timed_Out,
+    Submitted_At: formatSheetValueForClient_(row.Submitted_At)
+  };
+}
+
 function apiAdminListSubmissions_(requestData) {
   const admin = requireAssignmentAdminFromRequest_(requestData || {});
   if (!admin.ok) return { status: 'error', message: admin.error };
@@ -2738,7 +2766,7 @@ function apiAdminListSubmissions_(requestData) {
     return String(b.Submitted_At || '').localeCompare(String(a.Submitted_At || ''));
   });
   const limit = Math.min(500, Math.max(1, parseInt(requestData && requestData.limit, 10) || 200));
-  return { status: 'success', data: rows.slice(0, limit) };
+  return { status: 'success', data: rows.slice(0, limit).map(slimSubmissionForAdmin_) };
 }
 
 function apiListMyAssignments_(requestData) {
@@ -3141,7 +3169,11 @@ function apiAdminUpsertAssignment(assignment) {
   return apiAdminUpsertAssignment_({ assignment: assignment });
 }
 function apiAdminListSubmissions(assignmentId, limit) {
-  return apiAdminListSubmissions_({ assignmentId: assignmentId || '', limit: limit || 200 });
+  try {
+    return apiAdminListSubmissions_({ assignmentId: assignmentId || '', limit: limit || 200 });
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
 }
 
 /** dashboard: 文法学習セット一覧 */

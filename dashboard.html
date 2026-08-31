@@ -134,7 +134,10 @@ function gasRun(fnName) {
   return new Promise(function(resolve, reject) {
     google.script.run
       .withSuccessHandler(function(res) {
-        if (res == null) { reject(new Error('サーバーから応答がありません（GAS の再デプロイが必要な場合があります）')); return; }
+        if (res == null) {
+          reject(new Error('サーバーから応答がありません。GAS を再デプロイするか、提出データが多い場合は課題IDで絞り込んでください。'));
+          return;
+        }
         resolve(res);
       })
       .withFailureHandler(function(err) {
