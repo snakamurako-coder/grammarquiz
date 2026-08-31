@@ -9573,19 +9573,42 @@ bindVocabCardStart_(vocabCardStartTargetedBtn, 'targeted');
 bindVocabCardStart_(vocabCardStartAllBtn, 'all');
 
 function applyVocabCardSessionGlobals_(meta) {
-  currentAppMode = 'vocab';
+  currentAppMode = 'vocab-card';
   currentVocabSetName = meta.setName;
   currentVocabBookName = meta.bookName;
   currentVocabSheetName = meta.sheetName;
   currentSessionIsPreset = !!meta.isPreset;
   sessionStartTime = Date.now();
   sessionPersistedToServer = false;
-  totalQuestionsCount = (meta.cardItems || []).length;
+  totalQuestionsCount = 0;
   currentScore = 0;
-  currentSessionSettings = captureSessionSettingsSnapshot_('vocab');
+  currentSessionSettings = captureSessionSettingsSnapshot_('vocab-card');
   currentReviewSetId = null;
 }
 window.applyVocabCardSessionGlobals_ = applyVocabCardSessionGlobals_;
+
+window.saveVocabCardSessionLog_ = async function (stats) {
+  if (!AuthGateService.isValid()) return;
+  sessionStartTime = stats.viewStartedAt || Date.now();
+  currentVocabSetName = stats.setName;
+  currentVocabBookName = stats.bookName;
+  currentVocabSheetName = stats.sheetName;
+  currentSessionIsPreset = !!stats.isPreset;
+  currentAppMode = 'vocab-card';
+  currentSessionSettings = captureSessionSettingsSnapshot_('vocab-card');
+  currentSessionSettings.vocabCard = {
+    viewingSec: stats.viewingSec,
+    cardsNavigated: stats.cardsNavigated,
+    knownCount: stats.knownCount,
+    unknownCount: stats.unknownCount,
+    totalCards: stats.totalCards,
+    completed: !!stats.completed,
+    contentType: stats.contentType,
+    firstLang: stats.firstLang,
+    shuffle: !!stats.shuffle
+  };
+  await saveSessionResultsUnified('vocab-card', stats.setName);
+};
 
 function applyVocabCardSessionScore_(known, total) {
   currentScore = known;
@@ -10070,6 +10093,37 @@ async function buildSessionSummary_(modeOverride, setNameOverride) {
   if (mode === 'vocab') {
     setName = setNameOverride || currentVocabSetName || 'セット';
     setId = 'vocab:' + (currentVocabBookName || '') + '/' + (currentVocabSheetName || '');
+  } else if (mode === 'vocab-card') {
+    setName = setNameOverride || currentVocabSetName || 'セット';
+    setId = 'vocab-card:' + (currentVocabBookName || '') + '/' + (currentVocabSheetName || '');
+    const vc = (currentSessionSettings && currentSessionSettings.vocabCard) || {};
+    const viewingSec = vc.viewingSec != null
+      ? vc.viewingSec
+      : (sessionStartTime ? Math.round((Date.now() - sessionStartTime) / 1000) : 0);
+    let attemptNo = 1;
+    if (AuthGateService.isValid()) {
+      try {
+        const cnt = await Promise.race([
+          UserBridge.call('countSessionAttempts', { setId: setName }),
+          new Promise(function (resolve) {
+            setTimeout(function () { resolve({ status: 'timeout' }); }, 8000);
+          })
+        ]);
+        if (cnt.status === 'success' && cnt.data) attemptNo = cnt.data.attemptNo || 1;
+      } catch (e) { /* ignore */ }
+    }
+    return {
+      Mode: mode,
+      Set_ID: setId,
+      Set_Name: setName,
+      Attempt_No: attemptNo,
+      Correct: vc.knownCount || 0,
+      Total: vc.totalCards || 0,
+      Score: '',
+      Duration_Sec: viewingSec,
+      Started_At: sessionStartTime ? new Date(sessionStartTime).toISOString() : '',
+      Ended_At: new Date().toISOString()
+    };
   } else if (mode === 'reading') {
     setName = setNameOverride || currentReadingSetName || '音読';
     setId = 'reading:' + setName;
@@ -10741,6 +10795,22 @@ function bindLoginScreen_() {
 
 function captureSessionSettingsSnapshot_(mode) {
   mode = mode || currentAppMode || 'grammar';
+  if (mode === 'vocab-card' && window.VocabSettingsModule && VocabSettingsModule.getQuizOptions) {
+    const opts = VocabSettingsModule.getQuizOptions();
+    const bookTypeEl = document.getElementById('vocab-book-type');
+    const snap = {
+      kind: 'vocab-card',
+      bookType: bookTypeEl ? bookTypeEl.value : 'preset',
+      bookName: opts.bookName || currentVocabBookName || '',
+      sheetName: opts.sheetName || currentVocabSheetName || '',
+      filters: opts.filters || { dai: [], chu: [], sho: [] },
+      cardTarget: opts.cardTarget || null
+    };
+    if (window.VocabCardModule && typeof VocabCardModule.getSessionDisplaySettings === 'function') {
+      Object.assign(snap, VocabCardModule.getSessionDisplaySettings());
+    }
+    return snap;
+  }
   if (mode === 'vocab' && window.VocabSettingsModule && VocabSettingsModule.getQuizOptions) {
     const opts = VocabSettingsModule.getQuizOptions();
     const bookTypeEl = document.getElementById('vocab-book-type');
@@ -10796,6 +10866,21 @@ function extractSessionSettingsFromLog_(log) {
   const mode = String(log['モード'] || detail.Mode || detail.mode || '').toLowerCase();
   const setId = String(detail.Set_ID || detail.setId || '');
   const setName = log['学習セット名'] || detail.Set_Name || detail.setName || '';
+  if (mode === 'vocab-card' || setId.indexOf('vocab-card:') === 0) {
+    let bookName = '';
+    let sheetName = '';
+    if (setId.indexOf('vocab-card:') === 0) {
+      const rest = setId.slice(11);
+      const slash = rest.indexOf('/');
+      bookName = slash >= 0 ? rest.slice(0, slash) : rest;
+      sheetName = slash >= 0 ? rest.slice(slash + 1) : '';
+    } else if (setName.indexOf(' / ') >= 0) {
+      const parts = setName.split(' / ');
+      bookName = parts[0];
+      sheetName = parts.slice(1).join(' / ');
+    }
+    return { kind: 'vocab-card', bookName: bookName, sheetName: sheetName, filters: { dai: [], chu: [], sho: [] } };
+  }
   if (mode === 'vocab' || setId.indexOf('vocab:') === 0) {
     let bookName = '';
     let sheetName = '';
@@ -10845,8 +10930,9 @@ function formatSessionSettingsText_(log) {
   const modeRaw = String((settings && settings.kind) || log['モード'] || detail.Mode || detail.mode || '');
   const lines = [];
   const modeLabel = modeRaw === 'grammar' || modeRaw === '文法' ? '文法・語法演習'
-    : (modeRaw === 'vocab' || modeRaw === '単語' ? '単語学習'
-      : (modeRaw === 'reading' || modeRaw === '音読' ? '音読練習' : (modeRaw || '不明')));
+    : (modeRaw === 'vocab-card' || modeRaw === '単語カード' ? '単語カード'
+      : (modeRaw === 'vocab' || modeRaw === '単語' ? '単語学習'
+        : (modeRaw === 'reading' || modeRaw === '音読' ? '音読練習' : (modeRaw || '不明'))));
   lines.push('モード: ' + modeLabel);
 
   if (!settings) {
@@ -10927,6 +11013,35 @@ function formatSessionSettingsText_(log) {
         lines.push('単語カード特定語: テスト結果(' + (quizLabels[ct.quizStrategy] || ct.quizStrategy) + ')');
       }
     }
+  } else if (settings.kind === 'vocab-card') {
+    const contentMap = { word: '語', phrase: '句', example: '例文' };
+    const langMap = { ja: '日本語→英語', en: '英語→日本語' };
+    lines.push('教材種別: ' + (settings.bookType === 'user' ? 'マイ単語帳' : 'プリセット'));
+    lines.push('ブック: ' + (settings.bookName || '（不明）'));
+    lines.push('シート: ' + (settings.sheetName || '（不明）'));
+    const f = settings.filters || {};
+    lines.push('絞り込み 大区分: ' + joinSettingList_(f.dai));
+    lines.push('絞り込み 中区分: ' + joinSettingList_(f.chu));
+    lines.push('絞り込み 小区分: ' + joinSettingList_(f.sho));
+    if (settings.contentType) lines.push('表示内容: ' + (contentMap[settings.contentType] || settings.contentType));
+    if (settings.firstLang) lines.push('表の言語: ' + (langMap[settings.firstLang] || settings.firstLang));
+    if (settings.shuffle != null) lines.push('シャッフル: ' + (settings.shuffle ? 'あり' : 'なし'));
+    if (settings.cardTarget && settings.cardTarget.source) {
+      const ct = settings.cardTarget;
+      if (ct.source === 'mark') {
+        const parts = [];
+        if (ct.markUnknown) parts.push('😫');
+        if (ct.markKnown) parts.push('👍');
+        if (ct.markNone) parts.push('未登録');
+        lines.push('特定語: マーク登録(' + (ct.markMode === 'include' ? '該当' : '除外') + ') ' + (parts.join('・') || '—'));
+      } else {
+        const quizLabels = { recentWrong: '最近間違えた順', historicalWrong: '過去の誤答中心', unseen: '未演習中心' };
+        lines.push('特定語: テスト結果(' + (quizLabels[ct.quizStrategy] || ct.quizStrategy) + ')');
+      }
+    }
+    const vc = settings.vocabCard || {};
+    if (vc.viewingSec != null) lines.push('閲覧時間: ' + formatVocabCardViewingTime_(vc.viewingSec));
+    if (vc.cardsNavigated != null) lines.push('めくったカード: ' + vc.cardsNavigated + '枚');
   } else if (settings.kind === 'reading') {
     lines.push('ブック: ' + (settings.bookName || 'マイ単語帳'));
     lines.push('シート: ' + (settings.sheetName || '（不明）'));
@@ -10959,8 +11074,19 @@ async function reproduceSessionSettings_(log) {
       if (window.VocabSettingsModule) {
         if (VocabSettingsModule.loadCatalog) await VocabSettingsModule.loadCatalog(false);
         if (VocabSettingsModule.applySettings) VocabSettingsModule.applySettings(settings);
+        if (VocabSettingsModule.applyVocabModeTab) VocabSettingsModule.applyVocabModeTab('quiz', true);
       }
       showToast_('単語学習の出題設定を再現しました（問題そのものは再現しません）');
+      return true;
+    }
+    if (settings.kind === 'vocab-card') {
+      switchMainModeTab_('vocab');
+      if (window.VocabSettingsModule) {
+        if (VocabSettingsModule.loadCatalog) await VocabSettingsModule.loadCatalog(false);
+        if (VocabSettingsModule.applySettings) VocabSettingsModule.applySettings(settings);
+        if (VocabSettingsModule.applyVocabModeTab) VocabSettingsModule.applyVocabModeTab('card', true);
+      }
+      showToast_('単語カードの出題設定を再現しました');
       return true;
     }
     if (settings.kind === 'reading') {
@@ -11091,11 +11217,24 @@ function renderUserLogsList_(logs) {
   const show = lastFetchedLearningLogs_.slice(0, 30);
   let html = '';
   show.forEach(function (log, idx) {
-    const rate = parseInt(log['正答率'], 10);
-    const rateLabel = isNaN(rate) ? (log['正答率'] || '-') : (rate + '%');
+    const isCard = isVocabCardLog_(log);
+    let rateLabel;
+    let asideScore;
+    if (isCard) {
+      const st = getVocabCardLogStats_(log);
+      rateLabel = formatVocabCardViewingTime_(st.viewingSec) + ' / ' + st.cardsNavigated + '枚';
+      asideScore = '<div class="log-score vocab-card-stats">' + escapeHtml_(formatVocabCardViewingTime_(st.viewingSec))
+        + '<br><small>' + escapeHtml_(String(st.cardsNavigated)) + '枚めくり</small></div>';
+    } else {
+      const rate = parseInt(log['正答率'], 10);
+      rateLabel = isNaN(rate) ? (log['正答率'] || '-') : (rate + '%');
+      asideScore = '<div class="log-score">' + escapeHtml_(String(rateLabel)) + '</div>';
+    }
     const duration = formatLogDuration_(log);
-    const metaParts = [log['タイムスタンプ'] || '', log['モード'] || '', '正答率 ' + rateLabel];
-    if (duration) metaParts.push(duration);
+    const metaParts = [log['タイムスタンプ'] || '', log['モード'] || ''];
+    if (!isCard) metaParts.push('正答率 ' + rateLabel);
+    else metaParts.push(rateLabel);
+    if (duration && !isCard) metaParts.push(duration);
     const settingsText = formatSessionSettingsText_(log);
     html += '<div class="log-item">'
       + '<div class="log-item-main">'
@@ -11104,7 +11243,7 @@ function renderUserLogsList_(logs) {
       + '<div class="log-settings">' + escapeHtml_(settingsText) + '</div>'
       + '</div>'
       + '<div class="log-item-aside">'
-      + '<div class="log-score">' + escapeHtml_(String(rateLabel)) + '</div>'
+      + asideScore
       + '<button type="button" class="log-reproduce-btn" data-reproduce-log="' + idx + '">再現</button>'
       + '</div>'
       + '</div>';
@@ -11113,11 +11252,48 @@ function renderUserLogsList_(logs) {
 }
 
 function formatLogDuration_(log) {
+  if (isVocabCardLog_(log)) {
+    const st = getVocabCardLogStats_(log);
+    return formatVocabCardViewingTime_(st.viewingSec);
+  }
   const t = log['解答時間'];
   if (t === null || t === undefined || t === '') {
     return log.source === 'vocab' ? '単語SRS' : '';
   }
   return String(t) + '秒';
+}
+
+function isVocabCardLog_(log) {
+  const mode = String(log['モード'] || '').toLowerCase();
+  if (mode === 'vocab-card' || mode === '単語カード') return true;
+  const detail = parseLogDetail_(log);
+  if (String(detail.Mode || detail.mode || '').toLowerCase() === 'vocab-card') return true;
+  const setId = String(detail.Set_ID || detail.setId || '');
+  if (setId.indexOf('vocab-card:') === 0) return true;
+  const settings = detail.settings;
+  return !!(settings && settings.kind === 'vocab-card');
+}
+
+function getVocabCardLogStats_(log) {
+  const detail = parseLogDetail_(log);
+  const settings = (detail.settings && typeof detail.settings === 'object') ? detail.settings : {};
+  const vc = settings.vocabCard || detail.vocabCard || {};
+  const viewingSec = parseInt(log['解答時間'], 10);
+  const cardsNavigated = vc.cardsNavigated != null ? vc.cardsNavigated : (detail.cardsNavigated || 0);
+  return {
+    viewingSec: !isNaN(viewingSec) ? viewingSec : (vc.viewingSec || detail.Duration_Sec || 0),
+    cardsNavigated: cardsNavigated
+  };
+}
+
+function formatVocabCardViewingTime_(sec) {
+  sec = parseInt(sec, 10) || 0;
+  if (sec <= 0) return '0秒';
+  if (sec < 60) return sec + '秒';
+  const min = Math.floor(sec / 60);
+  const rem = sec % 60;
+  if (rem === 0) return min + '分';
+  return min + '分' + rem + '秒';
 }
 
 function parseLogDetail_(log) {
@@ -11300,11 +11476,21 @@ async function renderMyPage(logs, renderOpts) {
   const recentLogs = logs.slice(0, 5);
   let recentHtml = '';
   recentLogs.forEach(log => {
-    const rate = parseInt(log['正答率'], 10) || 0;
-    const scoreClass = rate >= 80 ? 'score-perfect' : rate >= 60 ? 'score-good' : rate >= 40 ? 'score-warn' : 'score-poor';
+    const isCard = isVocabCardLog_(log);
     const duration = formatLogDuration_(log);
     const metaParts = [log['タイムスタンプ'] || ''];
-    if (duration) metaParts.push(duration);
+    let asideHtml;
+    if (isCard) {
+      const st = getVocabCardLogStats_(log);
+      if (duration) metaParts.push(duration);
+      metaParts.push(st.cardsNavigated + '枚めくり');
+      asideHtml = `<div class="log-score vocab-card-stats">${escapeHtml_(formatVocabCardViewingTime_(st.viewingSec))}<br><small>${escapeHtml_(String(st.cardsNavigated))}枚めくり</small></div>`;
+    } else {
+      const rate = parseInt(log['正答率'], 10) || 0;
+      const scoreClass = rate >= 80 ? 'score-perfect' : rate >= 60 ? 'score-good' : rate >= 40 ? 'score-warn' : 'score-poor';
+      if (duration) metaParts.push(duration);
+      asideHtml = `<div class="log-score ${scoreClass}">${rate}%</div>`;
+    }
     const settingsText = formatSessionSettingsText_(log);
     recentHtml += `
       <div class="log-item">
@@ -11314,7 +11500,7 @@ async function renderMyPage(logs, renderOpts) {
           <div class="log-settings">${escapeHtml_(settingsText)}</div>
         </div>
         <div class="log-item-aside">
-          <div class="log-score ${scoreClass}">${rate}%</div>
+          ${asideHtml}
         </div>
       </div>
     `;
@@ -11324,6 +11510,7 @@ async function renderMyPage(logs, renderOpts) {
   // 2. 教材（シート名）別進捗 & 弱点分析
   const sheetMap = {};
   logs.forEach(function (log) {
+    if (isVocabCardLog_(log)) return;
     const rate = parseInt(log['正答率'], 10) || 0;
     extractSheetNamesFromLog_(log).forEach(function (sheetName) {
       if (!sheetMap[sheetName]) {

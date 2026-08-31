@@ -28,6 +28,9 @@ const VocabCardModule = (() => {
   let keyHandler = null;
   let settings = Object.assign({}, DEFAULT_SETTINGS);
   let resultsCommitted = false;
+  let sessionLogSaved = false;
+  let sessionViewStartedAt = 0;
+  let cardsNavigatedCount = 0;
 
   function esc_(s) {
     return String(s || '')
@@ -370,6 +373,69 @@ const VocabCardModule = (() => {
     document.addEventListener('keydown', keyHandler);
   }
 
+  function setCurrentIndex_(newIndex, opts) {
+    opts = opts || {};
+    const prev = currentIndex;
+    if (newIndex < 0) newIndex = 0;
+    if (activeList.length && newIndex >= activeList.length) newIndex = activeList.length;
+    if (newIndex === prev) {
+      if (opts.forceUpdate) updateCardUI_();
+      return;
+    }
+    currentIndex = newIndex;
+    if (!opts.skipNavCount && sessionMeta && prev !== newIndex) {
+      cardsNavigatedCount++;
+    }
+    updateCardUI_();
+  }
+
+  function getSessionStats_() {
+    const viewingSec = sessionViewStartedAt
+      ? Math.max(0, Math.round((Date.now() - sessionViewStartedAt) / 1000))
+      : 0;
+    return {
+      setName: sessionMeta && sessionMeta.setName,
+      bookName: sessionMeta && sessionMeta.bookName,
+      sheetName: sessionMeta && sessionMeta.sheetName,
+      isPreset: sessionMeta && sessionMeta.isPreset,
+      viewStartedAt: sessionViewStartedAt || Date.now(),
+      viewingSec: viewingSec,
+      cardsNavigated: cardsNavigatedCount,
+      knownCount: knownIds.size,
+      unknownCount: unknownIds.size,
+      totalCards: activeList.length,
+      contentType: settings.contentType,
+      firstLang: settings.firstLang,
+      shuffle: !!settings.shuffle
+    };
+  }
+
+  async function saveSessionLog_(opts) {
+    opts = opts || {};
+    if (sessionLogSaved || !sessionMeta) return;
+    const stats = getSessionStats_();
+    if (!opts.force && stats.viewingSec < 1 && stats.cardsNavigated < 1 && !Object.keys(marks).length) {
+      return;
+    }
+    sessionLogSaved = true;
+    if (typeof window.saveVocabCardSessionLog_ === 'function') {
+      try {
+        await window.saveVocabCardSessionLog_(Object.assign({}, stats, { completed: !!opts.completed }));
+      } catch (e) {
+        console.warn('単語カード学習記録の保存:', e.message || e);
+        sessionLogSaved = false;
+      }
+    }
+  }
+
+  function getSessionDisplaySettings_() {
+    return {
+      contentType: settings.contentType,
+      firstLang: settings.firstLang,
+      shuffle: !!settings.shuffle
+    };
+  }
+
   function stripTags_(html) {
     const div = document.createElement('div');
     div.innerHTML = html;
@@ -503,12 +569,12 @@ const VocabCardModule = (() => {
 
   function prevCard_() {
     stopAutoPlay_();
-    if (currentIndex > 0) { currentIndex--; updateCardUI_(); }
+    if (currentIndex > 0) setCurrentIndex_(currentIndex - 1);
   }
 
   function nextCard_() {
     stopAutoPlay_();
-    if (currentIndex < activeList.length - 1) { currentIndex++; updateCardUI_(); }
+    if (currentIndex < activeList.length - 1) setCurrentIndex_(currentIndex + 1);
   }
 
   function markCard_(isKnown) {
@@ -527,7 +593,7 @@ const VocabCardModule = (() => {
       card.classList.add('swipe-left');
     }
     updateModeButtons_();
-    setTimeout(function () { currentIndex++; updateCardUI_(); }, 150);
+    setTimeout(function () { setCurrentIndex_(currentIndex + 1); }, 150);
   }
 
   async function commitResults_() {
@@ -548,13 +614,8 @@ const VocabCardModule = (() => {
     if (typeof window.applyVocabCardSessionScore_ === 'function') {
       window.applyVocabCardSessionScore_(knownIds.size, allItems.length);
     }
-    if (typeof saveSessionResultsUnified === 'function' && window.AuthGateService && window.AuthGateService.isValid()) {
-      try {
-        await saveSessionResultsUnified('vocab', sessionMeta.setName);
-      } catch (e) {
-        console.warn('単語カード結果の保存:', e.message || e);
-      }
-    } else if (window.ItemStateModule) {
+    await saveSessionLog_({ completed: true, force: true });
+    if (window.ItemStateModule) {
       window.ItemStateModule.syncToServer().catch(function (e) {
         console.warn('学習状態の同期:', e.message || e);
       });
@@ -603,8 +664,8 @@ const VocabCardModule = (() => {
       if (!isAutoPlaying || autoPlayToken !== token) break;
       await delay_(settings.intervalNextWord * 1000);
       if (!isAutoPlaying || autoPlayToken !== token) break;
-      currentIndex++;
-      updateCardUI_();
+      if (currentIndex < activeList.length - 1) setCurrentIndex_(currentIndex + 1);
+      else break;
     }
     stopAutoPlay_();
   }
@@ -657,6 +718,7 @@ const VocabCardModule = (() => {
 
   function showScreen_() {
     document.body.classList.add('vocab-card-active');
+    sessionViewStartedAt = Date.now();
     el_('vocab-card-screen').style.display = 'flex';
     el_('vocab-card-screen').setAttribute('aria-hidden', 'false');
     const settingsScreen = document.getElementById('settings-screen');
@@ -686,6 +748,9 @@ const VocabCardModule = (() => {
     currentMode = 'all';
     currentIndex = 0;
     resultsCommitted = false;
+    sessionLogSaved = false;
+    sessionViewStartedAt = 0;
+    cardsNavigatedCount = 0;
 
     if (!hasSavedSettings_()) {
       if (meta.defaultContentType) settings.contentType = meta.defaultContentType;
@@ -716,10 +781,12 @@ const VocabCardModule = (() => {
   }
 
   function backToSettings() {
-    hideScreen_();
-    const settingsScreen = document.getElementById('settings-screen');
-    if (settingsScreen) settingsScreen.style.display = 'block';
-    if (window.BackendSyncStatus) window.BackendSyncStatus.refresh();
+    saveSessionLog_({ completed: false }).finally(function () {
+      hideScreen_();
+      const settingsScreen = document.getElementById('settings-screen');
+      if (settingsScreen) settingsScreen.style.display = 'block';
+      if (window.BackendSyncStatus) window.BackendSyncStatus.refresh();
+    });
   }
 
   function countPreview_(words, bookName, sheetName, cardTarget) {
@@ -782,7 +849,8 @@ const VocabCardModule = (() => {
     previewDivisionCounts: previewDivisionCounts,
     startSession: startSession,
     backToSettings: backToSettings,
-    syncHomeworkUi_: syncHomeworkUi_
+    syncHomeworkUi_: syncHomeworkUi_,
+    getSessionDisplaySettings: getSessionDisplaySettings_
   };
 })();
 
