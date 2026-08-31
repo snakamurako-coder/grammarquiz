@@ -2583,12 +2583,24 @@ function newId_(prefix) {
 }
 
 function parseLooseDate_(value) {
-  if (!value) return null;
+  if (value === null || value === undefined || value === '') return null;
   if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
     return value.getTime();
   }
+  if (typeof value === 'number' && isFinite(value)) return value;
   const s = String(value).trim();
   if (!s) return null;
+  const m = s.match(/(\d{4})[-\/年.](\d{1,2})[-\/月.](\d{1,2})日?(?:[T\s　]+(\d{1,2})[:時](\d{1,2})(?::(\d{1,2}))?)?/);
+  if (m) {
+    return new Date(
+      parseInt(m[1], 10),
+      parseInt(m[2], 10) - 1,
+      parseInt(m[3], 10),
+      parseInt(m[4] || '0', 10),
+      parseInt(m[5] || '0', 10),
+      parseInt(m[6] || '0', 10)
+    ).getTime();
+  }
   const t = Date.parse(s);
   return isNaN(t) ? null : t;
 }

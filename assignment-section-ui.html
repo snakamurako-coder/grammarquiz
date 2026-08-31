@@ -457,6 +457,8 @@ const AssignmentSectionBuilder = (function () {
     if (!vFormats.length) throw new Error('セクション' + (idx + 1) + ': 出題形式の組み合わせが空です');
     if (vFormats.length > 4) throw new Error('セクション' + (idx + 1) + ': 出題形式は最大4種類まで（現在' + vFormats.length + '種類）');
     var vqc = sec.questionCountSpecify ? sec.questionCountCustom : sec.questionCount;
+    var isChoice = sec.response === 'choice';
+    var isPool = sec.choiceStyle === 'pool';
     return {
       mode: 'vocab', bookType: 'preset', bookName: sec.bookName, sheetName: sec.sheetName,
       filters: { dai: sec.filters.dai.slice(), chu: sec.filters.chu.slice(), sho: sec.filters.sho.slice() },
@@ -464,7 +466,8 @@ const AssignmentSectionBuilder = (function () {
       axes: { directions: sec.directions.slice(), grains: sec.grains.slice(), response: sec.response, choiceStyle: sec.choiceStyle },
       questionCount: vqc, pointsPerQuestion: sec.pointsPerQuestion,
       choiceCount: sec.choiceCount, poolDummyCount: sec.poolDummyCount,
-      includeUnknown: sec.includeUnknown, includeNone: sec.includeNone,
+      includeUnknown: isChoice && !isPool && !!sec.includeUnknown,
+      includeNone: isChoice && !isPool && !!sec.includeNone,
       dummyScope: sec.dummyScope, dummyMethod: sec.dummyMethod, affixType: sec.affixType, affixLen: sec.affixLen
     };
   }

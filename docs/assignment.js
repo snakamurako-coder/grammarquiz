@@ -136,14 +136,53 @@ const AssignmentModule = (function () {
   }
 
   function parseLooseDate_(value) {
-    if (!value) return null;
+    if (value === null || value === undefined || value === '') return null;
     if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
       return value.getTime();
     }
+    if (typeof value === 'number' && isFinite(value)) return value;
     const s = String(value).trim();
     if (!s) return null;
+    const m = s.match(/(\d{4})[-\/年.](\d{1,2})[-\/月.](\d{1,2})日?(?:[T\s　]+(\d{1,2})[:時](\d{1,2})(?::(\d{1,2}))?)?/);
+    if (m) {
+      return new Date(
+        parseInt(m[1], 10),
+        parseInt(m[2], 10) - 1,
+        parseInt(m[3], 10),
+        parseInt(m[4] || '0', 10),
+        parseInt(m[5] || '0', 10),
+        parseInt(m[6] || '0', 10)
+      ).getTime();
+    }
     const t = Date.parse(s);
     return isNaN(t) ? null : t;
+  }
+
+  function coerceSections_(a) {
+    function tryParse(raw) {
+      if (!raw) return [];
+      if (Array.isArray(raw)) return raw.slice(0, 4);
+      if (typeof raw === 'string') {
+        try {
+          const p = JSON.parse(raw);
+          if (Array.isArray(p)) return p.slice(0, 4);
+          if (p && Array.isArray(p.sections)) return p.sections.slice(0, 4);
+        } catch (e) {}
+      }
+      return [];
+    }
+    if (!a) return [];
+    let list = tryParse(a.Sections);
+    if (!list.length) list = tryParse(a.Sections_JSON);
+    if (!list.length) list = tryParse(a.sections);
+    return list.filter(Boolean);
+  }
+
+  function showAssignmentError_(e) {
+    const msg = (e && e.message) ? e.message : String(e || '不明なエラー');
+    console.error('課題開始:', e);
+    if (typeof showToast_ === 'function') showToast_('課題を開始できません: ' + msg);
+    alert('課題を開始できません:\n' + msg);
   }
 
   function formatAssignmentWhen_(value) {
@@ -390,7 +429,11 @@ const AssignmentModule = (function () {
         const idx = parseInt(btn.getAttribute('data-idx'), 10);
         const row = listCache_[idx];
         if (!row) return;
-        BusyButton.run(btn, function () { return startAssignment_(row, false, {}); }, '準備中…');
+        BusyButton.run(btn, function () {
+          return startAssignment_(row, false, {}).catch(function (e) {
+            showAssignmentError_(e);
+          });
+        }, '準備中…');
       });
     });
     wrap.querySelectorAll('.assignment-preview-btn').forEach(function (btn) {
@@ -398,7 +441,11 @@ const AssignmentModule = (function () {
         const idx = parseInt(btn.getAttribute('data-idx'), 10);
         const row = listCache_[idx];
         if (!row) return;
-        BusyButton.run(btn, function () { return startAssignment_(row, false, { preview: true }); }, '準備中…');
+        BusyButton.run(btn, function () {
+          return startAssignment_(row, false, { preview: true }).catch(function (e) {
+            showAssignmentError_(e);
+          });
+        }, '準備中…');
       });
     });
     wrap.querySelectorAll('.assignment-report-btn').forEach(function (btn) {
@@ -509,8 +556,11 @@ const AssignmentModule = (function () {
           wordsPayload = res.data;
         } else {
           const filtersJson = JSON.stringify(sec.filters || {});
-          wordsPayload = await PresetModule.getVocabWords(bookName, sheetName, filtersJson, true, false);
-          if (wordsPayload && wordsPayload.data) wordsPayload = wordsPayload.data;
+          const vocabRes = await PresetModule.getVocabWords(bookName, sheetName, filtersJson, true, false);
+          if (!vocabRes || vocabRes.status !== 'success') {
+            throw new Error('セクション' + (si + 1) + ': ' + ((vocabRes && vocabRes.message) || '単語の取得に失敗しました'));
+          }
+          wordsPayload = vocabRes.data;
         }
         const words = (wordsPayload && wordsPayload.words) || wordsPayload || [];
         const pool = (wordsPayload && wordsPayload.pool) || words;
@@ -520,12 +570,14 @@ const AssignmentModule = (function () {
         }
         const formats = sec.formats.slice(0, 4);
         const per = parseInt(sec.questionCount, 10) || 5;
+        const axes = sec.axes || {};
+        const isPool = (axes.choiceStyle || sec.choiceStyle) === 'pool';
         qs = VocabQuizGenerator.buildQuestions(words, pool, bookPool, {
           formats: formats,
           homeworkMode: true,
           homeworkPerSection: per,
-          includeNone: sec.includeNone !== false,
-          includeUnknown: sec.includeUnknown !== false,
+          includeNone: !isPool && sec.includeNone !== false,
+          includeUnknown: !isPool && sec.includeUnknown !== false,
           choiceCount: sec.choiceCount || 4,
           poolDummyCount: sec.poolDummyCount != null ? sec.poolDummyCount : 2,
           dummyScope: sec.dummyScope || 'sheet',
@@ -584,8 +636,8 @@ const AssignmentModule = (function () {
     if (phase !== 'open' && !isPreview) {
       throw new Error('この課題はまだ取り組める期間ではありません');
     }
-    const sections = a.Sections || [];
-    if (!sections.length) throw new Error('セクションが空です');
+    const sections = coerceSections_(a);
+    if (!sections.length) throw new Error('セクションが空です。管理ダッシュボードで課題を開き直して保存し直してください。');
 
     const local = loadLocalProgress_(a.Assignment_ID);
     let data = {};
@@ -664,22 +716,29 @@ const AssignmentModule = (function () {
     sessionPersistedToServer = false;
     sessionStartTime = Date.now();
 
-    screens.login.style.display = 'none';
-    screens.settings.style.display = 'none';
-    const resultScreen = document.getElementById('result-screen');
-    if (resultScreen) resultScreen.style.display = 'none';
-    const readingScreen = document.getElementById('reading-screen');
-    if (readingScreen) readingScreen.style.display = 'none';
-    screens.game.style.display = 'block';
+    try {
+      screens.login.style.display = 'none';
+      screens.settings.style.display = 'none';
+      const resultScreen = document.getElementById('result-screen');
+      if (resultScreen) resultScreen.style.display = 'none';
+      const readingScreen = document.getElementById('reading-screen');
+      if (readingScreen) readingScreen.style.display = 'none';
+      screens.game.style.display = 'block';
 
-    setAssignmentSessionBanner_(a, { reviewWrong: !!reviewWrong, preview: isPreview });
+      setAssignmentSessionBanner_(a, { reviewWrong: !!reviewWrong, preview: isPreview });
 
-    if (activeSession_.deadlineMs) startTimer_(activeSession_.deadlineMs);
-    else clearTimer_();
+      if (activeSession_.deadlineMs) startTimer_(activeSession_.deadlineMs);
+      else clearTimer_();
 
-    GameSessionPlay.start(currentQuestionDataList);
-    if (window.clearSessionDraft_) window.clearSessionDraft_();
-    if (window.persistSessionDraft_) window.persistSessionDraft_();
+      GameSessionPlay.start(currentQuestionDataList);
+      if (window.clearSessionDraft_) window.clearSessionDraft_();
+      if (window.persistSessionDraft_) window.persistSessionDraft_();
+    } catch (e) {
+      screens.settings.style.display = 'block';
+      screens.game.style.display = 'none';
+      abandonActiveSession_();
+      throw e;
+    }
   }
 
   function abandonActiveSession_() {
