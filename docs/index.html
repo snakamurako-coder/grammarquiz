@@ -663,6 +663,16 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
   font-weight: bold;
   color: #0d47a1;
   font-size: 0.92em;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.asg-preview-warn {
+  color: #c62828;
+  font-size: 0.9em;
+  font-weight: bold;
+  line-height: 1.35;
 }
 #assignment-session-banner[hidden] { display: none !important; }
 .asg-status {
@@ -677,6 +687,8 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
 .asg-status-in-progress { background: #fff8e1; color: #f57f17; }
 .asg-status-ended { background: #e8f5e9; color: #2e7d32; }
 .asg-status-expired { background: #212121; color: #fff; }
+.asg-status-scheduled { background: #e3f2fd; color: #1565c0; }
+.asg-period-meta { font-size: 0.82em; color: #546e7a; margin-top: 2px; }
 .asg-list-item { align-items: flex-start; }
 .asg-list-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .asg-refresh-warn {
@@ -10117,6 +10129,9 @@ document.getElementById('next-btn').addEventListener('click', () => {
 });
 
 function getResultSavedMessage_(saveResult) {
+  if (saveResult && saveResult.preview) {
+    return '予行演習が終了しました。（取り組み期間外のため、成績・進捗には反映されません）';
+  }
   if (saveResult && saveResult.assignment) {
     if (saveResult.status === 'error') {
       return '課題の提出に失敗しました: ' + (saveResult.message || '通信エラー')

@@ -119,6 +119,7 @@ const VocabSessionDraftModule = (() => {
         draft.startedAtMs = act.startedAtMs;
         draft.rangeIds = act.rangeIds || [];
         draft.answerLog = (act.answerLog || []).slice();
+        draft.preview = !!act.preview;
       }
     }
     return draft;
