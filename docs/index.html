@@ -74,6 +74,9 @@ button:active { opacity: 0.9; }
 .vocab-card-target-btn { width: 100%; min-height: 52px; padding: 16px 12px; font-size: 1.05em; font-weight: bold; margin-bottom: 10px; }
 .vocab-target-source-tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .vocab-target-source-tabs label { flex: 1; min-width: 140px; }
+.vocab-target-source-switch { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; flex-wrap: wrap; }
+.vocab-mode-tabs { margin-bottom: 14px; }
+.vocab-mode-tabs .vocab-mode-tab { flex: 1; min-width: 0; font-size: 0.88em; padding: 10px 8px; }
 .vocab-mark-mode-switch { display: flex; align-items: center; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
 .vocab-mark-mode-label { font-size: 0.88em; color: #607d8b; }
 .vocab-mark-mode-label.is-active { color: #1565c0; font-weight: bold; }
@@ -1099,7 +1102,12 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
     </div>
 
     <div id="vocab-settings-panel" style="display: none;">
-      <div class="setting-section">
+      <div class="vocab-mode-tabs mode-tabs" id="vocab-mode-tabs" role="tablist" aria-label="単語学習の種類">
+        <button type="button" class="mode-tab vocab-mode-tab active" data-vocab-mode="card" role="tab" aria-selected="true">単語カード</button>
+        <button type="button" class="mode-tab vocab-mode-tab" data-vocab-mode="quiz" role="tab" aria-selected="false">単語クイズ</button>
+        <button type="button" class="mode-tab vocab-mode-tab" data-vocab-mode="review" role="tab" aria-selected="false">復習モード</button>
+      </div>
+      <div class="setting-section vocab-shared-section">
         <div class="section-title">1. 単語ブック</div>
         <div class="form-group">
           <label>ブック種別</label>
@@ -1117,7 +1125,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           <select id="vocab-sheet-select"></select>
         </div>
       </div>
-      <div class="setting-section vocab-division-section">
+      <div class="setting-section vocab-shared-section vocab-division-section">
         <div class="section-title section-title-with-meta">
           <span>2. 区分で絞り込み（任意）</span>
           <span id="vocab-card-division-count" class="section-title-meta" aria-live="polite"></span>
@@ -1135,26 +1143,21 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           <div class="division-grid" id="vocab-sho-container"></div>
         </div>
       </div>
-      <div class="setting-section" id="vocab-card-section">
-        <div class="section-title">単語カード【3A】</div>
-        <p class="filter-axis-hint vocab-3a-note">※「3C 単語クイズ」以降の設定（出題形式・出題数など）は単語カードには反映されません。</p>
+      <div class="setting-section" id="vocab-card-section" data-vocab-mode-panel="card">
         <p class="filter-axis-hint" style="margin:0 0 12px;">フラッシュカードで語・句・例文をめくり、👍/😫 で仕分けます。一巡後に学習状態をまとめて登録します。</p>
         <div class="vocab-card-target-panel" id="vocab-card-target-panel">
           <div class="form-group" style="margin-bottom:10px;">
             <label>特定語の選び方</label>
-            <div class="vocab-target-source-tabs check-list">
-              <label class="check-item"><input type="radio" name="vocab-card-target-source" value="quiz" checked> 単語テスト結果ベース</label>
-              <label class="check-item"><input type="radio" name="vocab-card-target-source" value="mark"> 自分のマーク登録ベース</label>
+            <div class="vocab-target-source-switch">
+              <span class="vocab-mark-mode-label is-active" id="vocab-card-source-label-mark">自分のマーク登録ベース</span>
+              <label class="slide-switch" title="スライドで切り替え">
+                <input type="checkbox" id="vocab-card-target-source-switch" aria-label="単語クイズの結果ベースに切り替え">
+                <span class="slide-switch-slider"></span>
+              </label>
+              <span class="vocab-mark-mode-label" id="vocab-card-source-label-quiz">単語クイズの結果ベース</span>
             </div>
           </div>
-          <div id="vocab-card-target-quiz-panel">
-            <div class="check-list">
-              <label class="check-item"><input type="radio" name="vocab-card-quiz-strategy" value="recentWrong" checked> 最近間違えた順に</label>
-              <label class="check-item"><input type="radio" name="vocab-card-quiz-strategy" value="historicalWrong"> 過去に間違えた問題を中心に</label>
-              <label class="check-item"><input type="radio" name="vocab-card-quiz-strategy" value="unseen"> 解いたことのない問題を中心に</label>
-            </div>
-          </div>
-          <div id="vocab-card-target-mark-panel" style="display:none;">
+          <div id="vocab-card-target-mark-panel">
             <div class="vocab-mark-mode-switch">
               <span class="vocab-mark-mode-label is-active" id="vocab-card-mark-label-exclude">次を除く語</span>
               <label class="slide-switch" title="スライドで切り替え">
@@ -1169,12 +1172,18 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
               <label class="check-item"><input type="checkbox" id="vocab-card-mark-none"> 何もつけていない</label>
             </div>
           </div>
+          <div id="vocab-card-target-quiz-panel" style="display:none;">
+            <div class="check-list">
+              <label class="check-item"><input type="radio" name="vocab-card-quiz-strategy" value="recentWrong" checked> 最近間違えた順に</label>
+              <label class="check-item"><input type="radio" name="vocab-card-quiz-strategy" value="historicalWrong"> 過去に間違えた問題を中心に</label>
+              <label class="check-item"><input type="radio" name="vocab-card-quiz-strategy" value="unseen"> 解いたことのない問題を中心に</label>
+            </div>
+          </div>
         </div>
         <button type="button" id="vocab-card-start-targeted-btn" class="btn-secondary vocab-card-target-btn">特定語に取り組む</button>
         <button type="button" id="vocab-card-start-all-btn" class="btn-primary" style="width:100%;">全単語に取り組む</button>
       </div>
-      <div class="setting-section" id="vocab-quiz-section">
-        <div class="section-title">単語クイズ【3C】</div>
+      <div class="setting-section" id="vocab-quiz-section" data-vocab-mode-panel="quiz" style="display:none;">
         <p class="filter-axis-hint" style="margin:0 0 12px;">クイズ形式の単語学習です。下の出題形式・出題設定が反映されます。</p>
         <div id="session-resume-banner" class="vocab-session-resume-banner" style="display:none;" role="status">
           <span id="session-resume-text"></span>
@@ -1183,18 +1192,8 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
             <button type="button" class="btn-secondary" id="session-resume-discard-btn">破棄</button>
           </span>
         </div>
-        <div class="vocab-3b-subsection" id="vocab-review-set-section">
-          <button type="button" class="review-set-toggle" id="vocab-review-set-toggle" aria-expanded="false" aria-controls="vocab-review-set-body">
-            <span class="subsection-title" style="margin:0;border:none;padding:0;">3B 復習モード</span>
-            <span class="review-set-toggle-icon" id="vocab-review-set-toggle-icon" aria-hidden="true">▼</span>
-          </button>
-          <div id="vocab-review-set-body" style="display:none;">
-            <p class="filter-axis-hint" style="margin:0 0 10px;">初回学習からの経過日数で分類します。今日学習した語は翌日以降に表示されます。3回連続正解した語は復習セットから除外されます（通常の単語クイズ・SRSには影響しません）。<strong>出題形式・解答方法は下の「3. 出題形式」の設定に準じます。</strong></p>
-            <div id="vocab-review-set-list" class="review-set-list" aria-live="polite"></div>
-          </div>
-        </div>
         <div class="vocab-3b-subsection">
-        <div class="subsection-title">3. 出題形式</div>
+        <div class="subsection-title">出題形式</div>
         <p id="vocab-homework-banner" class="filter-axis-hint" style="display:none;margin:0 0 10px;padding:8px 10px;background:#fff8e1;border-radius:8px;color:#6d4c00;"></p>
         <div class="form-group">
           <label>① 和英 / 英和</label>
@@ -1309,6 +1308,13 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         </div>
       <button id="vocab-start-btn" class="btn-primary">単語クイズを開始する</button>
       </div>
+
+      <div class="setting-section" id="vocab-review-section" data-vocab-mode-panel="review" style="display:none;">
+        <div class="section-title">復習単語セット</div>
+        <p class="filter-axis-hint" style="margin:0 0 10px;">初回学習からの経過日数で分類します。今日学習した語は翌日以降に表示されます。3回連続正解した語は復習セットから除外されます（通常の単語クイズ・SRSには影響しません）。<strong>出題形式・解答方法は「単語クイズ」タブの設定に準じます。</strong></p>
+        <div id="vocab-review-set-list" class="review-set-list" aria-live="polite"></div>
+      </div>
+    </div>
 
     <div id="reading-info-panel" style="display: none;">
       <div class="setting-section">
@@ -6115,7 +6121,8 @@ const VocabSettingsModule = (() => {
   let divisionCountTimer_ = null;
   let reviewSetCountToken_ = 0;
   let reviewSetCountTimer_ = null;
-  let reviewSetExpanded_ = false;
+  let reviewSetExpanded_ = true;
+  let vocabSubMode_ = 'card';
 
   function readSettings() {
     try {
@@ -6283,6 +6290,7 @@ const VocabSettingsModule = (() => {
       affixType: affixTypeEl ? affixTypeEl.value : 'prefix',
       affixLen: parseInt((document.getElementById('vocab-affix-len') || {}).value, 10) || 2,
       cardTarget: getCardTargetSettings_(),
+      vocabSubMode: vocabSubMode_,
       filters: {
         dai: getSelectedDivisions('dai'),
         chu: getSelectedDivisions('chu'),
@@ -6364,6 +6372,7 @@ const VocabSettingsModule = (() => {
         setCheckedValues_('vocab-sho-container', saved.filters.sho);
       }
       if (saved.cardTarget) applyCardTargetSettings_(saved.cardTarget);
+      applyVocabModeTab_(saved.vocabSubMode || 'card', false);
     } finally {
       restoring_ = false;
     }
@@ -6498,11 +6507,11 @@ const VocabSettingsModule = (() => {
   }
 
   function getCardTargetSettings_() {
-    const sourceEl = document.querySelector('input[name="vocab-card-target-source"]:checked');
     const strategyEl = document.querySelector('input[name="vocab-card-quiz-strategy"]:checked');
     const includeEl = document.getElementById('vocab-card-mark-mode-include');
+    const sourceSwitch = document.getElementById('vocab-card-target-source-switch');
     return {
-      source: sourceEl ? sourceEl.value : 'quiz',
+      source: sourceSwitch && sourceSwitch.checked ? 'quiz' : 'mark',
       quizStrategy: strategyEl ? strategyEl.value : 'recentWrong',
       markMode: includeEl && includeEl.checked ? 'include' : 'exclude',
       markKnown: !!(document.getElementById('vocab-card-mark-known') || {}).checked,
@@ -6513,7 +6522,8 @@ const VocabSettingsModule = (() => {
 
   function applyCardTargetSettings_(saved) {
     if (!saved || typeof saved !== 'object') return;
-    if (saved.source) setRadio_('vocab-card-target-source', saved.source);
+    const sourceSwitch = document.getElementById('vocab-card-target-source-switch');
+    if (sourceSwitch) sourceSwitch.checked = saved.source === 'quiz';
     if (saved.quizStrategy) setRadio_('vocab-card-quiz-strategy', saved.quizStrategy);
     const includeEl = document.getElementById('vocab-card-mark-mode-include');
     if (includeEl) includeEl.checked = saved.markMode === 'include';
@@ -6527,11 +6537,16 @@ const VocabSettingsModule = (() => {
   }
 
   function syncCardTargetUi_() {
-    const source = getRadio_('vocab-card-target-source', 'quiz');
+    const sourceSwitch = document.getElementById('vocab-card-target-source-switch');
+    const source = sourceSwitch && sourceSwitch.checked ? 'quiz' : 'mark';
     const quizPanel = document.getElementById('vocab-card-target-quiz-panel');
     const markPanel = document.getElementById('vocab-card-target-mark-panel');
     if (quizPanel) quizPanel.style.display = source === 'quiz' ? '' : 'none';
     if (markPanel) markPanel.style.display = source === 'mark' ? '' : 'none';
+    const markLabel = document.getElementById('vocab-card-source-label-mark');
+    const quizLabel = document.getElementById('vocab-card-source-label-quiz');
+    if (markLabel) markLabel.classList.toggle('is-active', source === 'mark');
+    if (quizLabel) quizLabel.classList.toggle('is-active', source === 'quiz');
     const includeEl = document.getElementById('vocab-card-mark-mode-include');
     const isInclude = !!(includeEl && includeEl.checked);
     const exLabel = document.getElementById('vocab-card-mark-label-exclude');
@@ -6541,9 +6556,14 @@ const VocabSettingsModule = (() => {
   }
 
   function bindCardTargetUi_() {
-    document.querySelectorAll('input[name="vocab-card-target-source"]').forEach(function (inp) {
-      inp.addEventListener('change', function () { syncCardTargetUi_(); persistSettings_(); scheduleVocabCardDivisionCount_(); });
-    });
+    const sourceSwitch = document.getElementById('vocab-card-target-source-switch');
+    if (sourceSwitch) {
+      sourceSwitch.addEventListener('change', function () {
+        syncCardTargetUi_();
+        persistSettings_();
+        scheduleVocabCardDivisionCount_();
+      });
+    }
     document.querySelectorAll('input[name="vocab-card-quiz-strategy"]').forEach(function (inp) {
       inp.addEventListener('change', function () { persistSettings_(); scheduleVocabCardDivisionCount_(); });
     });
@@ -6570,6 +6590,38 @@ const VocabSettingsModule = (() => {
       },
       cardTarget: getCardTargetSettings_()
     };
+  }
+
+  function syncVocabDivisionCountVisibility_() {
+    const el = document.getElementById('vocab-card-division-count');
+    if (!el) return;
+    el.style.display = vocabSubMode_ === 'card' ? '' : 'none';
+  }
+
+  function applyVocabModeTab_(mode, persist) {
+    const valid = { card: true, quiz: true, review: true };
+    mode = valid[mode] ? mode : 'card';
+    if (VocabLaunchConfig.isHomeworkMode()) mode = 'quiz';
+    vocabSubMode_ = mode;
+    document.querySelectorAll('.vocab-mode-tab').forEach(function (tab) {
+      const on = tab.getAttribute('data-vocab-mode') === mode;
+      tab.classList.toggle('active', on);
+      tab.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-vocab-mode-panel]').forEach(function (panel) {
+      panel.style.display = panel.getAttribute('data-vocab-mode-panel') === mode ? 'block' : 'none';
+    });
+    syncVocabDivisionCountVisibility_();
+    if (mode === 'review') scheduleReviewSetCount_();
+    if (persist && !restoring_) persistSettings_();
+  }
+
+  function bindVocabModeTabs_() {
+    document.querySelectorAll('.vocab-mode-tab').forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        applyVocabModeTab_(tab.getAttribute('data-vocab-mode'), true);
+      });
+    });
   }
 
   function scheduleVocabCardDivisionCount_() {
@@ -6632,9 +6684,7 @@ const VocabSettingsModule = (() => {
   }
 
   async function refreshReviewSetCounts_() {
-    const section = document.getElementById('vocab-review-set-section');
-    if (!section || section.style.display === 'none') return;
-    if (!reviewSetExpanded_) return;
+    if (vocabSubMode_ !== 'review') return;
     const options = getVocabCardCountOptions_();
     if (!options.bookName || !options.sheetName) {
       renderReviewSetList_(null, false, 'ブックと教材（シート）を選択してください。');
@@ -6662,18 +6712,6 @@ const VocabSettingsModule = (() => {
   }
 
   function bindReviewSetUi_() {
-    const toggle = document.getElementById('vocab-review-set-toggle');
-    const body = document.getElementById('vocab-review-set-body');
-    const icon = document.getElementById('vocab-review-set-toggle-icon');
-    if (toggle && body) {
-      toggle.addEventListener('click', function () {
-        reviewSetExpanded_ = !reviewSetExpanded_;
-        body.style.display = reviewSetExpanded_ ? 'block' : 'none';
-        toggle.setAttribute('aria-expanded', reviewSetExpanded_ ? 'true' : 'false');
-        if (icon) icon.textContent = reviewSetExpanded_ ? '▲' : '▼';
-        if (reviewSetExpanded_) scheduleReviewSetCount_();
-      });
-    }
     const list = document.getElementById('vocab-review-set-list');
     if (list) {
       list.addEventListener('click', function (ev) {
@@ -6851,9 +6889,10 @@ const VocabSettingsModule = (() => {
     if (window.VocabCardModule && VocabCardModule.syncHomeworkUi_) {
       VocabCardModule.syncHomeworkUi_(homework);
     }
-    const reviewSection = document.getElementById('vocab-review-set-section');
-    if (reviewSection) reviewSection.style.display = homework ? 'none' : '';
-    if (!homework && reviewSetExpanded_) scheduleReviewSetCount_();
+    const vocabModeTabs = document.getElementById('vocab-mode-tabs');
+    if (vocabModeTabs) vocabModeTabs.style.display = homework ? 'none' : '';
+    if (homework) applyVocabModeTab_('quiz', false);
+    else if (!restoring_) applyVocabModeTab_(vocabSubMode_ || 'card', false);
   }
 
   function init() {
@@ -6883,6 +6922,8 @@ const VocabSettingsModule = (() => {
     bindVocabQuestionCountUi_();
     bindCardTargetUi_();
     bindReviewSetUi_();
+    bindVocabModeTabs_();
+    applyVocabModeTab_('card', false);
     syncChoiceUi_();
     syncHomeworkUi_();
     scheduleVocabCardDivisionCount_();
@@ -6892,7 +6933,7 @@ const VocabSettingsModule = (() => {
     return catalog.userBooks || [];
   }
 
-  return { loadCatalog, init, getQuizOptions, getQuestionCount: getQuestionCount_, refreshBookSelect, getUserBooks, applySettings: applySavedSettings_, refreshVocabCardDivisionCount: refreshVocabCardDivisionCount_, refreshReviewSetCounts: refreshReviewSetCounts_, loadVocabWordsForSettings: loadVocabWordsForSettings_ };
+  return { loadCatalog, init, getQuizOptions, getQuestionCount: getQuestionCount_, refreshBookSelect, getUserBooks, applySettings: applySavedSettings_, refreshVocabCardDivisionCount: refreshVocabCardDivisionCount_, refreshReviewSetCounts: refreshReviewSetCounts_, loadVocabWordsForSettings: loadVocabWordsForSettings_, applyVocabModeTab: applyVocabModeTab_ };
 })();
 
 window.VocabSettingsModule = VocabSettingsModule;
@@ -10302,8 +10343,13 @@ function initModeTabs() {
     if (startBtn) startBtn.style.display = mode === 'grammar' ? 'block' : 'none';
     if (profileEl) profileEl.style.display = mode === 'manage' ? 'block' : 'none';
     if (mypageEl) mypageEl.style.display = mode === 'manage' ? 'block' : 'none';
-    if (mode === 'vocab' && window.VocabSettingsModule && VocabSettingsModule.refreshVocabCardDivisionCount) {
-      VocabSettingsModule.refreshVocabCardDivisionCount();
+    if (mode === 'vocab' && window.VocabSettingsModule) {
+      if (VocabSettingsModule.refreshVocabCardDivisionCount) {
+        VocabSettingsModule.refreshVocabCardDivisionCount();
+      }
+      if (VocabSettingsModule.refreshReviewSetCounts) {
+        VocabSettingsModule.refreshReviewSetCounts();
+      }
     }
     if (mode === 'grammar' && window.GrammarSettingsModule && GrammarSettingsModule.refreshGrammarFilterCount) {
       GrammarSettingsModule.refreshGrammarFilterCount();
