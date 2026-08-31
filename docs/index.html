@@ -979,7 +979,10 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
     <div class="setting-section" id="mypage-container" style="display: none;">
       <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
         <span>📊 マイページ（学習記録）</span>
-        <button type="button" id="mypage-refresh-btn" class="btn-small" style="font-weight:normal;">更新</button>
+        <div class="mypage-header-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <button type="button" id="mypage-register-btn" class="btn-primary btn-small">単語登録</button>
+          <button type="button" id="mypage-refresh-btn" class="btn-small" style="font-weight:normal;">更新</button>
+        </div>
       </div>
       <div class="dashboard-grid">
         <!-- 弱点分析 -->
@@ -8321,7 +8324,7 @@ const VocabRegisterModule = (() => {
     });
   }
 
-  return { init: init, refreshBookShortcut: refreshBookShortcut, saveDraft: saveDraftNow_ };
+  return { init: init, refreshBookShortcut: refreshBookShortcut, saveDraft: saveDraftNow_, setRegisterMode: setRegisterMode };
 })();
 
 window.VocabRegisterModule = VocabRegisterModule;
@@ -10433,20 +10436,7 @@ function initModeTabs() {
 
   document.querySelectorAll('.manage-sub-tab').forEach(function (tab) {
     tab.addEventListener('click', function () {
-      document.querySelectorAll('.manage-sub-tab').forEach(function (t) { t.classList.remove('active'); });
-      tab.classList.add('active');
-      const name = tab.dataset.manageTab;
-      document.getElementById('manage-sets-panel').style.display = name === 'sets' ? 'block' : 'none';
-      document.getElementById('manage-register-panel').style.display = name === 'register' ? 'block' : 'none';
-      document.getElementById('manage-logs-panel').style.display = name === 'logs' ? 'block' : 'none';
-      const settingsPanel = document.getElementById('manage-settings-panel');
-      if (settingsPanel) settingsPanel.style.display = name === 'settings' ? 'block' : 'none';
-      if (name === 'register' && window.VocabRegisterModule) window.VocabRegisterModule.init();
-      // 学習記録サブタブはキャッシュ表示のみ（再取得はマイページ切替／更新ボタン）
-      if (name === 'settings') {
-        if (window.TtsModule) TtsModule.refreshSettingsUi();
-        if (window.SttSettings) SttSettings.refreshSettingsUi();
-      }
+      switchManageSubTab_(tab.dataset.manageTab);
     });
   });
 
@@ -11136,15 +11126,64 @@ function setMyPageLoadingPlaceholders_() {
   if (logsEl) logsEl.innerHTML = '<p>読込中...</p>';
 }
 
-function bindMyPageRefreshButton_() {
-  const btn = document.getElementById('mypage-refresh-btn');
-  if (!btn || btn._mypageRefreshBound) return;
-  btn._mypageRefreshBound = true;
-  btn.addEventListener('click', function () {
-    BusyButton.run(btn, function () {
-      return fetchUserLogs({ reason: 'button', force: true });
-    }, '更新中…');
+function switchManageSubTab_(name) {
+  document.querySelectorAll('.manage-sub-tab').forEach(function (t) {
+    t.classList.toggle('active', t.dataset.manageTab === name);
   });
+  const setsPanel = document.getElementById('manage-sets-panel');
+  const registerPanel = document.getElementById('manage-register-panel');
+  const logsPanel = document.getElementById('manage-logs-panel');
+  const settingsPanel = document.getElementById('manage-settings-panel');
+  if (setsPanel) setsPanel.style.display = name === 'sets' ? 'block' : 'none';
+  if (registerPanel) registerPanel.style.display = name === 'register' ? 'block' : 'none';
+  if (logsPanel) logsPanel.style.display = name === 'logs' ? 'block' : 'none';
+  if (settingsPanel) settingsPanel.style.display = name === 'settings' ? 'block' : 'none';
+  if (name === 'register' && window.VocabRegisterModule) window.VocabRegisterModule.init();
+  if (name === 'settings') {
+    if (window.TtsModule) TtsModule.refreshSettingsUi();
+    if (window.SttSettings) SttSettings.refreshSettingsUi();
+  }
+}
+
+function openMypageVocabRegister_() {
+  if (!AuthGateService.isValid()) {
+    alert('単語登録にはログインが必要です');
+    return;
+  }
+  switchManageSubTab_('register');
+  if (window.VocabRegisterModule) {
+    VocabRegisterModule.init();
+    VocabRegisterModule.setRegisterMode('simple');
+  }
+  const panel = document.getElementById('manage-register-panel');
+  if (panel) {
+    requestAnimationFrame(function () {
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+  const firstWord = document.querySelector('#manage-register-panel .register-simple-word');
+  if (firstWord) {
+    setTimeout(function () { firstWord.focus(); }, 400);
+  }
+}
+
+function bindMyPageRefreshButton_() {
+  const refreshBtn = document.getElementById('mypage-refresh-btn');
+  if (refreshBtn && !refreshBtn._mypageRefreshBound) {
+    refreshBtn._mypageRefreshBound = true;
+    refreshBtn.addEventListener('click', function () {
+      BusyButton.run(refreshBtn, function () {
+        return fetchUserLogs({ reason: 'button', force: true });
+      }, '更新中…');
+    });
+  }
+  const registerBtn = document.getElementById('mypage-register-btn');
+  if (registerBtn && !registerBtn._mypageRegisterBound) {
+    registerBtn._mypageRegisterBound = true;
+    registerBtn.addEventListener('click', function () {
+      openMypageVocabRegister_();
+    });
+  }
 }
 
 // ログ取得とマイページ描画
