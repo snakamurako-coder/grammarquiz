@@ -77,6 +77,45 @@ const VocabCardModule = (() => {
       + esc_(s.slice(idx + w.length));
   }
 
+  function clozeParts_(enText, word) {
+    const parsed = typeof window.vocabParseBracket === 'function' ? window.vocabParseBracket(enText) : null;
+    if (parsed && parsed.inner) {
+      return { prefix: parsed.prefix || '', inner: parsed.inner, suffix: parsed.suffix || '' };
+    }
+    const s = window.vocabNorm(enText);
+    const w = window.vocabNorm(word);
+    if (s && w) {
+      const idx = s.toLowerCase().indexOf(w.toLowerCase());
+      if (idx >= 0) {
+        return {
+          prefix: s.slice(0, idx).trim(),
+          inner: s.slice(idx, idx + w.length),
+          suffix: s.slice(idx + w.length).trim()
+        };
+      }
+    }
+    return { prefix: '', inner: s, suffix: '' };
+  }
+
+  function joinClozeHtml_(prefix, innerHtml, suffix) {
+    const joiner = typeof window.joinEnglish === 'function' ? window.joinEnglish : function (p, i, s) {
+      return [p, i, s].filter(Boolean).join(' ');
+    };
+    const marker = '⟦CLOZE⟧';
+    return esc_(joiner(prefix, marker, suffix)).split(marker).join(innerHtml);
+  }
+
+  function blankEnglishHtml_(enText, word) {
+    const p = clozeParts_(enText, word);
+    return joinClozeHtml_(p.prefix, '<span class="vocab-card-blank">(　　)</span>', p.suffix) || '(　　)';
+  }
+
+  function revealEnglishHtml_(enText, word) {
+    const p = clozeParts_(enText, word);
+    const inner = '<span class="vocab-card-hl">' + esc_(p.inner || '') + '</span>';
+    return joinClozeHtml_(p.prefix, inner, p.suffix) || inner;
+  }
+
   function buildCardItemsFromWords_(words, options) {
     const axes = (options && options.axes) || {};
     const grains = axes.grains || ['WD'];
@@ -105,9 +144,12 @@ const VocabCardModule = (() => {
         wordObj: wordObj,
         word: displayVocab_(wordObj['英単語・熟語の表現']),
         meaning: displayVocab_(meaning),
+        wordRaw: word,
         phrase: phraseEn,
+        phraseRaw: chunk.enFull !== unregistered ? chunk.enFull : '',
         phraseMeaning: displayVocab_(chunk.jaFull),
         example: exEn,
+        exampleRaw: ex.enFull !== unregistered ? ex.enFull : '',
         exampleMeaning: displayVocab_(ex.jaFull),
         defaultContentType: defaultType,
         defaultFirstLang: defaultFirstLang
@@ -289,7 +331,7 @@ const VocabCardModule = (() => {
     }
     const typeSel = el_('vc-cfg-content-type');
     if (typeSel && !typeSel.options.length) {
-      [['word', '単語'], ['phrase', '句 (フレーズ)'], ['example', '例文']].forEach(function (pair) {
+      [['word', '単語'], ['phrase', '句 (フレーズ)'], ['example', '例文'], ['phrase-blank', '句：空欄'], ['example-blank', '例文：空欄']].forEach(function (pair) {
         typeSel.add(new Option(pair[1], pair[0]));
       });
     }
@@ -458,6 +500,22 @@ const VocabCardModule = (() => {
   }
 
   function getContentData_(item) {
+    if (settings.contentType === 'phrase-blank') {
+      return {
+        cloze: true,
+        ja: item.phraseMeaning,
+        enRaw: item.phraseRaw || stripTags_(item.phrase),
+        wordRaw: item.wordRaw || stripTags_(item.word)
+      };
+    }
+    if (settings.contentType === 'example-blank') {
+      return {
+        cloze: true,
+        ja: item.exampleMeaning,
+        enRaw: item.exampleRaw || stripTags_(item.example),
+        wordRaw: item.wordRaw || stripTags_(item.word)
+      };
+    }
     if (settings.contentType === 'phrase') return { en: item.phrase, ja: item.phraseMeaning };
     if (settings.contentType === 'example') return { en: item.example, ja: item.exampleMeaning };
     return { en: item.word, ja: item.meaning };
@@ -467,6 +525,10 @@ const VocabCardModule = (() => {
     if (!activeList[currentIndex]) return Promise.resolve();
     const item = activeList[currentIndex];
     const content = getContentData_(item);
+    if (content.cloze) {
+      if (!isBack) return speakPromise_(content.ja, 'ja-JP');
+      return speakPromise_(content.enRaw, 'en-US');
+    }
     const isEnOnFront = settings.firstLang === 'en';
     if (!isBack) {
       return isEnOnFront
@@ -509,11 +571,20 @@ const VocabCardModule = (() => {
 
     const item = activeList[currentIndex];
     const content = getContentData_(item);
-    const isEnOnFront = settings.firstLang === 'en';
-    el_('vc-front-text').innerHTML = isEnOnFront ? (content.en || '—') : (content.ja || '—');
-    el_('vc-front-lang').textContent = isEnOnFront ? '英語' : '日本語';
-    el_('vc-back-text').innerHTML = isEnOnFront ? (content.ja || '—') : (content.en || '—');
-    el_('vc-back-lang').textContent = isEnOnFront ? '日本語' : '英語';
+    if (content.cloze) {
+      el_('vc-front-text').innerHTML =
+        '<div class="vocab-card-cloze-ja">' + (content.ja || '—') + '</div>'
+        + '<div class="vocab-card-cloze-en">' + blankEnglishHtml_(content.enRaw, content.wordRaw) + '</div>';
+      el_('vc-front-lang').textContent = '空欄補充';
+      el_('vc-back-text').innerHTML = revealEnglishHtml_(content.enRaw, content.wordRaw);
+      el_('vc-back-lang').textContent = '答え';
+    } else {
+      const isEnOnFront = settings.firstLang === 'en';
+      el_('vc-front-text').innerHTML = isEnOnFront ? (content.en || '—') : (content.ja || '—');
+      el_('vc-front-lang').textContent = isEnOnFront ? '英語' : '日本語';
+      el_('vc-back-text').innerHTML = isEnOnFront ? (content.ja || '—') : (content.en || '—');
+      el_('vc-back-lang').textContent = isEnOnFront ? '日本語' : '英語';
+    }
     el_('vc-card-progress').textContent = (currentIndex + 1) + ' / ' + activeList.length;
     el_('vc-score-tracker').textContent = '👍 ' + knownIds.size + ' | 😫 ' + unknownIds.size;
     el_('vc-prev-btn').disabled = currentIndex === 0;

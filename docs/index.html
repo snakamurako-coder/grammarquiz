@@ -527,12 +527,15 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
   width: 34px; height: 34px; font-size: 16px; display: flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .vocab-card-header-icon.playing { background: #e53e3e; color: #fff; border-color: #e53e3e; }
-.vocab-card-content-selector { display: flex; background: #e2e8f0; padding: 2px; border-radius: 10px; gap: 2px; }
+.vocab-card-content-selector { display: flex; flex-wrap: wrap; background: #e2e8f0; padding: 2px; border-radius: 10px; gap: 2px; }
 .vocab-card-content-btn {
-  flex: 1; padding: 5px 0; font-size: 12px; font-weight: bold; border: none; background: transparent;
-  color: #4a5568; border-radius: 8px; cursor: pointer;
+  flex: 1 1 18%; min-width: 4.2em; padding: 5px 2px; font-size: 11px; font-weight: bold; border: none; background: transparent;
+  color: #4a5568; border-radius: 8px; cursor: pointer; white-space: nowrap;
 }
 .vocab-card-content-btn.active { background: #fff; color: #2b6cb0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.vocab-card-cloze-ja { font-size: clamp(14px, 3.6vw, 20px); font-weight: 700; color: #4a5568; text-align: center; margin-bottom: 10px; line-height: 1.4; }
+.vocab-card-cloze-en { font-size: inherit; font-weight: inherit; }
+.vocab-card-blank { color: #718096; letter-spacing: 0.18em; font-weight: 800; }
 .vocab-card-status-bar { display: flex; justify-content: space-between; font-size: 12px; font-weight: bold; color: #718096; padding: 0 4px; }
 .vocab-card-container {
   width: 100%; flex: 1; max-height: 380px; min-height: 200px; perspective: 1000px; cursor: pointer; position: relative;
@@ -1159,8 +1162,8 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         </div>
       </div>
       <div class="setting-section" id="vocab-card-section" data-vocab-mode-panel="card">
-        <button type="button" id="vocab-card-start-all-btn" class="btn-primary vocab-card-target-btn">全単語に取り組む</button>
-        <button type="button" id="vocab-card-start-targeted-btn" class="btn-secondary vocab-card-target-btn">特定語に取り組む</button>
+        <button type="button" id="vocab-card-start-all-btn" class="btn-primary vocab-card-target-btn">モードA：全単語に取り組む（上記の範囲）</button>
+        <button type="button" id="vocab-card-start-targeted-btn" class="btn-secondary vocab-card-target-btn">モードB：特定語に取り組む（下記の設定）</button>
         <p class="filter-axis-hint" style="margin:12px 0;">フラッシュカードで語・句・例文をめくり、👍/😫 で仕分けます。一巡後に学習状態をまとめて登録します。</p>
         <div class="vocab-card-target-panel" id="vocab-card-target-panel">
           <div class="form-group" style="margin-bottom:10px;">
@@ -1698,6 +1701,8 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         <button type="button" class="vocab-card-content-btn active" data-vc-type="word">単語</button>
         <button type="button" class="vocab-card-content-btn" data-vc-type="phrase">句</button>
         <button type="button" class="vocab-card-content-btn" data-vc-type="example">例文</button>
+        <button type="button" class="vocab-card-content-btn" data-vc-type="phrase-blank">句：空欄</button>
+        <button type="button" class="vocab-card-content-btn" data-vc-type="example-blank">例文：空欄</button>
       </div>
       <div class="vocab-card-status-bar" id="vc-status-bar">
         <span id="vc-card-progress">0 / 0</span>
@@ -11018,7 +11023,7 @@ function formatSessionSettingsText_(log) {
       }
     }
   } else if (settings.kind === 'vocab-card') {
-    const contentMap = { word: '語', phrase: '句', example: '例文' };
+    const contentMap = { word: '語', phrase: '句', example: '例文', 'phrase-blank': '句：空欄', 'example-blank': '例文：空欄' };
     const langMap = { ja: '日本語→英語', en: '英語→日本語' };
     lines.push('教材種別: ' + (settings.bookType === 'user' ? 'マイ単語帳' : 'プリセット'));
     lines.push('ブック: ' + (settings.bookName || '（不明）'));
