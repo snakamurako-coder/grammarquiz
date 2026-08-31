@@ -2531,9 +2531,6 @@ function evaluateQuizAttemptPass_(asg, correct, total, points, pointsMax, durati
   } else {
     pass = score >= asg.Pass_Score;
   }
-  if (asg.Time_Limit_Sec > 0 && durationSec > asg.Time_Limit_Sec + 2) {
-    pass = false;
-  }
   return { pass: pass, score: score };
 }
 

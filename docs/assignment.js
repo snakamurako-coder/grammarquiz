@@ -96,7 +96,6 @@ const AssignmentModule = (function () {
     } else {
       pass = score >= a.Pass_Score;
     }
-    if (a.Time_Limit_Sec > 0 && durationSec > a.Time_Limit_Sec + 2) pass = false;
     return { pass: pass, score: score };
   }
 
@@ -1178,12 +1177,20 @@ const AssignmentModule = (function () {
   async function forceSubmitActiveSession_() {
     if (!activeSession_) return;
     const isPreview = !!activeSession_.preview;
-    if (!isPreview) showToast_('制限時間のため提出します…');
+    if (!isPreview) showToast_('制限時間のため、ここまでの回答を提出します…');
+    if (window.GameSessionPlay && typeof GameSessionPlay.flushPendingForTimeout === 'function') {
+      GameSessionPlay.flushPendingForTimeout();
+    }
+    const nextBtn = document.getElementById('next-btn');
+    if (nextBtn) nextBtn.style.display = 'none';
     const res = await finishActiveSession_({ timedOut: true });
     showResultScreen();
     if (!isPreview && res && res.data) {
       const d = res.data;
-      showToast_('時間切れ提出: ' + (d.resultStatus || '') + ' / ' + d.score + '%');
+      const passed = d.passedThisAttempt || d.resultStatus === 'clear' || d.resultStatus === 'passed';
+      showToast_('時間切れ提出: ' + (passed ? 'クリア' : '未達')
+        + ' / ' + (d.score != null ? d.score : 0) + '%'
+        + (d.points != null ? (' / ' + d.points + '点') : ''));
     }
     await refreshList();
   }

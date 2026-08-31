@@ -5124,7 +5124,13 @@ const TypingModule = (() => {
     stopStt_();
   }
 
-  return { initGame };
+  function commitPending() {
+    if (answered || !qData) return;
+    const text = (window.KeyboardModule ? KeyboardModule.getInput() : (inputDisplay && inputDisplay.getAttribute('data-kb-value'))) || '';
+    checkAnswer(text);
+  }
+
+  return { initGame, commitPending };
 })();
 
 window.TypingModule = TypingModule;
@@ -5646,6 +5652,7 @@ const VocabPoolMatchModule = (() => {
   let listIndices_ = null;
   let onComplete_ = null;
   let segmentKey_ = '';
+  let scored_ = false;
   const parked_ = {};
 
   function lemmaKey_(text) {
@@ -5850,22 +5857,46 @@ const VocabPoolMatchModule = (() => {
     finishAndScore_();
   }
 
-  function finishAndScore_() {
-    questions.forEach(function (q, i) {
-      currentQuestionIndex = listIndices_ ? listIndices_[i] : i;
-      const user = userAnswers[String(q.id)] || '';
-      const correct = correctOf_(q);
-      const ok = !!user && lemmaKey_(user) === lemmaKey_(correct);
-      if (typeof window.onQuestionCompleted === 'function') {
-        window.onQuestionCompleted(ok, { userAnswer: user || '未選択', correctAnswer: correct });
-      }
-    });
+  function finishAndScore_(opts) {
+    opts = opts || {};
+    if (scored_) return;
+    scored_ = true;
+    scoreAnswers_(questions, listIndices_, userAnswers);
     const nextBtn = document.getElementById('next-btn');
     if (nextBtn) nextBtn.style.display = 'none';
     const done = onComplete_;
     stop();
+    if (opts.silent) return;
     if (done) done();
     else showResultScreen();
+  }
+
+  function scoreAnswers_(qs, indices, answers) {
+    (qs || []).forEach(function (q, i) {
+      currentQuestionIndex = indices ? indices[i] : i;
+      const user = (answers && answers[String(q.id)]) || '';
+      const correct = correctOf_(q);
+      const ok = !!user && lemmaKey_(user) === lemmaKey_(correct);
+      if (typeof window.onQuestionCompleted === 'function') {
+        window.onQuestionCompleted(ok, { userAnswer: user || '未選択', correctAnswer: correct, fromTimeout: true });
+      }
+    });
+  }
+
+  function flushScore() {
+    finishAndScore_({ silent: true });
+  }
+
+  function scoreParked(key, qs, indices) {
+    const parked = key && parked_[key];
+    const answers = parked ? parked.userAnswers : {};
+    const mapped = (qs || []).map(function (q, i) {
+      const copy = Object.assign({}, q);
+      copy.id = i + 1;
+      return copy;
+    });
+    scoreAnswers_(mapped, indices, answers);
+    if (key) delete parked_[key];
   }
 
   function bind_() {
@@ -5886,6 +5917,7 @@ const VocabPoolMatchModule = (() => {
     listIndices_ = options.listIndices || null;
     onComplete_ = typeof options.onComplete === 'function' ? options.onComplete : null;
     segmentKey_ = options.segmentKey || '';
+    scored_ = false;
     questions = (qs || []).map(function (q, i) {
       const copy = Object.assign({}, q);
       copy.id = i + 1;
@@ -5958,7 +5990,7 @@ const VocabPoolMatchModule = (() => {
     return !!(root && root.style.display === 'block');
   }
 
-  return { start, stop, park, isActive, clearParked };
+  return { start, stop, park, isActive, clearParked, flushScore, scoreParked };
 })();
 window.VocabPoolMatchModule = VocabPoolMatchModule;
 
@@ -6210,7 +6242,30 @@ const GameSessionPlay = (() => {
     return true;
   }
 
-  return { start, reset, isActive, advanceLinear, jumpToSegment };
+  function flushPendingForTimeout() {
+    if (window.TypingModule && typeof TypingModule.commitPending === 'function') {
+      TypingModule.commitPending();
+    }
+    if (window.VocabJaModule && typeof VocabJaModule.commitPending === 'function') {
+      VocabJaModule.commitPending();
+    }
+    segments.forEach(function (seg, i) {
+      if (seg.type !== 'pool' || isSegmentComplete_(seg)) return;
+      const key = 'seg-' + i;
+      if (window.VocabPoolMatchModule && VocabPoolMatchModule.isActive() && i === segmentIndex
+          && typeof VocabPoolMatchModule.flushScore === 'function') {
+        VocabPoolMatchModule.flushScore();
+      } else if (window.VocabPoolMatchModule && typeof VocabPoolMatchModule.scoreParked === 'function') {
+        VocabPoolMatchModule.scoreParked(key, seg.questions, seg.indices);
+      }
+      seg.completed = true;
+    });
+    const nextBtn = document.getElementById('next-btn');
+    if (nextBtn) nextBtn.style.display = 'none';
+    if (window.KeyboardModule) KeyboardModule.deactivate();
+  }
+
+  return { start, reset, isActive, advanceLinear, jumpToSegment, flushPendingForTimeout };
 })();
 window.GameSessionPlay = GameSessionPlay;
 
@@ -7866,24 +7921,34 @@ const VocabJaModule = (() => {
       if (answered) return;
       const user = inputEl.value.trim();
       if (!user) return;
-      answered = true;
-      const ok = vocabJapaneseMatch(user, qData.expectedAnswer);
-      const meta = { userAnswer: user, correctAnswer: qData.expectedAnswer };
-      if (ok) {
-        setResultVerdict(resultMsg, 'ok', '⭕️ 正解！');
-        if (window.onQuestionCompleted) window.onQuestionCompleted(true, meta);
-      } else {
-        setResultVerdict(resultMsg, 'ng', '❌ 不正解...');
-        const extra = document.createElement('div');
-        extra.className = 'result-correct-label';
-        extra.textContent = '正答: ' + qData.expectedAnswer;
-        resultMsg.appendChild(extra);
-        if (window.onQuestionCompleted) window.onQuestionCompleted(false, meta);
-      }
+      commitAnswer_(user);
     };
   }
 
-  return { initGame };
+  function commitAnswer_(user) {
+    if (answered || !qData) return;
+    answered = true;
+    const ok = vocabJapaneseMatch(user, qData.expectedAnswer);
+    const meta = { userAnswer: user, correctAnswer: qData.expectedAnswer };
+    if (ok) {
+      setResultVerdict(resultMsg, 'ok', '⭕️ 正解！');
+      if (window.onQuestionCompleted) window.onQuestionCompleted(true, meta);
+    } else {
+      setResultVerdict(resultMsg, 'ng', '❌ 不正解...');
+      const extra = document.createElement('div');
+      extra.className = 'result-correct-label';
+      extra.textContent = '正答: ' + qData.expectedAnswer;
+      resultMsg.appendChild(extra);
+      if (window.onQuestionCompleted) window.onQuestionCompleted(false, meta);
+    }
+  }
+
+  function commitPending() {
+    if (answered || !qData) return;
+    commitAnswer_((inputEl && inputEl.value) ? inputEl.value.trim() : '');
+  }
+
+  return { initGame, commitPending };
 })();
 
 window.VocabJaModule = VocabJaModule;
@@ -10341,6 +10406,10 @@ const SessionSave = (function () {
 window.onQuestionCompleted = (isCorrect, meta) => {
   meta = meta || {};
   const currentQ = currentQuestionDataList[currentQuestionIndex];
+  const logIndex = currentQuestionIndex + 1;
+  if ((sessionAnswerLog || []).some(function (item) { return item.index === logIndex; })) {
+    return;
+  }
   sessionAnswerLog.push({
     index: currentQuestionIndex + 1,
     format: currentQ ? currentQ.format : '',
@@ -10393,7 +10462,7 @@ window.onQuestionCompleted = (isCorrect, meta) => {
     const answerFeedback = document.getElementById('answer-feedback');
     if (answerFeedback) answerFeedback.classList.add('is-visible');
   }
-  document.getElementById('next-btn').style.display = 'block';
+  document.getElementById('next-btn').style.display = meta.fromTimeout ? 'none' : 'block';
   if (window.persistSessionDraft_) window.persistSessionDraft_();
 };
 
