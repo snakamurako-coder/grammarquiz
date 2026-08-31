@@ -170,19 +170,37 @@ function showBanner(text, ok) {
 
 function localInputToSheet_(value) {
   if (!value) return '';
-  // datetime-local → yyyy-MM-dd HH:mm:ss
-  return String(value).replace('T', ' ') + (String(value).length === 16 ? ':00' : '');
+  var s = String(value).trim();
+  if (!s) return '';
+  if (s.length === 16 && s.indexOf('T') === 10) return s.replace('T', ' ') + ':00';
+  return s.replace('T', ' ');
+}
+
+function pad2_(n) {
+  n = parseInt(n, 10) || 0;
+  return (n < 10 ? '0' : '') + n;
+}
+
+function formatLocalDateTime_(d) {
+  return d.getFullYear() + '-' + pad2_(d.getMonth() + 1) + '-' + pad2_(d.getDate())
+    + 'T' + pad2_(d.getHours()) + ':' + pad2_(d.getMinutes());
 }
 
 function sheetToLocalInput_(value) {
   if (value == null || value === '') return '';
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    return formatLocalDateTime_(value);
+  }
   var s = String(value).trim();
-  if (!s) return '';
-  s = s.replace(' ', 'T').replace(/\//g, '-');
-  var m = s.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
-  if (m) return m[1] + 'T' + m[2];
-  var d = s.match(/^(\d{4}-\d{2}-\d{2})/);
-  return d ? d[1] + 'T00:00' : '';
+  if (!s || s === 'Invalid Date') return '';
+  var m = s.match(/(\d{4})[-\/.年](\d{1,2})[-\/.月](\d{1,2})日?(?:[T\s　]+(\d{1,2})[:時](\d{1,2}))?/);
+  if (m) {
+    return m[1] + '-' + pad2_(m[2]) + '-' + pad2_(m[3]) + 'T'
+      + pad2_(m[4] != null ? m[4] : 0) + ':' + pad2_(m[5] != null ? m[5] : 0);
+  }
+  var t = Date.parse(s);
+  if (!isNaN(t)) return formatLocalDateTime_(new Date(t));
+  return '';
 }
 
 function selectedAssignmentIds_() {
