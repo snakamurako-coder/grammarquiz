@@ -221,6 +221,15 @@ button.is-busy::after,
 .register-dest-row #register-sheet-name { width: auto; flex: 1; min-width: 0; }
 .register-dest-row .btn-small { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; white-space: nowrap; }
 .register-dest-hint { font-size: 0.82em; color: var(--c-text-sub); margin: 6px 0 0; line-height: 1.4; }
+.manage-book-name-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.manage-book-name-row strong { font-size: 1.05em; color: #455a64; }
+.manage-inline-sheet-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.78em; padding: 4px 10px; min-height: 28px;
+  background: #607d8b; color: #fff; border-radius: 6px; text-decoration: none; white-space: nowrap;
+}
+.manage-inline-sheet-link:hover { opacity: 0.92; }
+#profile-container .manage-sub-tabs { margin-top: 14px; margin-bottom: 0; }
 #register-sheet-name,
 .register-simple-word {
   display: block;
@@ -973,16 +982,19 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         <div style="font-size: 0.9em; color: #666; margin-top: 8px;"><strong>アカウント: </strong><span id="profile-account"></span></div>
       </div>
       <input type="hidden" id="username-input">
+      <div class="mode-tabs manage-sub-tabs" id="manage-sub-tabs" role="tablist" aria-label="マイページメニュー">
+        <button type="button" class="mode-tab manage-sub-tab active" data-manage-tab="sets">マイセット</button>
+        <button type="button" class="mode-tab manage-sub-tab" data-manage-tab="register">単語登録</button>
+        <button type="button" class="mode-tab manage-sub-tab" data-manage-tab="logs">学習記録</button>
+        <button type="button" class="mode-tab manage-sub-tab" data-manage-tab="settings">詳細設定</button>
+      </div>
     </div>
     
     <!-- 新設：マイページ（学習記録サマリー） -->
     <div class="setting-section" id="mypage-container" style="display: none;">
       <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
         <span>📊 マイページ（学習記録）</span>
-        <div class="mypage-header-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <button type="button" id="mypage-register-btn" class="btn-primary btn-small">単語登録</button>
-          <button type="button" id="mypage-refresh-btn" class="btn-small" style="font-weight:normal;">更新</button>
-        </div>
+        <button type="button" id="mypage-refresh-btn" class="btn-small" style="font-weight:normal;">更新</button>
       </div>
       <div class="dashboard-grid">
         <!-- 弱点分析 -->
@@ -1147,7 +1159,9 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         </div>
       </div>
       <div class="setting-section" id="vocab-card-section" data-vocab-mode-panel="card">
-        <p class="filter-axis-hint" style="margin:0 0 12px;">フラッシュカードで語・句・例文をめくり、👍/😫 で仕分けます。一巡後に学習状態をまとめて登録します。</p>
+        <button type="button" id="vocab-card-start-all-btn" class="btn-primary vocab-card-target-btn">全単語に取り組む</button>
+        <button type="button" id="vocab-card-start-targeted-btn" class="btn-secondary vocab-card-target-btn">特定語に取り組む</button>
+        <p class="filter-axis-hint" style="margin:12px 0;">フラッシュカードで語・句・例文をめくり、👍/😫 で仕分けます。一巡後に学習状態をまとめて登録します。</p>
         <div class="vocab-card-target-panel" id="vocab-card-target-panel">
           <div class="form-group" style="margin-bottom:10px;">
             <label>特定語の選び方</label>
@@ -1183,8 +1197,6 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
             </div>
           </div>
         </div>
-        <button type="button" id="vocab-card-start-targeted-btn" class="btn-secondary vocab-card-target-btn">特定語に取り組む</button>
-        <button type="button" id="vocab-card-start-all-btn" class="btn-primary" style="width:100%;">全単語に取り組む</button>
       </div>
       <div class="setting-section" id="vocab-quiz-section" data-vocab-mode-panel="quiz" style="display:none;">
         <p class="filter-axis-hint" style="margin:0 0 12px;">クイズ形式の単語学習です。下の出題形式・出題設定が反映されます。</p>
@@ -1350,17 +1362,13 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
     </div>
 
     <div id="manage-panel" style="display: none;">
-      <div class="mode-tabs" style="margin-bottom:12px;">
-        <button type="button" class="mode-tab manage-sub-tab active" data-manage-tab="sets">マイセット</button>
-        <button type="button" class="mode-tab manage-sub-tab" data-manage-tab="register">単語登録</button>
-        <button type="button" class="mode-tab manage-sub-tab" data-manage-tab="logs">学習記録</button>
-        <button type="button" class="mode-tab manage-sub-tab" data-manage-tab="settings">詳細設定</button>
-      </div>
       <div id="manage-sets-panel">
         <div class="setting-section">
-          <div class="section-title">マイ単語帳（あなたのDrive）</div>
+          <div class="manage-book-name-row">
+            <strong id="manage-book-name">マイ単語帳</strong>
+            <a id="manage-open-book-btn" class="manage-inline-sheet-link" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">スプレッドシートを開く</a>
+          </div>
           <p class="register-dest-hint">単語登録はここに保存されます。</p>
-          <a id="manage-open-book-btn" class="btn-small" href="#" target="_blank" rel="noopener noreferrer" style="display:none;margin-bottom:12px;">スプレッドシートを開く</a>
           <div id="user-set-list">ログイン後に読み込まれます</div>
         </div>
       </div>
@@ -6614,6 +6622,9 @@ const VocabSettingsModule = (() => {
     document.querySelectorAll('[data-vocab-mode-panel]').forEach(function (panel) {
       panel.style.display = panel.getAttribute('data-vocab-mode-panel') === mode ? 'block' : 'none';
     });
+    document.querySelectorAll('.vocab-shared-section').forEach(function (section) {
+      section.style.display = 'block';
+    });
     syncVocabDivisionCountVisibility_();
     if (mode === 'review') scheduleReviewSetCount_();
     if (persist && !restoring_) persistSettings_();
@@ -6621,7 +6632,8 @@ const VocabSettingsModule = (() => {
 
   function bindVocabModeTabs_() {
     document.querySelectorAll('.vocab-mode-tab').forEach(function (tab) {
-      tab.addEventListener('click', function () {
+      tab.addEventListener('click', function (e) {
+        e.stopPropagation();
         applyVocabModeTab_(tab.getAttribute('data-vocab-mode'), true);
       });
     });
@@ -10381,7 +10393,7 @@ function initModeTabs() {
   if (initModeTabs._done) return;
   initModeTabs._done = true;
   bindMyPageRefreshButton_();
-  const tabs = document.querySelectorAll('.mode-tab:not(.manage-sub-tab)');
+  const tabs = document.querySelectorAll('.mode-tab:not(.manage-sub-tab):not(.vocab-mode-tab)');
   const grammarPanel = document.getElementById('grammar-settings-panel');
   const vocabPanel = document.getElementById('vocab-settings-panel');
   const readingPanel = document.getElementById('reading-info-panel');
@@ -10431,7 +10443,7 @@ function initModeTabs() {
     });
   });
 
-  const activeTab = document.querySelector('.mode-tab.active:not(.manage-sub-tab)');
+  const activeTab = document.querySelector('.mode-tab.active:not(.manage-sub-tab):not(.vocab-mode-tab)');
   applyModePanels_(activeTab && activeTab.dataset.mode ? activeTab.dataset.mode : 'grammar');
 
   document.querySelectorAll('.manage-sub-tab').forEach(function (tab) {
@@ -10570,6 +10582,8 @@ async function loadManagePanel_() {
     }
     const book = books[0];
     const bookUrl = book.bookUrl || (book.bookId ? 'https://docs.google.com/spreadsheets/d/' + book.bookId + '/edit' : '');
+    const bookNameEl = document.getElementById('manage-book-name');
+    if (bookNameEl) bookNameEl.textContent = book.bookName || 'マイ単語帳';
     if (manageBtn) {
       if (bookUrl) {
         manageBtn.href = bookUrl;
@@ -11138,32 +11152,13 @@ function switchManageSubTab_(name) {
   if (registerPanel) registerPanel.style.display = name === 'register' ? 'block' : 'none';
   if (logsPanel) logsPanel.style.display = name === 'logs' ? 'block' : 'none';
   if (settingsPanel) settingsPanel.style.display = name === 'settings' ? 'block' : 'none';
-  if (name === 'register' && window.VocabRegisterModule) window.VocabRegisterModule.init();
-  if (name === 'settings') {
-    if (window.TtsModule) TtsModule.refreshSettingsUi();
-    if (window.SttSettings) SttSettings.refreshSettingsUi();
-  }
-}
-
-function openMypageVocabRegister_() {
-  if (!AuthGateService.isValid()) {
-    alert('単語登録にはログインが必要です');
-    return;
-  }
-  switchManageSubTab_('register');
-  if (window.VocabRegisterModule) {
+  if (name === 'register' && window.VocabRegisterModule) {
     VocabRegisterModule.init();
     VocabRegisterModule.setRegisterMode('simple');
   }
-  const panel = document.getElementById('manage-register-panel');
-  if (panel) {
-    requestAnimationFrame(function () {
-      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-  }
-  const firstWord = document.querySelector('#manage-register-panel .register-simple-word');
-  if (firstWord) {
-    setTimeout(function () { firstWord.focus(); }, 400);
+  if (name === 'settings') {
+    if (window.TtsModule) TtsModule.refreshSettingsUi();
+    if (window.SttSettings) SttSettings.refreshSettingsUi();
   }
 }
 
@@ -11175,13 +11170,6 @@ function bindMyPageRefreshButton_() {
       BusyButton.run(refreshBtn, function () {
         return fetchUserLogs({ reason: 'button', force: true });
       }, '更新中…');
-    });
-  }
-  const registerBtn = document.getElementById('mypage-register-btn');
-  if (registerBtn && !registerBtn._mypageRegisterBound) {
-    registerBtn._mypageRegisterBound = true;
-    registerBtn.addEventListener('click', function () {
-      openMypageVocabRegister_();
     });
   }
 }
@@ -11501,7 +11489,7 @@ function renderGrammarAreaProgress_(areaMap) {
 async function renderMyPage(logs, renderOpts) {
   renderOpts = renderOpts || {};
   const container = document.getElementById('mypage-container');
-  const manageActive = document.querySelector('.mode-tab.active:not(.manage-sub-tab)');
+  const manageActive = document.querySelector('.mode-tab.active[data-mode]');
   if (container) {
     container.style.display = (manageActive && manageActive.dataset.mode === 'manage') ? 'block' : 'none';
   }
