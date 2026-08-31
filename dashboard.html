@@ -14,6 +14,8 @@ body{font-family:'Helvetica Neue','Hiragino Kaku Gothic ProN','Noto Sans JP',Ari
 .btn-primary{width:100%;min-height:48px;padding:12px;font-size:1em;font-weight:bold;background:var(--c-primary);color:#fff;border:none;border-radius:10px;cursor:pointer;margin-top:8px}
 .btn-small{min-height:38px;padding:8px 14px;font-size:.85em;background:#607d8b;color:#fff;border:none;border-radius:8px;cursor:pointer}
 .btn-danger{background:#e53935}
+.btn-primary:disabled,.btn-small:disabled{opacity:.55;cursor:not-allowed}
+.asg-list-check{width:20px;height:20px;accent-color:var(--c-primary)}
 .alert-box{padding:12px;border-radius:8px;margin-bottom:16px;font-weight:bold}
 .alert-success{background:#e8f5e9;color:#2e7d32}
 .alert-error{background:#ffebee;color:#c62828}
@@ -100,7 +102,12 @@ th{background:#f5f5f5}
       </div>
     </div>
     <button type="button" id="asg-save-btn" class="btn-primary">課題を保存</button>
-    <button type="button" id="asg-refresh-btn" class="btn-small" style="margin-top:8px;">課題一覧を再読込</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">
+      <button type="button" id="asg-refresh-btn" class="btn-small">課題一覧を再読込</button>
+      <button type="button" id="asg-clone-btn" class="btn-small">同じ設定で新しい課題を作成開始</button>
+      <button type="button" id="asg-delete-btn" class="btn-small btn-danger">削除</button>
+    </div>
+    <p class="hint" style="margin:6px 0 0;">☑は1件だけ選んで「同じ設定で新しい課題を作成開始」（過去の出題をプリセット化）。複数チェックで「削除」できます。</p>
     <div id="asg-list-wrap" style="overflow-x:auto;margin-top:12px;">読込中...</div>
   </div>
 
@@ -167,6 +174,24 @@ function localInputToSheet_(value) {
   return String(value).replace('T', ' ') + (String(value).length === 16 ? ':00' : '');
 }
 
+function sheetToLocalInput_(value) {
+  if (value == null || value === '') return '';
+  var s = String(value).trim();
+  if (!s) return '';
+  s = s.replace(' ', 'T').replace(/\//g, '-');
+  var m = s.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  if (m) return m[1] + 'T' + m[2];
+  var d = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return d ? d[1] + 'T00:00' : '';
+}
+
+function selectedAssignmentIds_() {
+  var wrap = document.getElementById('asg-list-wrap');
+  return Array.from((wrap && wrap.querySelectorAll('.asg-row-check:checked')) || []).map(function (cb) {
+    return cb.value;
+  }).filter(Boolean);
+}
+
 function formatTargetSummary_(a) {
   var parts = [];
   if (a.Target_Class) parts.push('class:' + a.Target_Class);
@@ -202,8 +227,9 @@ function collectAssignment_() {
   };
 }
 
-function fillFormFromAssignment_(a) {
-  document.getElementById('asg-id').value = a.Assignment_ID || '';
+function fillFormFromAssignment_(a, opts) {
+  opts = opts || {};
+  document.getElementById('asg-id').value = opts.asNew ? '' : (a.Assignment_ID || '');
   document.getElementById('asg-title').value = a.Title || '';
   document.getElementById('asg-kind').value = a.Kind || 'homework';
   document.getElementById('asg-target-class').value = a.Target_Class || '';
@@ -212,6 +238,9 @@ function fillFormFromAssignment_(a) {
   document.getElementById('asg-target-attr3').value = a.Target_attribute3 || '';
   document.getElementById('asg-target-attr4').value = a.Target_attribute4 || '';
   document.getElementById('asg-target-attr5').value = a.Target_attribute5 || '';
+  document.getElementById('asg-window-start').value = sheetToLocalInput_(a.Window_Start);
+  document.getElementById('asg-window-end').value = sheetToLocalInput_(a.Window_End);
+  document.getElementById('asg-deadline').value = sheetToLocalInput_(a.Deadline);
   document.getElementById('asg-time-limit').value = a.Time_Limit_Sec || 0;
   document.getElementById('asg-required-pass-count').value = a.Required_Pass_Count || a.Max_Attempts || 1;
   document.getElementById('asg-pass-score').value = a.Pass_Score || 0;
@@ -219,6 +248,23 @@ function fillFormFromAssignment_(a) {
   document.getElementById('asg-weakness').value = String(a.Weakness_Review || 0);
   document.getElementById('asg-active').value = String(a.Active != null ? a.Active : 1);
   AssignmentSectionBuilder.setSectionsFromPayload(a.Sections || []);
+}
+
+function startNewAssignmentFromChecked_() {
+  var ids = selectedAssignmentIds_();
+  if (ids.length !== 1) {
+    showBanner('新しい課題の元にする課題を、1件だけチェックしてください', false);
+    return;
+  }
+  var wrap = document.getElementById('asg-list-wrap');
+  var found = (wrap._rows || []).filter(function (r) { return r.Assignment_ID === ids[0]; })[0];
+  if (!found) {
+    showBanner('選択した課題の内容を読み込めませんでした。一覧を再読込してください', false);
+    return;
+  }
+  fillFormFromAssignment_(found, { asNew: true });
+  showBanner('「' + (found.Title || '') + '」と同じ設定で新規作成を開始しました。課題IDは空です。保存すると新しい課題として登録されます（元の課題はそのまま残ります）。', true);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 async function loadAssignments() {
@@ -231,9 +277,12 @@ async function loadAssignments() {
       wrap.innerHTML = '<p>まだ課題がありません。</p>';
       return;
     }
-    var html = '<table><thead><tr><th>名前</th><th>種別</th><th>配布対象</th><th>期限/期間</th><th>制限</th><th>合格</th><th>公開</th><th></th></tr></thead><tbody>';
+    var html = '<table><thead><tr>'
+      + '<th><input type="checkbox" class="asg-list-check" id="asg-check-all" title="すべて選択"></th>'
+      + '<th>名前</th><th>種別</th><th>配布対象</th><th>期限/期間</th><th>制限</th><th>合格</th><th>公開</th><th></th></tr></thead><tbody>';
     rows.forEach(function (a) {
       html += '<tr>';
+      html += '<td><input type="checkbox" class="asg-list-check asg-row-check" value="' + escapeHtml(a.Assignment_ID) + '"></td>';
       html += '<td>' + escapeHtml(a.Title) + '<div class="hint">' + escapeHtml(a.Assignment_ID) + '</div></td>';
       html += '<td>' + escapeHtml(a.Kind) + '</td>';
       html += '<td>' + escapeHtml(formatTargetSummary_(a)) + '</td>';
@@ -258,13 +307,26 @@ async function loadAssignments() {
         }
       });
     });
+    var checkAll = document.getElementById('asg-check-all');
+    if (checkAll) {
+      checkAll.addEventListener('change', function () {
+        wrap.querySelectorAll('.asg-row-check').forEach(function (cb) { cb.checked = checkAll.checked; });
+      });
+    }
   } catch (e) {
     wrap.innerHTML = '<p style="color:#c62828;">エラー: ' + escapeHtml(e.message) + '</p>';
   }
 }
 
 async function saveAssignment() {
+  var btn = document.getElementById('asg-save-btn');
+  if (btn && btn.disabled) return;
+  var prevLabel = btn ? btn.textContent : '';
   try {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '登録中…';
+    }
     var payload = collectAssignment_();
     if (!payload.Title) throw new Error('課題名を入力してください');
     var result = await gasRun('apiAdminUpsertAssignment', payload);
@@ -274,6 +336,44 @@ async function saveAssignment() {
     await loadAssignments();
   } catch (e) {
     showBanner(e.message || String(e), false);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prevLabel || '課題を保存';
+    }
+  }
+}
+
+async function deleteSelectedAssignments() {
+  var ids = selectedAssignmentIds_();
+  if (!ids.length) {
+    showBanner('削除する課題にチェックを入れてください', false);
+    return;
+  }
+  if (!window.confirm(ids.length + '件の課題を削除します。関連する提出記録も削除されます。よろしいですか？')) return;
+  var btn = document.getElementById('asg-delete-btn');
+  var prevLabel = btn ? btn.textContent : '';
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '削除中…';
+    }
+    var result = await gasRun('apiAdminDeleteAssignments', ids);
+    if (result.status !== 'success') throw new Error(result.message);
+    var n = (result.data && result.data.deletedAssignments) || ids.length;
+    var subN = (result.data && result.data.deletedSubmissions) || 0;
+    showBanner(n + '件の課題を削除しました' + (subN ? '（提出 ' + subN + '件も削除）' : ''), true);
+    var currentId = document.getElementById('asg-id').value.trim();
+    if (currentId && ids.indexOf(currentId) >= 0) document.getElementById('asg-id').value = '';
+    await loadAssignments();
+    await loadSubmissions();
+  } catch (e) {
+    showBanner(e.message || String(e), false);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prevLabel || '削除';
+    }
   }
 }
 
@@ -365,6 +465,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
   document.getElementById('asg-save-btn').addEventListener('click', saveAssignment);
   document.getElementById('asg-refresh-btn').addEventListener('click', loadAssignments);
+  document.getElementById('asg-clone-btn').addEventListener('click', startNewAssignmentFromChecked_);
+  document.getElementById('asg-delete-btn').addEventListener('click', deleteSelectedAssignments);
   document.getElementById('sub-refresh-btn').addEventListener('click', loadSubmissions);
   document.getElementById('refresh-summaries-btn').addEventListener('click', loadSummaries);
 

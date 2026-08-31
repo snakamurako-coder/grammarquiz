@@ -524,7 +524,8 @@ function doPost(e) {
         || action === 'startAssignmentAttempt' || action === 'submitAssignmentAttempt'
         || action === 'reportQuizAchievement' || action === 'saveHomeworkProgress'
         || action === 'adminListAssignments'
-        || action === 'adminUpsertAssignment' || action === 'adminListSubmissions') {
+        || action === 'adminUpsertAssignment' || action === 'adminDeleteAssignments'
+        || action === 'adminListSubmissions') {
       syncWhitelistCacheIfStale_();
       return sendResponse(handleAssignmentApi_(action, requestData));
     } else {
@@ -2647,6 +2648,7 @@ function handleAssignmentApi_(action, requestData) {
   try {
     if (action === 'adminListAssignments') return apiAdminListAssignments_(requestData);
     if (action === 'adminUpsertAssignment') return apiAdminUpsertAssignment_(requestData);
+    if (action === 'adminDeleteAssignments') return apiAdminDeleteAssignments_(requestData);
     if (action === 'adminListSubmissions') return apiAdminListSubmissions_(requestData);
     if (action === 'listMyAssignments') return apiListMyAssignments_(requestData);
     if (action === 'getAssignment') return apiGetAssignment_(requestData);
@@ -2724,6 +2726,50 @@ function apiAdminUpsertAssignment_(requestData) {
   migrateSheetHeaders_(sheet, ASSIGNMENT_HEADERS);
   writeObjectRowByHeaders_(sheet, ASSIGNMENT_HEADERS, rowObj, existing ? existing._row : 0);
   return { status: 'success', data: normalizeAssignmentRow_(rowObj) };
+}
+
+function apiAdminDeleteAssignments_(requestData) {
+  const admin = requireAssignmentAdminFromRequest_(requestData || {});
+  if (!admin.ok) return { status: 'error', message: admin.error };
+  const raw = requestData.assignmentIds || requestData.ids || requestData.Assignment_IDs || [];
+  const ids = (Array.isArray(raw) ? raw : [raw]).map(function (id) {
+    return String(id || '').trim();
+  }).filter(Boolean);
+  if (!ids.length) return { status: 'error', message: '削除する課題を選んでください' };
+  const idSet = {};
+  ids.forEach(function (id) { idSet[id] = true; });
+  const ss = openAppSpreadsheet_();
+  const asgSheet = ss.getSheetByName('assignments');
+  const subSheet = ss.getSheetByName('assignment_submissions');
+  let deletedAssignments = 0;
+  let deletedSubmissions = 0;
+  if (asgSheet) {
+    const rows = sheetRowsToObjects_(asgSheet);
+    const rowNums = [];
+    rows.forEach(function (r) {
+      if (idSet[String(r.Assignment_ID || '')]) rowNums.push(r._row);
+    });
+    rowNums.sort(function (a, b) { return b - a; });
+    rowNums.forEach(function (n) { asgSheet.deleteRow(n); });
+    deletedAssignments = rowNums.length;
+  }
+  if (subSheet && deletedAssignments) {
+    const subs = sheetRowsToObjects_(subSheet);
+    const subRows = [];
+    subs.forEach(function (r) {
+      if (idSet[String(r.Assignment_ID || '')]) subRows.push(r._row);
+    });
+    subRows.sort(function (a, b) { return b - a; });
+    subRows.forEach(function (n) { subSheet.deleteRow(n); });
+    deletedSubmissions = subRows.length;
+  }
+  if (!deletedAssignments) {
+    return { status: 'error', message: '該当する課題が見つかりませんでした' };
+  }
+  return {
+    status: 'success',
+    data: { deletedAssignments: deletedAssignments, deletedSubmissions: deletedSubmissions }
+  };
 }
 
 function formatSheetValueForClient_(value) {
@@ -3166,7 +3212,18 @@ function apiAdminListAssignments() {
   return apiAdminListAssignments_({});
 }
 function apiAdminUpsertAssignment(assignment) {
-  return apiAdminUpsertAssignment_({ assignment: assignment });
+  try {
+    return apiAdminUpsertAssignment_({ assignment: assignment });
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+function apiAdminDeleteAssignments(assignmentIds) {
+  try {
+    return apiAdminDeleteAssignments_({ assignmentIds: assignmentIds || [] });
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
 }
 function apiAdminListSubmissions(assignmentId, limit) {
   try {

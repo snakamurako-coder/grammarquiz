@@ -495,12 +495,29 @@ const AssignmentSectionBuilder = (function () {
 
   function addSection() {
     if (sections.length >= 4) return;
-    var sec = defaultGrammar();
-    var subs = grammarSubjects();
-    if (subs.length) { sec.subject = subs[0]; sec.units = (grammarCatalog[sec.subject] || []).slice(0, 1); }
+    document.querySelectorAll('.asg-section-card').forEach(function (card) {
+      readSectionFromCard(card, parseInt(card.getAttribute('data-sec-idx'), 10));
+    });
+    var sec;
+    if (sections.length >= 1) {
+      var copy = window.confirm(
+        'セクション1と同じ設定で新しいセクションを追加しますか？\n\n'
+        + '「OK」：セクション1の設定をコピー\n'
+        + '「キャンセル」：空の新規セクションを追加'
+      );
+      if (copy) {
+        try { sec = JSON.parse(JSON.stringify(sections[0])); }
+        catch (e) { sec = null; }
+      }
+    }
+    if (!sec) {
+      sec = defaultGrammar();
+      var subs = grammarSubjects();
+      if (subs.length) { sec.subject = subs[0]; sec.units = (grammarCatalog[sec.subject] || []).slice(0, 1); }
+    }
     sections.push(sec);
     renderAll();
-    loadDivisionsFor(sections.length - 1);
+    if (sec.mode === 'grammar' && sec.subject) loadDivisionsFor(sections.length - 1);
   }
 
   function bindEvents() {
