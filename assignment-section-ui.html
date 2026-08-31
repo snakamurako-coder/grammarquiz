@@ -58,7 +58,7 @@ const AssignmentSectionBuilder = (function () {
     }
     dirs.forEach(function (d) {
       grains.forEach(function (g) {
-        if (response === 'typing') {
+        if (response === 'typing' || response === 'speech') {
           if (d === 'jaen') { if (g === 'WD') add('W1'); if (g === 'PH') add('W2'); if (g === 'EX') add('W3'); }
           else { if (g === 'WD') add('W4'); if (g === 'PH') add('W5'); if (g === 'EX') add('W6'); }
           return;
@@ -243,7 +243,8 @@ const AssignmentSectionBuilder = (function () {
       + '<div class="form-group"><label>② 語 / 句 / 例文</label><div class="check-list">'
       + '<label class="check-item"><input type="checkbox" data-axis="grain" value="WD"' + grainCh('WD') + '> 語to語</label>'
       + '<label class="check-item"><input type="checkbox" data-axis="grain" value="PH"' + grainCh('PH') + '> 句to句</label>'
-      + '<label class="check-item"><input type="checkbox" data-axis="grain" value="EX"' + grainCh('EX') + '> 例文to例文</label></div></div>'
+      + '<label class="check-item"><input type="checkbox" data-axis="grain" value="EX"' + grainCh('EX') + '> 例文to例文</label></div>'
+      + '<p class="filter-axis-hint">句・例文はチャンク／例文に ( ) がある語だけ出題できます。小区分「単語」やチャンク未登録の大区分（例: FinalStage1）では句にできません。</p></div>'
       + '<div class="form-group"><label>③ 解答方法</label><div class="check-list">'
       + '<label class="check-item"><input type="radio" name="' + pid(idx, 'vresp') + '" data-field="response" value="choice"' + (sec.response === 'choice' ? ' checked' : '') + '> 選択</label>'
       + '<label class="check-item"><input type="radio" name="' + pid(idx, 'vresp') + '" data-field="response" value="typing"' + (sec.response === 'typing' ? ' checked' : '') + '> タイピング</label></div></div>'

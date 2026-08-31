@@ -680,9 +680,64 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
   font-size: 0.92em;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  align-items: stretch;
+  gap: 8px;
 }
+.asg-session-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.asg-session-title { flex: 1; min-width: 0; line-height: 1.35; }
+#assignment-session-banner .assignment-timer {
+  margin: 0;
+  flex-shrink: 0;
+  font-size: 1.05em;
+  padding: 6px 14px;
+  letter-spacing: 0.04em;
+}
+.asg-section-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.asg-section-tab {
+  min-height: 34px;
+  padding: 6px 12px;
+  font-size: 0.82em;
+  font-weight: bold;
+  border: 1px solid #90caf9;
+  background: #fff;
+  color: #1565c0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.asg-section-tab.is-active {
+  background: #1565c0;
+  color: #fff;
+  border-color: #1565c0;
+}
+.asg-section-tab.is-done:not(.is-active) {
+  background: #e8f5e9;
+  border-color: #a5d6a7;
+  color: #2e7d32;
+}
+.pool-section-nav {
+  padding: 8px 12px;
+  background: #eef2ff;
+  border-bottom: 1px solid #c7d2fe;
+  flex-shrink: 0;
+}
+.pool-header-timer {
+  margin: 0;
+  background: #fff;
+  color: #b71c1c;
+  font-size: 15px;
+  min-width: 6.5em;
+  text-align: center;
+}
+.pool-header-timer.urgent { background: #ffcdd2; }
 .asg-preview-warn {
   color: #c62828;
   font-size: 0.9em;
@@ -702,8 +757,47 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
 .asg-status-in-progress { background: #fff8e1; color: #f57f17; }
 .asg-status-ended { background: #e8f5e9; color: #2e7d32; }
 .asg-status-expired { background: #212121; color: #fff; }
-.asg-status-scheduled { background: #e3f2fd; color: #1565c0; }
+.asg-status-timer {
+  background: #ffebee;
+  color: #b71c1c;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+.asg-status-sub {
+  font-size: 0.75em;
+  color: #78909c;
+  font-weight: bold;
+}
 .asg-period-meta { font-size: 0.82em; color: #546e7a; margin-top: 2px; }
+.asg-settings-summary {
+  font-size: 0.8em;
+  color: #455a64;
+  margin-top: 6px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.asg-settings-details {
+  margin-top: 8px;
+  font-size: 0.82em;
+  color: #455a64;
+  background: #fafafa;
+  border: 1px solid #eceff1;
+  border-radius: 8px;
+  padding: 6px 10px 8px;
+}
+.asg-settings-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #546e7a;
+  list-style-position: outside;
+}
+.asg-settings-body {
+  margin: 8px 0 2px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
 .asg-list-item { align-items: flex-start; }
 .asg-list-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .asg-refresh-warn {
@@ -824,6 +918,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
 .key:active { background-color: #adb5bd; }
 .key.wide { max-width: 74px; font-size: 0.9em; background-color: #adb5bd; }
 .key.del { max-width: 52px; font-size: 0.78em; font-weight: bold; background-color: #eceff1; }
+.key.hide-kb { max-width: 52px; font-size: 0.72em; font-weight: bold; background-color: #cfd8dc; color: #37474f; }
 .key.space { max-width: 150px; }
 .key.enter { max-width: 110px; background-color: var(--c-warn); color: white; font-weight: bold; }
 .key.activated { background-color: #333 !important; color: #fff; }
@@ -1487,7 +1582,14 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
 
   <!-- Game Screen -->
   <div id="game-screen" style="display: none;">
-    <div id="assignment-session-banner" hidden></div>
+    <div id="assignment-session-banner" hidden>
+      <div class="asg-session-top">
+        <div class="asg-session-title" id="assignment-session-title"></div>
+        <span class="assignment-timer asg-status asg-status-timer" id="assignment-timer" hidden></span>
+      </div>
+      <div class="asg-preview-warn" id="assignment-preview-warn" hidden>取り組み期間外のため、この取り組みは成績・進捗にカウントされません。</div>
+      <div id="assignment-section-nav" class="asg-section-nav" hidden></div>
+    </div>
     <div class="question-box">
       <div class="question-instruction-wrap">
         <div class="question-instruction-row">
@@ -1498,7 +1600,6 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
       </div>
       <div>
         <div class="question-progress" id="question-progress" hidden>問 1 / 1</div>
-        <span class="assignment-timer" id="assignment-timer" hidden></span>
       </div>
       <div class="question-ja" id="question-ja"></div>
     </div>
@@ -1628,9 +1729,10 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
     <div id="vocab-pool-match-ui" style="display:none;">
       <div class="pool-phone-frame">
         <div class="pool-phone-header">
-          <span>単語マッチング</span>
+          <span class="assignment-timer pool-header-timer" id="pool-header-status">制限なし</span>
           <button type="button" class="pool-header-btn" id="pool-toggle-view-btn">一覧で確認</button>
         </div>
+        <div id="pool-section-nav" class="asg-section-nav pool-section-nav" hidden></div>
         <div class="pool-quiz-container" id="pool-quiz-mode">
           <div class="pool-q-nav">
             <button type="button" class="pool-nav-arrow" id="pool-prev-btn">←</button>
@@ -4060,14 +4162,14 @@ const KeyboardModule = (() => {
       ['!', '"', '&', "'", '(', ')', '-', '¥', 'Back'],
       ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
       ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
-      ['z', 'x', 'c', 'v', 'b', 'n', 'm', 'Back'],
+      ['Hide', 'z', 'x', 'c', 'v', 'b', 'n', 'm', 'Back'],
       ['Shift', 'Space', ',', '.', 'Enter']
     ],
     shifted: [
       ['!', '"', '&', "'", '(', ')', '-', '¥', 'Back'],
       ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
       ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
-      ['Z', 'X', 'C', 'V', 'B', 'N', 'M', 'Back'],
+      ['Hide', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', 'Back'],
       ['Shift', 'Space', ',', '.', 'Enter']
     ]
   };
@@ -4115,6 +4217,7 @@ const KeyboardModule = (() => {
   function keyLabel(key) {
     if (key === 'Back') return 'Del';
     if (key === 'Space') return '空白';
+    if (key === 'Hide') return '格納';
     return key;
   }
 
@@ -4163,6 +4266,11 @@ const KeyboardModule = (() => {
           if (shiftState === 1) keyBtn.classList.add('activated');
         }
         if (key === 'Back') keyBtn.classList.add('del');
+        if (key === 'Hide') {
+          keyBtn.classList.add('hide-kb');
+          keyBtn.setAttribute('aria-label', 'ソフトウェアキーボードを格納');
+          keyBtn.title = 'ソフトウェアキーボードを格納';
+        }
         if (key === 'Space') keyBtn.classList.add('space');
         if (key === 'Enter') keyBtn.classList.add('enter');
 
@@ -4195,6 +4303,9 @@ const KeyboardModule = (() => {
     if (key === 'Shift') {
       handleShiftLogic();
       relayout = true;
+    } else if (key === 'Hide') {
+      hide();
+      return;
     } else if (key === 'Back') {
       deleteBackward();
     } else if (key === 'Space') {
@@ -5459,6 +5570,31 @@ function vocabResolveFormats(axes) {
   return keys;
 }
 
+function vocabFormatsFromAssignmentSection(sec) {
+  if (!sec) return [];
+  const axes = sec.axes && typeof sec.axes === 'object' ? sec.axes : {};
+  const resolved = vocabResolveFormats({
+    directions: axes.directions || sec.directions || [],
+    grains: axes.grains || sec.grains || [],
+    response: axes.response || sec.response || 'choice',
+    choiceStyle: axes.choiceStyle || sec.choiceStyle || 'dedicated'
+  });
+  if (resolved.length) return resolved.slice(0, 4);
+  return (Array.isArray(sec.formats) ? sec.formats : []).slice(0, 4);
+}
+
+function vocabHomeworkShortageMessage_(formatKey, need, got, rangeCount) {
+  const label = (VOCAB_FORMAT_MAP[formatKey] || {}).label || formatKey;
+  const grain = VOCAB_FORMAT_PRIMARY[formatKey];
+  let hint = '';
+  if (grain === 'PH') {
+    hint = '句形式はチャンクに ( ) がある語が必要です。小区分「単語」やチャンク未登録の大区分では出題できません。語to語にするか、小区分の絞り込みを外してください。';
+  } else if (grain === 'EX') {
+    hint = '例文形式は例文に ( ) がある語が必要です。語または句に変えるか、絞り込みを見直してください。';
+  }
+  return label + ' に使える語が不足しています（必要 ' + need + ' / 確保 ' + got + ' / 範囲内 ' + rangeCount + '語）。' + hint;
+}
+
 const VocabPoolSession = {
   used: {},
   reset: function () { this.used = {}; },
@@ -5509,6 +5645,8 @@ const VocabPoolMatchModule = (() => {
   let bound = false;
   let listIndices_ = null;
   let onComplete_ = null;
+  let segmentKey_ = '';
+  const parked_ = {};
 
   function lemmaKey_(text) {
     return String(text || '').trim().toLowerCase();
@@ -5747,16 +5885,26 @@ const VocabPoolMatchModule = (() => {
     bind_();
     listIndices_ = options.listIndices || null;
     onComplete_ = typeof options.onComplete === 'function' ? options.onComplete : null;
+    segmentKey_ = options.segmentKey || '';
     questions = (qs || []).map(function (q, i) {
       const copy = Object.assign({}, q);
       copy.id = i + 1;
       return copy;
     });
     poolOptions = collectPool_(questions);
-    userAnswers = {};
-    currentIndex = 0;
+    const parked = segmentKey_ && parked_[segmentKey_];
+    if (parked) {
+      userAnswers = Object.assign({}, parked.userAnswers);
+      currentIndex = Math.min(parked.currentIndex || 0, Math.max(0, questions.length - 1));
+      isSummaryView = !!parked.isSummaryView;
+      if (window.VocabPoolSession) VocabPoolSession.used = Object.assign({}, parked.used || {});
+    } else {
+      userAnswers = {};
+      currentIndex = 0;
+      isSummaryView = false;
+      if (window.VocabPoolSession) VocabPoolSession.reset();
+    }
     currentFilter = 'all';
-    isSummaryView = false;
     document.querySelectorAll('.pool-tab-btn').forEach(function (btn) { btn.classList.remove('active'); });
     const allTab = document.getElementById('pool-tab-all');
     if (allTab) allTab.classList.add('active');
@@ -5770,12 +5918,39 @@ const VocabPoolMatchModule = (() => {
     render();
   }
 
-  function stop() {
+  function hideUi_() {
     document.body.classList.remove('pool-match-active');
     const root = document.getElementById('vocab-pool-match-ui');
     if (root) root.style.display = 'none';
+  }
+
+  function park() {
+    if (segmentKey_) {
+      parked_[segmentKey_] = {
+        userAnswers: Object.assign({}, userAnswers),
+        currentIndex: currentIndex,
+        isSummaryView: isSummaryView,
+        used: window.VocabPoolSession ? Object.assign({}, VocabPoolSession.used) : {}
+      };
+    }
+    hideUi_();
+  }
+
+  function stop(opts) {
+    opts = opts || {};
+    if (opts.park) {
+      park();
+      return;
+    }
+    hideUi_();
+    if (segmentKey_) delete parked_[segmentKey_];
     listIndices_ = null;
     onComplete_ = null;
+    segmentKey_ = '';
+  }
+
+  function clearParked() {
+    Object.keys(parked_).forEach(function (k) { delete parked_[k]; });
   }
 
   function isActive() {
@@ -5783,14 +5958,13 @@ const VocabPoolMatchModule = (() => {
     return !!(root && root.style.display === 'block');
   }
 
-  return { start, stop, isActive };
+  return { start, stop, park, isActive, clearParked };
 })();
 window.VocabPoolMatchModule = VocabPoolMatchModule;
 
 /** 選択肢プール専用UIを起動。起動したら true */
 function beginVocabPoolGameSession_(questions, options) {
   options = options || {};
-  if (typeof VocabPoolSession !== 'undefined') VocabPoolSession.reset();
   if (!vocabSessionIsPoolMatch_(questions)) {
     if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
     return false;
@@ -5832,7 +6006,7 @@ const GameSessionPlay = (() => {
     while (i < questions.length) {
       const poolBlock = isPoolBlockAt_(questions, i);
       if (poolBlock) {
-        out.push({ type: 'pool', indices: poolBlock.indices, questions: poolBlock.questions });
+        out.push({ type: 'pool', indices: poolBlock.indices, questions: poolBlock.questions, completed: false });
         i = poolBlock.indices[poolBlock.indices.length - 1] + 1;
         continue;
       }
@@ -5846,33 +6020,150 @@ const GameSessionPlay = (() => {
         indices.push(i);
         j = i + 1;
       }
-      out.push({ type: 'linear', indices: indices });
+      out.push({ type: 'linear', indices: indices, completed: false });
       i = j;
     }
     return out;
   }
 
-  function playCurrent_() {
-    if (segmentIndex >= segments.length) {
+  function assignmentNavOn_() {
+    return currentAppMode === 'assignment-quiz' || currentAppMode === 'assignment-homework';
+  }
+
+  function isGlobalAnswered_(globalIdx) {
+    return (sessionAnswerLog || []).some(function (item) { return item.index === globalIdx + 1; });
+  }
+
+  function isSegmentComplete_(seg) {
+    if (!seg) return true;
+    if (seg.completed) return true;
+    if (seg.type === 'linear') {
+      return seg.indices.every(function (idx) { return isGlobalAnswered_(idx); });
+    }
+    return false;
+  }
+
+  function firstIncompleteSegment_() {
+    for (let i = 0; i < segments.length; i++) {
+      if (!isSegmentComplete_(segments[i])) return i;
+    }
+    return -1;
+  }
+
+  function firstOpenLinearPos_(seg) {
+    if (!seg || seg.type !== 'linear') return 0;
+    for (let p = 0; p < seg.indices.length; p++) {
+      if (!isGlobalAnswered_(seg.indices[p])) return p;
+    }
+    return -1;
+  }
+
+  function sectionLabel_(seg, i) {
+    const q = currentQuestionDataList[seg.indices[0]];
+    const n = (q && q._assignmentSection != null) ? (q._assignmentSection + 1) : (i + 1);
+    return 'セクション' + n;
+  }
+
+  function renderSectionNav_() {
+    const show = assignmentNavOn_() && segments.length > 1;
+    function fill(container) {
+      if (!container) return;
+      if (!show) {
+        container.hidden = true;
+        container.innerHTML = '';
+        return;
+      }
+      container.hidden = false;
+      container.innerHTML = '';
+      segments.forEach(function (seg, i) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'asg-section-tab'
+          + (i === segmentIndex ? ' is-active' : '')
+          + (isSegmentComplete_(seg) ? ' is-done' : '');
+        btn.textContent = sectionLabel_(seg, i) + (isSegmentComplete_(seg) ? ' ✓' : '');
+        btn.addEventListener('click', function () { jumpToSegment(i); });
+        container.appendChild(btn);
+      });
+    }
+    fill(document.getElementById('assignment-section-nav'));
+    fill(document.getElementById('pool-section-nav'));
+  }
+
+  function parkCurrentIfNeeded_() {
+    if (window.VocabPoolMatchModule && VocabPoolMatchModule.isActive()) {
+      VocabPoolMatchModule.stop({ park: true });
+    }
+    if (window.KeyboardModule) KeyboardModule.deactivate();
+  }
+
+  function goAfterSegmentDone_() {
+    const seg = segments[segmentIndex];
+    if (seg) seg.completed = true;
+    renderSectionNav_();
+    const next = firstIncompleteSegment_();
+    if (next < 0) {
       active = false;
       showResultScreen();
       return;
     }
+    if (typeof showToast_ === 'function') {
+      showToast_('このセクションは完了です。まだ未完了のセクションがあります。');
+    }
+    jumpToSegment(next);
+  }
+
+  function playCurrent_() {
+    if (!active) return;
+    const incomplete = firstIncompleteSegment_();
+    if (incomplete < 0) {
+      active = false;
+      showResultScreen();
+      return;
+    }
+    if (isSegmentComplete_(segments[segmentIndex])) {
+      segmentIndex = incomplete;
+      linearPos = firstOpenLinearPos_(segments[segmentIndex]);
+    }
     const seg = segments[segmentIndex];
+    renderSectionNav_();
     if (seg.type === 'pool') {
       beginVocabPoolGameSession_(seg.questions, {
         listIndices: seg.indices,
+        segmentKey: 'seg-' + segmentIndex,
         onComplete: function () {
-          segmentIndex++;
-          linearPos = 0;
-          playCurrent_();
+          goAfterSegmentDone_();
         }
       });
+      renderSectionNav_();
       return;
     }
-    if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
+    if (window.VocabPoolMatchModule && VocabPoolMatchModule.isActive()) {
+      VocabPoolMatchModule.stop({ park: true });
+    }
+    if (linearPos < 0) linearPos = firstOpenLinearPos_(seg);
+    if (linearPos < 0) {
+      goAfterSegmentDone_();
+      return;
+    }
     currentQuestionIndex = seg.indices[linearPos];
     loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
+  }
+
+  function jumpToSegment(i) {
+    if (!active || i < 0 || i >= segments.length) return;
+    if (isSegmentComplete_(segments[i])) {
+      if (typeof showToast_ === 'function') showToast_('このセクションは回答済みです。');
+      return;
+    }
+    if (i === segmentIndex) {
+      if (segments[i].type === 'pool' && window.VocabPoolMatchModule && VocabPoolMatchModule.isActive()) return;
+      if (segments[i].type === 'linear') return;
+    }
+    parkCurrentIfNeeded_();
+    segmentIndex = i;
+    linearPos = firstOpenLinearPos_(segments[i]);
+    playCurrent_();
   }
 
   function start(questions) {
@@ -5890,8 +6181,12 @@ const GameSessionPlay = (() => {
     segmentIndex = 0;
     linearPos = 0;
     active = false;
-    if (window.VocabPoolMatchModule) VocabPoolMatchModule.stop();
+    if (window.VocabPoolMatchModule) {
+      if (VocabPoolMatchModule.clearParked) VocabPoolMatchModule.clearParked();
+      VocabPoolMatchModule.stop();
+    }
     if (window.KeyboardModule) KeyboardModule.deactivate();
+    renderSectionNav_();
   }
 
   function isActive() {
@@ -5903,18 +6198,19 @@ const GameSessionPlay = (() => {
     const seg = segments[segmentIndex];
     if (!seg || seg.type !== 'linear') return false;
     linearPos++;
+    while (linearPos < seg.indices.length && isGlobalAnswered_(seg.indices[linearPos])) {
+      linearPos++;
+    }
     if (linearPos < seg.indices.length) {
       currentQuestionIndex = seg.indices[linearPos];
       loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
       return true;
     }
-    segmentIndex++;
-    linearPos = 0;
-    playCurrent_();
+    goAfterSegmentDone_();
     return true;
   }
 
-  return { start, reset, isActive, advanceLinear };
+  return { start, reset, isActive, advanceLinear, jumpToSegment };
 })();
 window.GameSessionPlay = GameSessionPlay;
 
@@ -6972,25 +7268,18 @@ const VocabQuizGenerator = (() => {
   function buildHomeworkQuestions(words, pool, bookPool, options, formats) {
     if (!formats.length) throw new Error('出題形式を1つ以上選択してください。');
     const perSection = options.homeworkPerSection || 5;
-    const sourcePools = vocabBuildSourcePools(words);
     const usedKeys = options.usedKeys || new Set();
     const questions = [];
     let qIdx = 0;
+    const rangeCount = (words || []).length;
 
     formats.forEach(function (formatKey) {
-      const primary = VOCAB_FORMAT_PRIMARY[formatKey] || 'WD';
-      const fb1 = VOCAB_SOURCE_FALLBACK[primary];
-      const fb2 = VOCAB_SOURCE_FALLBACK[fb1];
-      const allocated = vocabAllocWordsUnique(
-        perSection,
-        sourcePools[primary],
-        [sourcePools[fb1], sourcePools[fb2]],
-        usedKeys
-      );
+      const eligible = (words || []).filter(function (w) { return vocabFormatAvailable(w, formatKey); });
+      const allocated = vocabAllocWordsUnique(perSection, eligible, [], usedKeys);
       if (allocated.length < perSection) {
-        const label = (VOCAB_FORMAT_MAP[formatKey] || {}).label || formatKey;
-        throw new Error(label + ' の語数が不足しています（必要 ' + perSection + ' / 確保 ' + allocated.length + '）。範囲や形式を見直してください。');
+        throw new Error(vocabHomeworkShortageMessage_(formatKey, perSection, allocated.length, rangeCount));
       }
+      const before = questions.length;
       if (vocabIsPoolFormat(formatKey)) {
         const dummyCount = options.poolDummyCount != null ? options.poolDummyCount : 2;
         let sharedCards;
@@ -7013,6 +7302,9 @@ const VocabQuizGenerator = (() => {
           const q = buildQuestionForFormat(wordObj, formatKey, pool, bookPool, options, qIdx++, null, extra);
           if (q) questions.push(q);
         });
+      }
+      if (questions.length - before < allocated.length) {
+        throw new Error(vocabHomeworkShortageMessage_(formatKey, allocated.length, questions.length - before, rangeCount));
       }
     });
     return questions;

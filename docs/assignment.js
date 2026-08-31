@@ -236,18 +236,27 @@ const AssignmentModule = (function () {
     const banner = document.getElementById('assignment-session-banner');
     if (!banner) return;
     banner.hidden = false;
-    banner.innerHTML = '';
-    const title = document.createElement('div');
-    title.textContent = (a.Kind === 'quiz' ? '【小テスト】' : '【宿題】') + a.Title
-      + (opts.reviewWrong ? '（ニガテ復習）' : '')
-      + (opts.preview ? '（予行演習）' : '');
-    banner.appendChild(title);
-    if (opts.preview) {
-      const warn = document.createElement('div');
-      warn.className = 'asg-preview-warn';
-      warn.textContent = '取り組み期間外のため、この取り組みは成績・進捗にカウントされません。';
-      banner.appendChild(warn);
+    const title = document.getElementById('assignment-session-title');
+    if (title) {
+      title.textContent = (a.Kind === 'quiz' ? '【小テスト】' : '【宿題】') + a.Title
+        + (opts.reviewWrong ? '（ニガテ復習）' : '')
+        + (opts.preview ? '（予行演習）' : '');
     }
+    const warn = document.getElementById('assignment-preview-warn');
+    if (warn) warn.hidden = !opts.preview;
+  }
+
+  function timerEls_() {
+    return [document.getElementById('assignment-timer'), document.getElementById('pool-header-status')]
+      .filter(Boolean);
+  }
+
+  function paintTimer_(text, urgent, hide) {
+    timerEls_().forEach(function (el) {
+      el.hidden = !!hide;
+      el.textContent = text;
+      el.classList.toggle('urgent', !!urgent);
+    });
   }
 
   function clearTimer_() {
@@ -255,24 +264,23 @@ const AssignmentModule = (function () {
       clearInterval(timerId_);
       timerId_ = null;
     }
-    const el = document.getElementById('assignment-timer');
-    if (el) {
-      el.hidden = true;
-      el.textContent = '';
-    }
+    paintTimer_('', false, true);
   }
 
   function startTimer_(deadlineMs) {
     clearTimer_();
-    const el = document.getElementById('assignment-timer');
-    if (!el || !deadlineMs) return;
-    el.hidden = false;
+    if (!deadlineMs) {
+      paintTimer_('制限なし', false, false);
+      return;
+    }
     function tick() {
       const left = Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
-      el.textContent = '残り ' + formatLimit_(left);
-      el.className = 'assignment-timer' + (left <= 30 ? ' urgent' : '');
+      paintTimer_('残り ' + formatLimit_(left), left <= 30, false);
       if (left <= 0) {
-        clearTimer_();
+        if (timerId_) {
+          clearInterval(timerId_);
+          timerId_ = null;
+        }
         forceSubmitActiveSession_().catch(function (e) {
           console.warn('時間切れ強制提出:', e.message || e);
         });
@@ -352,6 +360,143 @@ const AssignmentModule = (function () {
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  const VOCAB_FORMAT_LABELS_ = {
+    W1: '和英・語・記述', W2: '和英・句・記述', W3: '和英・例文・記述',
+    W4: '英和・語・記述', W5: '英和・句・記述', W6: '英和・例文・記述',
+    'vocab-enja': '英和・語・選択', 'vocab-jaen': '和英・語・選択',
+    C1: '和英・句・選択', C2: '和英・例文・選択',
+    PPW: '和英・語・プール', PPH: '和英・句・プール', PEX: '和英・例文・プール',
+    'enja-ph': '英和・句・選択', 'enja-ex': '英和・例文・選択',
+    'enja-wd-pool': '英和・語・プール', 'enja-ph-pool': '英和・句・プール', 'enja-ex-pool': '英和・例文・プール'
+  };
+  const GRAMMAR_FORMAT_LABELS_ = {
+    A: '和文英訳', B: '空所補充【長い】', E: '並び替え',
+    C: '並び替え', D: '並び替え',
+    F: '語句補完【短い記述】', G: '語句補完【選択方式】', H: '正誤判断'
+  };
+
+  function joinSettingList_(arr, emptyLabel) {
+    if (!arr || !arr.length) return emptyLabel || '指定なし';
+    return arr.join('、');
+  }
+
+  function vocabFormatLabel_(key) {
+    return VOCAB_FORMAT_LABELS_[key] || key;
+  }
+
+  function grammarFormatLabel_(key) {
+    return GRAMMAR_FORMAT_LABELS_[key] ? (key + ' ' + GRAMMAR_FORMAT_LABELS_[key]) : key;
+  }
+
+  function dummyScopeLabel_(scope) {
+    const map = {
+      sho: '同一小区分', chu: '同一中区分', dai: '同一大区分',
+      sheet: '同一シート（教材）', book: '同一ブック全体'
+    };
+    return map[scope] || scope || '（未記録）';
+  }
+
+  function dummyMethodLabel_(method) {
+    const map = {
+      none: '指定なし', random: 'ランダム', samePos: '同一品詞',
+      diffPos: '相違品詞', sameAffix: '同一頭文字・接辞'
+    };
+    return map[method] || method || '（未記録）';
+  }
+
+  function formatOneAssignmentSection_(sec, idx) {
+    const n = idx + 1;
+    const mode = String((sec && sec.mode) || '').toLowerCase();
+    const lines = [];
+    const summaryParts = [];
+    const ppq = sec.pointsPerQuestion != null ? sec.pointsPerQuestion : 1;
+    const qc = sec.questionCount === 'all' ? 'すべて' : (String(sec.questionCount != null ? sec.questionCount : '') + '問');
+
+    if (mode === 'grammar') {
+      lines.push('セクション' + n + '（文法・語法）');
+      lines.push('学年・区分: ' + (sec.subject || '（不明）'));
+      lines.push('教材: ' + joinSettingList_(sec.units, '（未選択）'));
+      const f = sec.filters || {};
+      lines.push('絞り込み 大単元: ' + joinSettingList_(f.dai));
+      lines.push('絞り込み 小単元: ' + joinSettingList_(f.sho));
+      lines.push('絞り込み ターゲット文法領域: ' + joinSettingList_(f.area));
+      const fmts = (sec.formats || []).map(grammarFormatLabel_);
+      lines.push('出題形式: ' + joinSettingList_(fmts, '（未記録）'));
+      if ((sec.formats || []).indexOf('G') >= 0) {
+        lines.push('形式G 選択肢数: ' + (sec.choiceCount || '?')
+          + ' / 「正答はない」' + (sec.includeNone !== false ? 'あり' : 'なし')
+          + ' / 「わからない」' + (sec.includeUnknown !== false ? 'あり' : 'なし'));
+      }
+      lines.push('出題数: ' + qc + ' / 1問 ' + ppq + '点');
+      summaryParts.push('文法 ' + joinSettingList_(fmts, '形式未記録') + ' / ' + qc + ' × ' + ppq + '点');
+    } else if (mode === 'vocab') {
+      const axes = sec.axes || {};
+      const dirMap = { jaen: '和英', enja: '英和' };
+      const grainMap = { WD: '語to語', PH: '句to句', EX: '例文to例文' };
+      const respMap = { choice: '選択', typing: 'タイピング', speech: '音声入力' };
+      const styleMap = { dedicated: '各問専用選択肢', pool: '選択肢プール' };
+      const dirs = axes.directions || sec.directions || [];
+      const grains = axes.grains || sec.grains || [];
+      const response = axes.response || sec.response || 'choice';
+      const choiceStyle = axes.choiceStyle || sec.choiceStyle || 'dedicated';
+      const formats = (typeof vocabFormatsFromAssignmentSection === 'function'
+        ? vocabFormatsFromAssignmentSection(sec)
+        : (sec.formats || []));
+      const formatLabels = formats.map(vocabFormatLabel_);
+      const isChoice = response === 'choice';
+      const isPool = choiceStyle === 'pool';
+
+      lines.push('セクション' + n + '（単語）');
+      lines.push('教材種別: ' + (sec.bookType === 'user' ? 'マイ単語帳' : 'プリセット'));
+      lines.push('ブック: ' + (sec.bookName || '（不明）'));
+      lines.push('シート: ' + (sec.sheetName || '（不明）'));
+      const f = sec.filters || {};
+      lines.push('絞り込み 大区分: ' + joinSettingList_(f.dai));
+      lines.push('絞り込み 中区分: ' + joinSettingList_(f.chu));
+      lines.push('絞り込み 小区分: ' + joinSettingList_(f.sho));
+      lines.push('和英/英和: ' + joinSettingList_(dirs.map(function (d) { return dirMap[d] || d; }), '（未記録）'));
+      lines.push('語/句/例文: ' + joinSettingList_(grains.map(function (g) { return grainMap[g] || g; }), '（未記録）'));
+      lines.push('解答方法: ' + (respMap[response] || response));
+      if (isChoice) {
+        lines.push('選択の出し方: ' + (styleMap[choiceStyle] || choiceStyle));
+        if (isPool) {
+          lines.push('プール用ダミー数: ' + (sec.poolDummyCount != null ? sec.poolDummyCount : '?'));
+        } else {
+          lines.push('選択肢数: ' + (sec.choiceCount != null ? sec.choiceCount : '?'));
+          lines.push('特殊選択肢: 「わからない」' + (sec.includeUnknown ? 'あり' : 'なし')
+            + ' / 「正答はない」' + (sec.includeNone ? 'あり' : 'なし'));
+        }
+        lines.push('ダミー範囲: ' + dummyScopeLabel_(sec.dummyScope));
+        lines.push('ダミー方式: ' + dummyMethodLabel_(sec.dummyMethod));
+        if (sec.dummyMethod === 'sameAffix') {
+          lines.push('接辞: ' + (sec.affixType === 'suffix' ? '語末' : '先頭') + ' ' + (sec.affixLen || 2) + '文字');
+        }
+      }
+      lines.push('出題形式: ' + joinSettingList_(formatLabels, '（未記録）'));
+      lines.push('出題数: ' + qc + ' / 1問 ' + ppq + '点');
+      summaryParts.push((sec.bookName || '単語') + ' / ' + joinSettingList_(formatLabels, '形式未記録') + ' / ' + qc + ' × ' + ppq + '点');
+    } else {
+      lines.push('セクション' + n + '（' + (mode || '不明') + '）');
+      summaryParts.push('未対応の形式');
+    }
+    return { lines: lines, summary: 'S' + n + ': ' + summaryParts.join(' ') };
+  }
+
+  function formatAssignmentSettingsView_(a) {
+    const sections = coerceSections_(a);
+    if (!sections.length) {
+      return { summary: '課題の出題設定が空です。管理者に再保存を依頼してください。', detail: '' };
+    }
+    const summaries = [];
+    const detailBlocks = [];
+    sections.forEach(function (sec, i) {
+      const one = formatOneAssignmentSection_(sec, i);
+      summaries.push(one.summary);
+      detailBlocks.push(one.lines.join('\n'));
+    });
+    return { summary: summaries.join('\n'), detail: detailBlocks.join('\n\n') };
+  }
+
   function renderList_(rows) {
     const wrap = document.getElementById('assignment-list');
     if (!wrap) return;
@@ -393,19 +538,27 @@ const AssignmentModule = (function () {
       if (periodText) {
         html += '<div class="asg-period-meta">' + escapeHtml_(periodText) + '</div>';
       }
-      html += '<div class="log-meta">' + escapeHtml_(limit);
+      html += '<div class="log-meta">';
       if (a.Kind === 'quiz') {
-        html += ' / クリア ' + clearN + '／' + required + ' 回（ノルマ）';
+        html += 'クリア ' + clearN + '／' + required + ' 回（ノルマ）';
         if (serverReported) html += ' / サーバー報告済';
         else if (clearN >= required) html += ' / <span style="color:#c62828;">未報告の可能性</span>';
       } else {
-        html += ' / ローカル消化 ' + doneN + '問';
+        html += 'ローカル消化 ' + doneN + '問';
       }
       html += '</div>';
       html += '<div class="log-settings">合格ライン: ' + escapeHtml_(a.Pass_Score) + (a.Pass_Mode === 'points' ? '点' : '%');
       if (a.Kind === 'quiz') html += ' / 挑戦回数無制限';
       if (a.Weakness_Review) html += ' / ニガテ復習あり';
       html += '</div>';
+      const settingsView = formatAssignmentSettingsView_(a);
+      html += '<div class="asg-settings-summary">' + escapeHtml_(settingsView.summary) + '</div>';
+      if (settingsView.detail) {
+        html += '<details class="asg-settings-details">';
+        html += '<summary>課題の設定を見る</summary>';
+        html += '<div class="asg-settings-body">' + escapeHtml_(settingsView.detail) + '</div>';
+        html += '</details>';
+      }
       html += '<div class="asg-list-actions">';
       if (phase === 'open') {
         html += '<button type="button" class="btn-small assignment-start-btn" data-idx="' + idx + '">取り組む</button>';
@@ -420,7 +573,10 @@ const AssignmentModule = (function () {
         html += '<p class="asg-report-hint">ノルマ達成済みですがサーバー未確認の場合は「再度報告」を押してください。</p>';
       }
       html += '</div>';
-      html += '<div class="log-item-aside"><span class="asg-status ' + status.css + '">' + escapeHtml_(status.label) + '</span></div>';
+      html += '<div class="log-item-aside">';
+      html += '<span class="asg-status asg-status-timer">' + escapeHtml_(limit) + '</span>';
+      html += '<span class="asg-status-sub">' + escapeHtml_(status.label) + '</span>';
+      html += '</div>';
       html += '</div>';
     });
     wrap.innerHTML = html;
@@ -565,27 +721,36 @@ const AssignmentModule = (function () {
         const words = (wordsPayload && wordsPayload.words) || wordsPayload || [];
         const pool = (wordsPayload && wordsPayload.pool) || words;
         const bookPool = (wordsPayload && wordsPayload.bookPool) || pool;
-        if (!sec.formats || !sec.formats.length) {
-          throw new Error('セクション' + (si + 1) + ': 出題形式（formats）が必要です。課題を再作成してください。');
+        const formats = (typeof vocabFormatsFromAssignmentSection === 'function'
+          ? vocabFormatsFromAssignmentSection(sec)
+          : (sec.formats || [])).slice(0, 4);
+        if (!formats.length) {
+          throw new Error('セクション' + (si + 1) + ': 出題形式が空です。管理画面で和英/英和・語/句・選択方法を保存し直してください。');
         }
-        const formats = sec.formats.slice(0, 4);
         const per = parseInt(sec.questionCount, 10) || 5;
         const axes = sec.axes || {};
         const isPool = (axes.choiceStyle || sec.choiceStyle) === 'pool';
-        qs = VocabQuizGenerator.buildQuestions(words, pool, bookPool, {
-          formats: formats,
-          homeworkMode: true,
-          homeworkPerSection: per,
-          includeNone: !isPool && sec.includeNone !== false,
-          includeUnknown: !isPool && sec.includeUnknown !== false,
-          choiceCount: sec.choiceCount || 4,
-          poolDummyCount: sec.poolDummyCount != null ? sec.poolDummyCount : 2,
-          dummyScope: sec.dummyScope || 'sheet',
-          dummyMethod: sec.dummyMethod || 'none',
-          affixType: sec.affixType || 'prefix',
-          affixLen: sec.affixLen != null ? sec.affixLen : 2,
-          usedKeys: usedVocabKeys
-        });
+        const isChoice = (axes.response || sec.response || 'choice') === 'choice';
+        try {
+          qs = VocabQuizGenerator.buildQuestions(words, pool, bookPool, {
+            formats: formats,
+            homeworkMode: true,
+            homeworkPerSection: per,
+            includeNone: isChoice && !isPool && sec.includeNone !== false,
+            includeUnknown: isChoice && !isPool && sec.includeUnknown !== false,
+            choiceCount: sec.choiceCount || 4,
+            poolDummyCount: sec.poolDummyCount != null ? sec.poolDummyCount : 2,
+            dummyScope: sec.dummyScope || 'sheet',
+            dummyMethod: sec.dummyMethod || 'none',
+            affixType: sec.affixType || 'prefix',
+            affixLen: sec.affixLen != null ? sec.affixLen : 2,
+            usedKeys: usedVocabKeys,
+            bookName: bookName,
+            sheetName: sheetName
+          });
+        } catch (genErr) {
+          throw new Error('セクション' + (si + 1) + ': ' + ((genErr && genErr.message) || genErr));
+        }
         qs.forEach(function (q) {
           const key = q.wordId || q.itemId || (q.wordObj && (q.wordObj.wordId || q.wordObj['英単語・熟語の表現']));
           if (key) usedVocabKeys.add(String(key));
@@ -681,7 +846,7 @@ const AssignmentModule = (function () {
         await refreshList();
         return;
       }
-      throw new Error('出題できる問題がありません（範囲・形式を確認してください）');
+      throw new Error('出題できる問題がありません（範囲・形式を確認してください）。句・例文はチャンク／例文の ( ) が必要です。');
     }
 
     activeSession_ = {
