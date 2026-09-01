@@ -2454,6 +2454,7 @@ function writeObjectRowByHeaders_(sheet, requiredHeaders, rowObj, existingRowNum
   }
   const targetRow = existingRowNum && existingRowNum > 1 ? existingRowNum : sheet.getLastRow() + 1;
   sheet.getRange(targetRow, 1, 1, lastCol).setValues([values]);
+  SpreadsheetApp.flush();
   return targetRow;
 }
 
@@ -2481,6 +2482,15 @@ function openAppSpreadsheet_() {
   if (wl) ensureWhitelistColumns_(wl);
   ensureAssignmentSheets_(ss);
   return ss;
+}
+
+/** GAS①の保存と GAS②の一覧は別実行のため、読み取り前に Drive へ確定した版を開き直す */
+function openAppSpreadsheetFresh_() {
+  openAppSpreadsheet_();
+  SpreadsheetApp.flush();
+  const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
+  if (!spreadId) throw new Error('SPREADSHEET_ID が未設定です');
+  return SpreadsheetApp.openById(spreadId);
 }
 
 function sheetRowsToObjects_(sheet) {
@@ -2772,6 +2782,7 @@ function apiAdminDeleteAssignments_(requestData) {
     subRows.forEach(function (n) { subSheet.deleteRow(n); });
     deletedSubmissions = subRows.length;
   }
+  SpreadsheetApp.flush();
   if (!deletedAssignments) {
     return { status: 'error', message: '該当する課題が見つかりませんでした' };
   }
@@ -2829,7 +2840,7 @@ function apiListMyAssignments_(requestData) {
   if (!authReq.ok) return { status: 'error', message: authReq.error };
   const user = resolveAuthUserFromRequest_(authReq);
   const account = String(authReq.auth.email || user.account || '').toLowerCase();
-  const ss = openAppSpreadsheet_();
+  const ss = openAppSpreadsheetFresh_();
   const now = Date.now();
   const subs = sheetRowsToObjects_(ss.getSheetByName('assignment_submissions'));
   const achievementByAsg = {};
@@ -2871,7 +2882,7 @@ function apiGetAssignment_(requestData) {
   if (!authReq.ok) return { status: 'error', message: authReq.error };
   const id = String(requestData.assignmentId || '').trim();
   if (!id) return { status: 'error', message: 'assignmentId が必要です' };
-  const ss = openAppSpreadsheet_();
+  const ss = openAppSpreadsheetFresh_();
   const rows = sheetRowsToObjects_(ss.getSheetByName('assignments'));
   for (let i = 0; i < rows.length; i++) {
     if (String(rows[i].Assignment_ID) === id) {
@@ -2898,7 +2909,7 @@ function apiStartAssignmentAttempt_(requestData) {
   if (!id) return { status: 'error', message: 'assignmentId が必要です' };
   const user = resolveAuthUserFromRequest_(authReq);
   const account = String(authReq.auth.email || user.account || '').toLowerCase();
-  const ss = openAppSpreadsheet_();
+  const ss = openAppSpreadsheetFresh_();
   const asgSheet = ss.getSheetByName('assignments');
   const asgRows = sheetRowsToObjects_(asgSheet);
   let asg = null;

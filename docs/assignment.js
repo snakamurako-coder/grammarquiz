@@ -1213,6 +1213,15 @@ const AssignmentModule = (function () {
         BusyButton.run(btn, refreshList, '更新中…');
       });
     }
+    if (!bindUi._visibilityBound) {
+      bindUi._visibilityBound = true;
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState !== 'visible') return;
+        const panel = document.getElementById('assignment-panel');
+        if (!panel || panel.style.display === 'none') return;
+        refreshList().catch(function (e) { console.warn('課題一覧:', e); });
+      });
+    }
   }
 
   return {
