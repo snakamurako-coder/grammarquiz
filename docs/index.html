@@ -8301,8 +8301,22 @@ const VocabRegisterModule = (() => {
     return String(text || '').trim().split(/\s+/).filter(Boolean).length >= 2;
   }
 
+  function syncExpressionBetweenModes_(fromMode) {
+    for (let ci = 0; ci < CARD_COUNT; ci++) {
+      const simpleEl = qsCard(ci, '.register-simple-word');
+      const detailEl = qsCard(ci, '[data-field="英単語・熟語の表現"]');
+      if (!simpleEl || !detailEl) continue;
+      const fromEl = fromMode === 'detail' ? detailEl : simpleEl;
+      const toEl = fromMode === 'detail' ? simpleEl : detailEl;
+      const fromVal = fromEl.value;
+      if (String(fromVal || '').trim()) toEl.value = fromVal;
+    }
+  }
+
   function setRegisterMode(mode) {
-    registerMode = mode === 'detail' ? 'detail' : 'simple';
+    const next = mode === 'detail' ? 'detail' : 'simple';
+    if (next !== registerMode) syncExpressionBetweenModes_(registerMode);
+    registerMode = next;
     document.querySelectorAll('.register-simple-panel').forEach(function (panel) {
       panel.style.display = registerMode === 'simple' ? 'block' : 'none';
     });
