@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "kind": "vocab",
+  "spreadsheetId": "1vzw2-qvKovYrtRXmxzwrhMQjqx8RdsRr512J3-zl_Vw",
+  "spreadsheetName": "コーパス4500",
+  "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/1vzw2-qvKovYrtRXmxzwrhMQjqx8RdsRr512J3-zl_Vw/edit",
+  "bookName": "コーパス4500",
+  "exportedAt": "2026-09-01T16:17:46.439Z",
+  "github": {
+    "dataPrefix": "data",
+    "sourceMapPath": "data/sources/1vzw2-qvKovYrtRXmxzwrhMQjqx8RdsRr512J3-zl_Vw.json",
+    "skipSpreadsheetWhenFilesPresent": true
+  },
+  "files": [
+    {
+      "sheetName": "Stage1～14",
+      "kind": "vocab_words",
+      "manifestKey": "コーパス4500::Stage1～14",
+      "githubPath": "data/vocab/コーパス4500/Stage1～14.json",
+      "rowCount": 1820
+    },
+    {
+      "sheetName": "_catalog",
+      "kind": "vocab_catalog",
+      "manifestKey": "コーパス4500::_catalog",
+      "githubPath": "data/vocab/コーパス4500/_catalog.json",
+      "rowCount": 1
+    }
+  ]
+}
