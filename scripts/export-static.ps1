@@ -36,6 +36,11 @@ if ($response.status -ne 'success') {
 $data = $response.data
 $outDir = Join-Path $Root 'docs\data'
 
+$exportVersion = [string](Get-ObjectProp $data 'version')
+$exportAt = [string](Get-ObjectProp $data 'exportedAt')
+if (-not $exportVersion) { throw 'exportStatic の応答に version がありません' }
+if (-not $exportAt) { $exportAt = (Get-Date).ToUniversalTime().ToString('o') }
+
 $modeSources = @{}
 foreach ($item in $script:ManifestModeDefs) {
   $modeSources[$item.Mode] = $data
@@ -43,7 +48,7 @@ foreach ($item in $script:ManifestModeDefs) {
 
 Publish-ManifestSetToDataDir -OutDir $outDir `
   -ModeSources $modeSources `
-  -Version ([string]$data.version) `
-  -ExportedAt ([string]$data.exportedAt)
+  -Version $exportVersion `
+  -ExportedAt $exportAt
 
-Write-Host "Version: $($data.version)"
+Write-Host "Version: $exportVersion"

@@ -65,6 +65,18 @@ function New-EmptyModeManifest {
   }
 }
 
+function Get-ObjectProp {
+  param($Object, [string]$Name)
+  if ($null -eq $Object) { return $null }
+  if ($Object -is [hashtable] -or $Object -is [System.Collections.IDictionary]) {
+    if ($Object.ContainsKey($Name)) { return $Object[$Name] }
+    return $null
+  }
+  $p = $Object.PSObject.Properties[$Name]
+  if ($null -eq $p) { return $null }
+  return $p.Value
+}
+
 function ConvertTo-ModeManifest {
   param(
     [Parameter(Mandatory = $true)]$Source,
@@ -79,19 +91,26 @@ function ConvertTo-ModeManifest {
     $Source.PSObject.Properties | ForEach-Object { $src[$_.Name] = $_.Value }
   }
 
-  $resolvedLabel = if ($src.modeLabel) { [string]$src.modeLabel } else { $ModeLabel }
+  $fromLabel = Get-ObjectProp $src 'modeLabel'
+  $fromVersion = Get-ObjectProp $src 'version'
+  $fromExported = Get-ObjectProp $src 'exportedAt'
+  $resolvedLabel = if ($fromLabel) { [string]$fromLabel } else { $ModeLabel }
   $manifest = New-EmptyModeManifest -Mode $Mode -ModeLabel $resolvedLabel `
-    -Version ($(if ($src.version) { [string]$src.version } else { $Version })) `
-    -ExportedAt ($(if ($src.exportedAt) { [string]$src.exportedAt } else { $ExportedAt }))
+    -Version ($(if ($fromVersion) { [string]$fromVersion } else { $Version })) `
+    -ExportedAt ($(if ($fromExported) { [string]$fromExported } else { $ExportedAt }))
 
   switch ($Mode) {
     'grammar' {
-      if ($src.catalog) { $manifest.catalog = $src.catalog }
-      if ($src.questions) { $manifest.questions = $src.questions }
+      $catalog = Get-ObjectProp $src 'catalog'
+      $questions = Get-ObjectProp $src 'questions'
+      if ($catalog) { $manifest.catalog = $catalog }
+      if ($questions) { $manifest.questions = $questions }
     }
     'vocab' {
-      if ($src.vocabCatalog) { $manifest.vocabCatalog = $src.vocabCatalog }
-      if ($src.vocabWords) { $manifest.vocabWords = $src.vocabWords }
+      $vocabCatalog = Get-ObjectProp $src 'vocabCatalog'
+      $vocabWords = Get-ObjectProp $src 'vocabWords'
+      if ($vocabCatalog) { $manifest.vocabCatalog = $vocabCatalog }
+      if ($vocabWords) { $manifest.vocabWords = $vocabWords }
     }
     { $_ -in @('reading', 'ai') } { }
   }
