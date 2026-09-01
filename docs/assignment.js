@@ -7,8 +7,10 @@ const AssignmentModule = (function () {
   const PASS_PREFIX = 'dd_quiz_pass:';
   let listCache_ = [];
   let listRefreshWarn_ = null;
+  let listRefreshPromise_ = null;
   let activeSession_ = null;
   let timerId_ = null;
+  const POST_TIMEOUT_MS = 20000;
 
   function apiUrl_() {
     return (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.API_URL) || window.API_URL || '';
@@ -19,13 +21,26 @@ const AssignmentModule = (function () {
     if (!url) throw new Error('API_URL が未設定です');
     if (!AuthGateService.isValid()) throw new Error('ログインが必要です');
     const body = Object.assign({ authToken: AuthGateService.getToken() }, payload);
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(body),
-      redirect: 'follow',
-      credentials: 'omit'
-    });
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(function () { controller.abort(); }, POST_TIMEOUT_MS) : null;
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(body),
+        redirect: 'follow',
+        credentials: 'omit',
+        signal: controller ? controller.signal : undefined
+      });
+    } catch (e) {
+      if (e && (e.name === 'AbortError' || /aborted/i.test(String(e.message || e)))) {
+        throw new Error('課題サーバーの応答がありません（時間切れ）');
+      }
+      throw e;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     const text = await res.text();
     let data = {};
     try { data = JSON.parse(text); } catch (e) {
@@ -331,27 +346,33 @@ const AssignmentModule = (function () {
   }
 
   async function refreshList() {
+    if (listRefreshPromise_) return listRefreshPromise_;
     const wrap = document.getElementById('assignment-list');
     if (!wrap) return;
     if (!AuthGateService.isValid()) {
       wrap.innerHTML = '<p>ログインすると課題が表示されます。</p>';
       return;
     }
-    wrap.innerHTML = '<p>読込中...</p>';
-    try {
-      const res = await postWithRetry_({ action: 'listMyAssignments' }, 2);
-      listCache_ = sortAssignmentRows_(res.data || []);
-      listRefreshWarn_ = null;
-      renderList_(listCache_);
-    } catch (e) {
-      if (listCache_.length) {
-        listRefreshWarn_ = String(e.message || e);
+    if (!listCache_.length) wrap.innerHTML = '<p>読込中...</p>';
+    listRefreshPromise_ = (async function () {
+      try {
+        const res = await postWithRetry_({ action: 'listMyAssignments' }, 1);
+        listCache_ = sortAssignmentRows_(res.data || []);
+        listRefreshWarn_ = null;
         renderList_(listCache_);
-      } else {
-        wrap.innerHTML = '<p style="color:#c62828;">課題の取得に失敗: ' + escapeHtml_(e.message || e) + '</p>'
-          + '<p class="hint" style="font-size:.85em;color:#666;margin-top:8px;">通信状況を確認して「更新」を押してください。</p>';
+      } catch (e) {
+        if (listCache_.length) {
+          listRefreshWarn_ = String(e.message || e);
+          renderList_(listCache_);
+        } else {
+          wrap.innerHTML = '<p style="color:#c62828;">課題の取得に失敗: ' + escapeHtml_(e.message || e) + '</p>'
+            + '<p class="hint" style="font-size:.85em;color:#666;margin-top:8px;">通信状況を確認して「更新」を押してください。</p>';
+        }
+      } finally {
+        listRefreshPromise_ = null;
       }
-    }
+    })();
+    return listRefreshPromise_;
   }
 
   function escapeHtml_(s) {
@@ -533,7 +554,14 @@ const AssignmentModule = (function () {
 
       html += '<div class="log-item asg-list-item">';
       html += '<div class="log-item-main">';
+      html += '<div class="asg-list-heading">';
+      if (phase === 'open') {
+        html += '<button type="button" class="btn-small assignment-start-btn" data-idx="' + idx + '">取り組む</button>';
+      } else if (phase === 'future') {
+        html += '<button type="button" class="btn-small assignment-preview-btn" data-idx="' + idx + '">予行演習</button>';
+      }
       html += '<div class="log-title">' + escapeHtml_(a.Title) + ' <span style="font-size:.8em;color:#666;">[' + kindLabel + ']</span></div>';
+      html += '</div>';
       if (periodText) {
         html += '<div class="asg-period-meta">' + escapeHtml_(periodText) + '</div>';
       }
@@ -558,16 +586,11 @@ const AssignmentModule = (function () {
         html += '<div class="asg-settings-body">' + escapeHtml_(settingsView.detail) + '</div>';
         html += '</details>';
       }
-      html += '<div class="asg-list-actions">';
-      if (phase === 'open') {
-        html += '<button type="button" class="btn-small assignment-start-btn" data-idx="' + idx + '">取り組む</button>';
-      } else if (phase === 'future') {
-        html += '<button type="button" class="btn-small assignment-preview-btn" data-idx="' + idx + '">予行演習</button>';
-      }
       if (showReport) {
+        html += '<div class="asg-list-actions">';
         html += '<button type="button" class="btn-small assignment-report-btn" data-idx="' + idx + '">再度報告</button>';
+        html += '</div>';
       }
-      html += '</div>';
       if (showReport && !serverReported) {
         html += '<p class="asg-report-hint">ノルマ達成済みですがサーバー未確認の場合は「再度報告」を押してください。</p>';
       }

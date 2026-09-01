@@ -816,6 +816,15 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
   line-height: 1.5;
 }
 .asg-list-item { align-items: flex-start; }
+.asg-list-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.asg-list-heading .log-title { margin-bottom: 0; flex: 1; min-width: 0; }
+.asg-list-heading .assignment-start-btn,
+.asg-list-heading .assignment-preview-btn { flex-shrink: 0; }
 .asg-list-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .asg-refresh-warn {
   font-size: 0.85em;

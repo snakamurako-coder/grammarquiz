@@ -2484,15 +2484,6 @@ function openAppSpreadsheet_() {
   return ss;
 }
 
-/** GAS①の保存と GAS②の一覧は別実行のため、読み取り前に Drive へ確定した版を開き直す */
-function openAppSpreadsheetFresh_() {
-  openAppSpreadsheet_();
-  SpreadsheetApp.flush();
-  const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
-  if (!spreadId) throw new Error('SPREADSHEET_ID が未設定です');
-  return SpreadsheetApp.openById(spreadId);
-}
-
 function sheetRowsToObjects_(sheet) {
   if (!sheet) return [];
   const data = sheet.getDataRange().getValues();
@@ -2840,7 +2831,7 @@ function apiListMyAssignments_(requestData) {
   if (!authReq.ok) return { status: 'error', message: authReq.error };
   const user = resolveAuthUserFromRequest_(authReq);
   const account = String(authReq.auth.email || user.account || '').toLowerCase();
-  const ss = openAppSpreadsheetFresh_();
+  const ss = openAppSpreadsheet_();
   const now = Date.now();
   const subs = sheetRowsToObjects_(ss.getSheetByName('assignment_submissions'));
   const achievementByAsg = {};
@@ -2882,7 +2873,7 @@ function apiGetAssignment_(requestData) {
   if (!authReq.ok) return { status: 'error', message: authReq.error };
   const id = String(requestData.assignmentId || '').trim();
   if (!id) return { status: 'error', message: 'assignmentId が必要です' };
-  const ss = openAppSpreadsheetFresh_();
+  const ss = openAppSpreadsheet_();
   const rows = sheetRowsToObjects_(ss.getSheetByName('assignments'));
   for (let i = 0; i < rows.length; i++) {
     if (String(rows[i].Assignment_ID) === id) {
@@ -2909,7 +2900,7 @@ function apiStartAssignmentAttempt_(requestData) {
   if (!id) return { status: 'error', message: 'assignmentId が必要です' };
   const user = resolveAuthUserFromRequest_(authReq);
   const account = String(authReq.auth.email || user.account || '').toLowerCase();
-  const ss = openAppSpreadsheetFresh_();
+  const ss = openAppSpreadsheet_();
   const asgSheet = ss.getSheetByName('assignments');
   const asgRows = sheetRowsToObjects_(asgSheet);
   let asg = null;
