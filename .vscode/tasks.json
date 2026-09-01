@@ -25,6 +25,18 @@
       "presentation": { "reveal": "always", "panel": "shared", "focus": true }
     },
     {
+      "label": "Drive全教材を更新（export-static＋Pages push）",
+      "type": "shell",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/scripts/deploy-all.ps1\" -PagesOnly -ExportStatic",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true,
+        "clear": true
+      }
+    },
+    {
       "label": "学習セットデータ更新（manifest更新＋push）",
       "type": "shell",
       "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/scripts/update-learning-set-data.ps1\"",
