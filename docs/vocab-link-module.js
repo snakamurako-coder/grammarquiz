@@ -587,7 +587,7 @@ const VocabLinkModule = (function () {
 
   return {
     loadAndStart: loadAndStart,
-    backToSettings: backToSettings,
+    backToSettings: backToSettings_,
     syncHomeworkUi_: syncHomeworkUi_,
     getSessionDisplaySettings: getSessionDisplaySettings_
   };
