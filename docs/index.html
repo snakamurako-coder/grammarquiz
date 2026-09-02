@@ -679,6 +679,137 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
   width: 100%; padding: 10px; margin-top: 4px; border: 1px solid #cbd5e0; background: #fff;
   border-radius: 8px; font-weight: 600; cursor: pointer;
 }
+
+/* Word Link モード（Desktop index.html 由来・暗色フルスクリーン） */
+body.vocab-link-active #settings-screen,
+body.vocab-link-active #game-screen,
+body.vocab-link-active #result-screen,
+body.vocab-link-active #reading-screen,
+body.vocab-link-active #login-screen,
+body.vocab-link-active #vocab-card-screen { display: none !important; }
+body.vocab-link-active #vocab-link-screen { display: flex !important; }
+#vocab-link-screen {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9100;
+  background: #0f172a;
+  color: #f8fafc;
+  overflow: hidden;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.vl-header { text-align: center; position: relative; padding-top: 2px; flex-shrink: 0; }
+.vl-info-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  max-width: 480px; margin: 0 auto 2px auto; font-size: 0.85rem; color: #94a3b8; font-weight: bold; gap: 6px;
+}
+.vl-btn-change-mode {
+  background: #1e293b; color: #38bdf8; border: 1px solid #38bdf8;
+  padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; cursor: pointer;
+}
+.vl-timer-container { position: relative; display: inline-block; }
+.vl-timer-display {
+  font-size: 2.5rem; font-weight: 800; font-family: monospace; color: #38bdf8; line-height: 1;
+}
+.vl-penalty-pop {
+  position: absolute; right: -60px; top: 0; color: #ef4444;
+  font-size: 1.1rem; font-weight: bold; font-family: monospace; opacity: 0; pointer-events: none;
+}
+.vl-penalty-pop.show { animation: vlPopUp 0.5s ease-out; }
+@keyframes vlPopUp {
+  0% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-20px); }
+}
+.vl-board {
+  display: flex; gap: 8px; width: 100%; max-width: 480px; margin: 0 auto;
+  flex: 1; max-height: calc(100dvh - 130px);
+}
+.vl-column { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+.vl-card {
+  height: calc((100% - (9 * 5px)) / 10);
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  background: #1e293b; border: 1px solid #334155; border-radius: 6px;
+  font-size: clamp(0.85rem, 3.8vw, 1.25rem); line-height: 1.15; font-weight: bold;
+  color: #f1f5f9; cursor: pointer; padding: 0 3px; word-break: break-word; overflow-wrap: anywhere;
+}
+.vl-card.vl-audio-card { font-size: 1.4rem; }
+.vl-card.selected { background: #f59e0b; color: #000; border-color: #f59e0b; }
+.vl-card.wrong { background: #ef4444; color: #fff; }
+.vl-card.matched { visibility: hidden; pointer-events: none; }
+.vl-overlay-screen {
+  display: flex; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: #0f172a; z-index: 100;
+  padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  flex-direction: column; justify-content: space-between;
+}
+.vl-start-title { text-align: center; margin-top: 20px; }
+.vl-start-title h1 { font-size: 2rem; color: #38bdf8; margin: 0 0 8px 0; }
+.vl-start-title p { color: #94a3b8; font-size: 0.9rem; margin: 0; }
+.vl-mode-select-grid {
+  display: grid; grid-template-columns: 1fr; gap: 12px;
+  max-width: 400px; width: 100%; margin: 0 auto;
+}
+.vl-btn-mode-card {
+  background: #1e293b; border: 1.5px solid #334155; border-radius: 12px;
+  padding: 16px; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 4px;
+}
+.vl-btn-mode-card:active { background: #334155; border-color: #38bdf8; }
+.vl-mode-card-title { font-size: 1.15rem; font-weight: bold; color: #38bdf8; }
+.vl-mode-card-desc { font-size: 0.8rem; color: #94a3b8; }
+.vl-result-header { text-align: center; flex-shrink: 0; }
+.vl-result-title { font-size: 1.3rem; color: #38bdf8; font-weight: bold; margin-bottom: 2px; }
+.vl-result-score { font-size: 2rem; font-family: monospace; font-weight: bold; color: #f8fafc; }
+.vl-result-list-container {
+  flex: 1; overflow-y: auto; margin: 10px 0; border: 1px solid #334155;
+  border-radius: 8px; background: #1e293b; padding: 5px; -webkit-overflow-scrolling: touch;
+}
+.vl-result-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 8px; border-bottom: 1px solid #334155; font-size: 0.9rem;
+}
+.vl-result-item:last-child { border-bottom: none; }
+.vl-word-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.vl-word-pair { font-weight: bold; color: #f8fafc; word-break: break-word; }
+.vl-word-stats { font-size: 0.75rem; color: #94a3b8; }
+.vl-badge-wrong { color: #ef4444; font-weight: bold; }
+.vl-rating-btns { display: flex; gap: 8px; flex-shrink: 0; }
+.vl-btn-rate {
+  background: #334155; border: 1px solid #475569; border-radius: 8px;
+  padding: 6px 12px; font-size: 1.2rem; cursor: pointer; opacity: 0.4;
+  min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center;
+}
+.vl-btn-rate.active { opacity: 1; background: #475569; border-color: #38bdf8; transform: scale(1.05); }
+.vl-action-row {
+  flex-shrink: 0; display: flex; gap: 8px; align-items: center; justify-content: center;
+  background: #1e293b; padding: 10px; border-radius: 8px; border: 1px solid #334155;
+}
+#vocab-link-screen select {
+  background: #0f172a; color: #38bdf8; border: 1px solid #38bdf8;
+  padding: 0 10px; height: 48px; border-radius: 8px; font-size: 1rem; font-weight: bold;
+}
+.vl-btn-action {
+  background: #38bdf8; color: #0f172a; border: none; height: 48px; padding: 0 16px;
+  font-size: 1rem; font-weight: bold; border-radius: 8px; cursor: pointer; flex: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.vl-btn-action-sub {
+  background: #334155; color: #f8fafc; border: 1px solid #475569;
+  height: 48px; padding: 0 16px; font-size: 0.95rem; font-weight: bold; border-radius: 8px; cursor: pointer;
+}
+.vl-btn-action:active, .vl-btn-action-sub:active { opacity: 0.8; }
+.vl-top-back {
+  position: absolute; left: 8px; top: 8px; z-index: 110;
+  background: #334155; color: #f8fafc; border: 1px solid #475569;
+  border-radius: 8px; padding: 6px 10px; font-size: 0.85rem; cursor: pointer;
+}
+
 .division-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 180px; overflow-y: auto; }
 .compact-division-section .form-group { margin-bottom: 8px; }
 .compact-division-section .form-group:last-of-type { margin-bottom: 0; }
@@ -1342,6 +1473,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         <button type="button" class="mode-tab vocab-mode-tab active" data-vocab-mode="card" role="tab" aria-selected="true">単語カード</button>
         <button type="button" class="mode-tab vocab-mode-tab" data-vocab-mode="quiz" role="tab" aria-selected="false">単語クイズ</button>
         <button type="button" class="mode-tab vocab-mode-tab" data-vocab-mode="review" role="tab" aria-selected="false">復習モード</button>
+        <button type="button" class="mode-tab vocab-mode-tab" data-vocab-mode="link" role="tab" aria-selected="false">Word Link</button>
       </div>
       <div class="setting-section vocab-shared-section">
         <div class="section-title">1. 単語ブック</div>
@@ -1549,6 +1681,21 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         </div>
         </div>
       <button id="vocab-start-btn" class="btn-primary">▶ 単語クイズを開始する</button>
+      </div>
+
+      <div class="setting-section" id="vocab-link-section" data-vocab-mode-panel="link" style="display:none;">
+        <p class="filter-axis-hint" style="margin:0 0 12px;">左右のカードをペアで選ぶ Word Link ゲームです。語（WD）の英語と第一語義で出題します。</p>
+        <div class="form-group">
+          <label>出題数</label>
+          <select id="vocab-link-count">
+            <option value="10">10語</option>
+            <option value="20">20語</option>
+            <option value="25" selected>25語</option>
+            <option value="30">30語</option>
+            <option value="50">50語</option>
+          </select>
+        </div>
+        <button type="button" id="vocab-link-start-btn" class="btn-primary">Word Link を開始する</button>
       </div>
 
       <div class="setting-section" id="vocab-review-section" data-vocab-mode-panel="review" style="display:none;">
@@ -2069,6 +2216,76 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           </div>
         </div>
         <button type="button" class="vocab-card-close-btn" id="vc-settings-close-btn">設定を閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="vocab-link-screen" style="display: none;" aria-hidden="true">
+    <button type="button" class="vl-top-back" id="vl-back-btn" title="学習設定に戻る">✕ 戻る</button>
+
+    <div class="vl-overlay-screen" id="vl-start-screen">
+      <div class="vl-start-title">
+        <h1>Word Link</h1>
+        <p>モードを選択してスタートしてください</p>
+      </div>
+      <div class="vl-mode-select-grid">
+        <button type="button" class="vl-btn-mode-card" data-vl-mode="wl-eija">
+          <span class="vl-mode-card-title">🔤 Word Link 英和</span>
+          <span class="vl-mode-card-desc">左列：英語テキスト ➔ 右列：日本語選択</span>
+        </button>
+        <button type="button" class="vl-btn-mode-card" data-vl-mode="wl-jaei">
+          <span class="vl-mode-card-title">🔤 Word Link 和英</span>
+          <span class="vl-mode-card-desc">左列：日本語テキスト ➔ 右列：英語選択</span>
+        </button>
+        <button type="button" class="vl-btn-mode-card" data-vl-mode="awl-eija">
+          <span class="vl-mode-card-title">🎧 Audio WL 英和</span>
+          <span class="vl-mode-card-desc">左列：英語音声 📢 ➔ 右列：日本語選択</span>
+        </button>
+        <button type="button" class="vl-btn-mode-card" data-vl-mode="awl-jaei">
+          <span class="vl-mode-card-title">🎧 Audio WL 和英</span>
+          <span class="vl-mode-card-desc">左列：日本語音声 📢 ➔ 右列：英語選択</span>
+        </button>
+      </div>
+      <div></div>
+    </div>
+
+    <header class="vl-header">
+      <div class="vl-info-bar">
+        <span id="vl-mode-text">Word Link 英和</span>
+        <button type="button" class="vl-btn-change-mode" id="vl-change-mode-btn">モード変更</button>
+        <span id="vl-progress-text">残り: 25</span>
+      </div>
+      <div class="vl-timer-container">
+        <div class="vl-timer-display" id="vl-timer">0.00s</div>
+        <div class="vl-penalty-pop" id="vl-penalty-pop">+1.00s</div>
+      </div>
+    </header>
+
+    <div class="vl-board">
+      <div class="vl-column" id="vl-col-left"></div>
+      <div class="vl-column" id="vl-col-right"></div>
+    </div>
+
+    <div class="vl-overlay-screen" id="vl-result-screen" style="display: none;">
+      <div class="vl-result-header">
+        <div class="vl-result-title" id="vl-result-title">RESULT</div>
+        <div class="vl-result-score" id="vl-final-time">0.00s</div>
+      </div>
+      <div class="vl-result-list-container" id="vl-result-list"></div>
+      <div class="vl-action-row" id="vl-review-controls">
+        <select id="vl-review-count-select">
+          <option value="10">10語</option>
+          <option value="20">20語</option>
+          <option value="30">30語</option>
+          <option value="40">40語</option>
+          <option value="50" selected>50語</option>
+        </select>
+        <button type="button" class="vl-btn-action" id="vl-review-start-btn">上位語数で復習</button>
+        <button type="button" class="vl-btn-action-sub" id="vl-result-top-btn">Top</button>
+      </div>
+      <div class="vl-action-row" id="vl-home-control" style="display: none;">
+        <button type="button" class="vl-btn-action" id="vl-home-btn">もう一度</button>
+        <button type="button" class="vl-btn-action-sub" id="vl-change-mode-btn-2">モード選択</button>
       </div>
     </div>
   </div>
@@ -6999,6 +7216,7 @@ const VocabSettingsModule = (() => {
       affixLen: parseInt((document.getElementById('vocab-affix-len') || {}).value, 10) || 2,
       cardTarget: getCardTargetSettings_(),
       vocabSubMode: vocabSubMode_,
+      linkQuestionCount: parseInt((document.getElementById('vocab-link-count') || {}).value, 10) || 25,
       filters: {
         dai: getSelectedDivisions('dai'),
         chu: getSelectedDivisions('chu'),
@@ -7080,6 +7298,10 @@ const VocabSettingsModule = (() => {
         setCheckedValues_('vocab-sho-container', saved.filters.sho);
       }
       if (saved.cardTarget) applyCardTargetSettings_(saved.cardTarget);
+      const linkCountEl = document.getElementById('vocab-link-count');
+      if (linkCountEl && saved.linkQuestionCount != null) {
+        linkCountEl.value = String(saved.linkQuestionCount);
+      }
       applyVocabModeTab_(saved.vocabSubMode || 'card', false);
     } finally {
       restoring_ = false;
@@ -7307,7 +7529,7 @@ const VocabSettingsModule = (() => {
   }
 
   function applyVocabModeTab_(mode, persist) {
-    const valid = { card: true, quiz: true, review: true };
+    const valid = { card: true, quiz: true, review: true, link: true };
     mode = valid[mode] ? mode : 'card';
     if (VocabLaunchConfig.isHomeworkMode()) mode = 'quiz';
     vocabSubMode_ = mode;
@@ -7599,6 +7821,9 @@ const VocabSettingsModule = (() => {
     syncVocabQuestionCountUi_();
     if (window.VocabCardModule && VocabCardModule.syncHomeworkUi_) {
       VocabCardModule.syncHomeworkUi_(homework);
+    }
+    if (window.VocabLinkModule && VocabLinkModule.syncHomeworkUi_) {
+      VocabLinkModule.syncHomeworkUi_(homework);
     }
     const vocabModeTabs = document.getElementById('vocab-mode-tabs');
     if (vocabModeTabs) vocabModeTabs.style.display = homework ? 'none' : '';
@@ -10408,6 +10633,37 @@ function bindVocabCardStart_(btn, scope) {
 bindVocabCardStart_(vocabCardStartTargetedBtn, 'targeted');
 bindVocabCardStart_(vocabCardStartAllBtn, 'all');
 
+const vocabLinkStartBtn = document.getElementById('vocab-link-start-btn');
+if (vocabLinkStartBtn) {
+  vocabLinkStartBtn.addEventListener('click', async function () {
+    const options = window.VocabSettingsModule.getQuizOptions();
+    if (!options.bookName || !options.sheetName) {
+      alert('ブックと教材（シート）を選択してください。');
+      return;
+    }
+    if (options.homeworkMode) {
+      alert('宿題・小テストモードでは Word Link は利用できません。');
+      return;
+    }
+    if (!window.VocabLinkModule) {
+      alert('Word Link モジュールの読み込みに失敗しました。ページを再読み込みしてください。');
+      return;
+    }
+    if (window.TtsModule && typeof window.TtsModule.prime === 'function') {
+      window.TtsModule.prime();
+    }
+    await BusyButton.run(vocabLinkStartBtn, async function () {
+      try {
+        await VocabLinkModule.loadAndStart(options);
+        BackendSyncStatus.refresh();
+      } catch (error) {
+        console.error(error);
+        alert('エラー: ' + (error.message || error));
+      }
+    }, '読み込み中…');
+  });
+}
+
 function applyVocabCardSessionGlobals_(meta) {
   currentAppMode = 'vocab-card';
   currentVocabSetName = meta.setName;
@@ -10444,6 +10700,43 @@ window.saveVocabCardSessionLog_ = async function (stats) {
     shuffle: !!stats.shuffle
   };
   await saveSessionResultsUnified('vocab-card', stats.setName);
+};
+
+function applyVocabLinkSessionGlobals_(meta) {
+  currentAppMode = 'word-link';
+  currentVocabSetName = meta.setName;
+  currentVocabBookName = meta.bookName;
+  currentVocabSheetName = meta.sheetName;
+  currentSessionIsPreset = !!meta.isPreset;
+  sessionStartTime = Date.now();
+  sessionPersistedToServer = false;
+  totalQuestionsCount = 0;
+  currentScore = 0;
+  currentSessionSettings = captureSessionSettingsSnapshot_('word-link');
+  currentReviewSetId = null;
+}
+window.applyVocabLinkSessionGlobals_ = applyVocabLinkSessionGlobals_;
+
+window.saveVocabLinkSessionLog_ = async function (stats) {
+  if (!AuthGateService.isValid()) return;
+  sessionStartTime = Date.now() - Math.round((stats.elapsedSec || 0) * 1000);
+  currentVocabSetName = stats.setName;
+  currentVocabBookName = stats.bookName;
+  currentVocabSheetName = stats.sheetName;
+  currentSessionIsPreset = !!stats.isPreset;
+  currentAppMode = 'word-link';
+  currentSessionSettings = captureSessionSettingsSnapshot_('word-link');
+  currentSessionSettings.wordLink = {
+    linkMode: stats.linkMode,
+    wordCount: stats.wordCount,
+    elapsedSec: stats.elapsedSec,
+    totalWrong: stats.totalWrong,
+    completed: !!stats.completed,
+    isReview: !!stats.isReview
+  };
+  totalQuestionsCount = stats.wordCount || 0;
+  currentScore = stats.wordCount || 0;
+  await saveSessionResultsUnified('word-link', stats.setName);
 };
 
 function applyVocabCardSessionScore_(known, total) {
@@ -10993,6 +11286,37 @@ async function buildSessionSummary_(modeOverride, setNameOverride) {
       Total: vc.totalCards || 0,
       Score: '',
       Duration_Sec: viewingSec,
+      Started_At: sessionStartTime ? new Date(sessionStartTime).toISOString() : '',
+      Ended_At: new Date().toISOString()
+    };
+  } else if (mode === 'word-link') {
+    setName = setNameOverride || currentVocabSetName || 'Word Link';
+    setId = 'word-link:' + (currentVocabBookName || '') + '/' + (currentVocabSheetName || '');
+    const wl = (currentSessionSettings && currentSessionSettings.wordLink) || {};
+    const durationSec = wl.elapsedSec != null
+      ? Math.round(wl.elapsedSec)
+      : (sessionStartTime ? Math.round((Date.now() - sessionStartTime) / 1000) : 0);
+    let attemptNo = 1;
+    if (AuthGateService.isValid()) {
+      try {
+        const cnt = await Promise.race([
+          UserBridge.call('countSessionAttempts', { setId: setName }),
+          new Promise(function (resolve) {
+            setTimeout(function () { resolve({ status: 'timeout' }); }, 8000);
+          })
+        ]);
+        if (cnt.status === 'success' && cnt.data) attemptNo = cnt.data.attemptNo || 1;
+      } catch (e) { /* ignore */ }
+    }
+    return {
+      Mode: mode,
+      Set_ID: setId,
+      Set_Name: setName,
+      Attempt_No: attemptNo,
+      Correct: wl.wordCount || 0,
+      Total: wl.wordCount || 0,
+      Score: '',
+      Duration_Sec: durationSec,
       Started_At: sessionStartTime ? new Date(sessionStartTime).toISOString() : '',
       Ended_At: new Date().toISOString()
     };
@@ -11724,6 +12048,23 @@ function captureSessionSettingsSnapshot_(mode) {
     }
     return snap;
   }
+  if (mode === 'word-link' && window.VocabSettingsModule && VocabSettingsModule.getQuizOptions) {
+    const opts = VocabSettingsModule.getQuizOptions();
+    const bookTypeEl = document.getElementById('vocab-book-type');
+    const linkCountEl = document.getElementById('vocab-link-count');
+    const snap = {
+      kind: 'word-link',
+      bookType: bookTypeEl ? bookTypeEl.value : 'preset',
+      bookName: opts.bookName || currentVocabBookName || '',
+      sheetName: opts.sheetName || currentVocabSheetName || '',
+      filters: opts.filters || { dai: [], chu: [], sho: [] },
+      linkQuestionCount: linkCountEl ? (parseInt(linkCountEl.value, 10) || 25) : 25
+    };
+    if (window.VocabLinkModule && typeof VocabLinkModule.getSessionDisplaySettings === 'function') {
+      Object.assign(snap, VocabLinkModule.getSessionDisplaySettings());
+    }
+    return snap;
+  }
   if (mode === 'vocab' && window.VocabSettingsModule && VocabSettingsModule.getQuizOptions) {
     const opts = VocabSettingsModule.getQuizOptions();
     const bookTypeEl = document.getElementById('vocab-book-type');
@@ -11807,6 +12148,21 @@ function extractSessionSettingsFromLog_(log) {
     }
     return { kind: 'vocab-card', bookName: bookName, sheetName: sheetName, filters: { dai: [], chu: [], sho: [] } };
   }
+  if (mode === 'word-link' || setId.indexOf('word-link:') === 0) {
+    let bookName = '';
+    let sheetName = '';
+    if (setId.indexOf('word-link:') === 0) {
+      const rest = setId.slice(10);
+      const slash = rest.indexOf('/');
+      bookName = slash >= 0 ? rest.slice(0, slash) : rest;
+      sheetName = slash >= 0 ? rest.slice(slash + 1) : '';
+    } else if (setName.indexOf(' / ') >= 0) {
+      const parts = setName.split(' / ');
+      bookName = parts[0];
+      sheetName = parts.slice(1).join(' / ');
+    }
+    return { kind: 'word-link', bookName: bookName, sheetName: sheetName, filters: { dai: [], chu: [], sho: [] } };
+  }
   if (mode === 'vocab' || setId.indexOf('vocab:') === 0) {
     let bookName = '';
     let sheetName = '';
@@ -11868,12 +12224,13 @@ function formatSessionSettingsText_(log) {
   const lines = [];
   const modeLabel = modeRaw === 'grammar' || modeRaw === '文法' ? '文法・語法演習'
     : (modeRaw === 'vocab-card' || modeRaw === '単語カード' ? '単語カード'
-      : (modeRaw === 'vocab' || modeRaw === '単語' ? '単語学習'
+      : (modeRaw === 'word-link' || modeRaw === 'Word Link' ? 'Word Link'
+        : (modeRaw === 'vocab' || modeRaw === '単語' ? '単語学習'
         : (modeRaw === 'reading' || modeRaw === '音読' ? '音読練習'
           : (modeRaw === 'assignment-quiz' || modeRaw === '小テスト'
             || (modeRaw === 'assignment' && settings && settings.assignmentKind === 'quiz') ? '小テスト'
             : (modeRaw === 'assignment' || modeRaw === 'assignment-homework' || modeRaw === '宿題' ? '宿題'
-              : (modeRaw || '不明'))))));
+              : (modeRaw || '不明')))))));
   lines.push('モード: ' + modeLabel);
 
   if (!settings) {
@@ -11983,6 +12340,25 @@ function formatSessionSettingsText_(log) {
     const vc = settings.vocabCard || {};
     if (vc.viewingSec != null) lines.push('閲覧時間: ' + formatVocabCardViewingTime_(vc.viewingSec));
     if (vc.cardsNavigated != null) lines.push('めくったカード: ' + vc.cardsNavigated + '枚');
+  } else if (settings.kind === 'word-link') {
+    const linkModeLabels = {
+      'wl-eija': 'Word Link 英和', 'wl-jaei': 'Word Link 和英',
+      'awl-eija': 'Audio WL 英和', 'awl-jaei': 'Audio WL 和英'
+    };
+    lines.push('教材種別: ' + (settings.bookType === 'user' ? 'マイ単語帳' : 'プリセット'));
+    lines.push('ブック: ' + (settings.bookName || '（不明）'));
+    lines.push('シート: ' + (settings.sheetName || '（不明）'));
+    const f = settings.filters || {};
+    lines.push('絞り込み 大区分: ' + joinSettingList_(f.dai));
+    lines.push('絞り込み 中区分: ' + joinSettingList_(f.chu));
+    lines.push('絞り込み 小区分: ' + joinSettingList_(f.sho));
+    if (settings.linkMode) lines.push('ゲームモード: ' + (linkModeLabels[settings.linkMode] || settings.linkMode));
+    if (settings.linkQuestionCount != null) lines.push('出題数: ' + settings.linkQuestionCount + '語');
+    const wl = settings.wordLink || {};
+    if (wl.elapsedSec != null) lines.push('所要時間: ' + (parseFloat(wl.elapsedSec).toFixed(2)) + '秒（ペナルティ込み）');
+    if (wl.wordCount != null) lines.push('語数: ' + wl.wordCount);
+    if (wl.totalWrong != null) lines.push('ミス合計: ' + wl.totalWrong + '回');
+    if (wl.isReview) lines.push('復習プレイ: はい');
   } else if (settings.kind === 'reading') {
     lines.push('ブック: ' + (settings.bookName || 'マイ単語帳'));
     lines.push('シート: ' + (settings.sheetName || '（不明）'));
@@ -12034,6 +12410,20 @@ async function reproduceSessionSettings_(log) {
         if (VocabSettingsModule.applyVocabModeTab) VocabSettingsModule.applyVocabModeTab('card', true);
       }
       showToast_('単語カードの出題設定を再現しました');
+      return true;
+    }
+    if (settings.kind === 'word-link') {
+      switchMainModeTab_('vocab');
+      if (window.VocabSettingsModule) {
+        if (VocabSettingsModule.loadCatalog) await VocabSettingsModule.loadCatalog(false);
+        if (VocabSettingsModule.applySettings) VocabSettingsModule.applySettings(settings);
+        if (VocabSettingsModule.applyVocabModeTab) VocabSettingsModule.applyVocabModeTab('link', true);
+      }
+      const linkCountEl = document.getElementById('vocab-link-count');
+      if (linkCountEl && settings.linkQuestionCount != null) {
+        linkCountEl.value = String(settings.linkQuestionCount);
+      }
+      showToast_('Word Link の出題設定を再現しました（問題そのものは再現しません）');
       return true;
     }
     if (settings.kind === 'reading') {
@@ -12145,6 +12535,7 @@ function placeManagePanelBeforeMypage_() {
 function renderCollapsibleLogHtml_(log, idx, opts) {
   opts = opts || {};
   const isCard = isVocabCardLog_(log);
+  const isLink = isWordLinkLog_(log);
   let rateLabel;
   let asideScore;
   if (isCard) {
@@ -12152,6 +12543,11 @@ function renderCollapsibleLogHtml_(log, idx, opts) {
     rateLabel = formatVocabCardViewingTime_(st.viewingSec) + ' / ' + st.cardsNavigated + '枚';
     asideScore = '<div class="log-score vocab-card-stats">' + escapeHtml_(formatVocabCardViewingTime_(st.viewingSec))
       + '<br><small>' + escapeHtml_(String(st.cardsNavigated)) + '枚めくり</small></div>';
+  } else if (isLink) {
+    const st = getWordLinkLogStats_(log);
+    rateLabel = (parseFloat(st.elapsedSec).toFixed(2)) + 's / ' + st.wordCount + '語';
+    asideScore = '<div class="log-score vocab-card-stats">' + escapeHtml_(parseFloat(st.elapsedSec).toFixed(2) + 's')
+      + '<br><small>' + escapeHtml_(String(st.wordCount)) + '語 / ミス' + escapeHtml_(String(st.totalWrong)) + '</small></div>';
   } else {
     const rate = parseInt(log['正答率'], 10);
     rateLabel = isNaN(rate) ? (log['正答率'] || '-') : (rate + '%');
@@ -12162,9 +12558,9 @@ function renderCollapsibleLogHtml_(log, idx, opts) {
   }
   const duration = formatLogDuration_(log);
   const detailParts = [log['モード'] || ''];
-  if (!isCard) detailParts.push('正答率 ' + rateLabel);
+  if (!isCard && !isLink) detailParts.push('正答率 ' + rateLabel);
   else detailParts.push(rateLabel);
-  if (duration && !isCard) detailParts.push(duration);
+  if (duration && !isCard && !isLink) detailParts.push(duration);
   const settingsText = formatSessionSettingsText_(log);
   let html = '<div class="log-item" data-collapse-root>';
   html += '<div class="log-item-summary">';
@@ -12277,6 +12673,10 @@ function formatLogDuration_(log) {
     const st = getVocabCardLogStats_(log);
     return formatVocabCardViewingTime_(st.viewingSec);
   }
+  if (isWordLinkLog_(log)) {
+    const st = getWordLinkLogStats_(log);
+    return parseFloat(st.elapsedSec).toFixed(2) + '秒';
+  }
   const t = log['解答時間'];
   if (t === null || t === undefined || t === '') {
     return log.source === 'vocab' ? '単語SRS' : '';
@@ -12293,6 +12693,29 @@ function isVocabCardLog_(log) {
   if (setId.indexOf('vocab-card:') === 0) return true;
   const settings = detail.settings;
   return !!(settings && settings.kind === 'vocab-card');
+}
+
+function isWordLinkLog_(log) {
+  const mode = String(log['モード'] || '').toLowerCase();
+  if (mode === 'word-link' || mode === 'word link') return true;
+  const detail = parseLogDetail_(log);
+  if (String(detail.Mode || detail.mode || '').toLowerCase() === 'word-link') return true;
+  const setId = String(detail.Set_ID || detail.setId || '');
+  if (setId.indexOf('word-link:') === 0) return true;
+  const settings = detail.settings;
+  return !!(settings && settings.kind === 'word-link');
+}
+
+function getWordLinkLogStats_(log) {
+  const detail = parseLogDetail_(log);
+  const settings = (detail.settings && typeof detail.settings === 'object') ? detail.settings : {};
+  const wl = settings.wordLink || detail.wordLink || {};
+  const elapsedSec = parseInt(log['解答時間'], 10);
+  return {
+    elapsedSec: !isNaN(elapsedSec) ? elapsedSec : (wl.elapsedSec || detail.Duration_Sec || 0),
+    wordCount: wl.wordCount != null ? wl.wordCount : (detail.Total || 0),
+    totalWrong: wl.totalWrong != null ? wl.totalWrong : 0
+  };
 }
 
 function getVocabCardLogStats_(log) {
@@ -12333,6 +12756,11 @@ function extractSheetNamesFromLog_(log) {
 
   if (setId.indexOf('vocab:') === 0) {
     const rest = setId.slice(6);
+    const slash = rest.indexOf('/');
+    return [slash >= 0 ? rest.slice(slash + 1) : setName];
+  }
+  if (setId.indexOf('word-link:') === 0) {
+    const rest = setId.slice(10);
     const slash = rest.indexOf('/');
     return [slash >= 0 ? rest.slice(slash + 1) : setName];
   }
@@ -12504,7 +12932,7 @@ async function renderMyPage(logs, renderOpts) {
   // 2. 教材（シート名）別進捗 & 弱点分析
   const sheetMap = {};
   logs.forEach(function (log) {
-    if (isVocabCardLog_(log)) return;
+    if (isVocabCardLog_(log) || isWordLinkLog_(log)) return;
     const rate = parseInt(log['正答率'], 10) || 0;
     extractSheetNamesFromLog_(log).forEach(function (sheetName) {
       if (!sheetMap[sheetName]) {
@@ -12653,5 +13081,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 </script>
 <script src="vocab-card-module.js"></script>
+<script src="vocab-link-module.js"></script>
 </body>
 </html>
