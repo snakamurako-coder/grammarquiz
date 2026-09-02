@@ -593,4 +593,6 @@ const VocabLinkModule = (function () {
   };
 })();
 
-window.VocabLinkModule = VocabLinkModule;
+if (typeof window !== 'undefined') {
+  window.VocabLinkModule = VocabLinkModule;
+}

@@ -2319,6 +2319,8 @@ body.vocab-link-active #vocab-link-screen { display: flex !important; }
 <script src="preset-store.js"></script>
 <script src="review-set-module.js"></script>
 <script src="vocab-session-draft.js"></script>
+<script src="vocab-card-module.js"></script>
+<script src="vocab-link-module.js"></script>
 <script>
 /** true: GAS① 認証ゲート必須（短命 auth トークン） */
 const AUTH_ENABLED = true;
@@ -10646,7 +10648,7 @@ if (vocabLinkStartBtn) {
       return;
     }
     if (!window.VocabLinkModule) {
-      alert('Word Link モジュールの読み込みに失敗しました。ページを再読み込みしてください。');
+      alert('Word Link モジュールの読み込みに失敗しました。ページを再読み込みしてください。\n（vocab-link-module.js が取得できていない可能性があります）');
       return;
     }
     if (window.TtsModule && typeof window.TtsModule.prime === 'function') {
@@ -13080,7 +13082,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (window.VocabSessionDraftModule) VocabSessionDraftModule.init();
 });
 </script>
-<script src="vocab-card-module.js"></script>
-<script src="vocab-link-module.js"></script>
 </body>
 </html>
