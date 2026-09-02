@@ -2351,8 +2351,9 @@ const TtsModule = (() => {
   function normalizeSpeakText(text) {
     return String(text || '')
       .replace(/[📢⭕️❌⚠️✅]/g, ' ')
-      .replace(/\(_{2,}\)/g, ', ')
+      .replace(/[(\uFF08]\s*_{2,}\s*[)\uFF09]/g, ', ')
       .replace(/_{3,}/g, ', ')
+      .replace(/[()（）]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
   }
@@ -2394,22 +2395,77 @@ const TtsModule = (() => {
         resolve();
         return;
       }
-      speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(utterText);
-      const voice = pickVoiceForLang(isJa ? 'ja-JP' : settings.locale);
-      if (voice) {
-        u.voice = voice;
-        u.lang = voice.lang || (isJa ? 'ja-JP' : settings.locale);
-      } else {
-        u.lang = isJa ? 'ja-JP' : settings.locale;
+
+      let settled = false;
+      const finish = function () {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+
+      const fire = function () {
+        if (settled) return;
+        try { speechSynthesis.resume(); } catch (e) { /* ignore */ }
+        speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(utterText);
+        const voice = pickVoiceForLang(isJa ? 'ja-JP' : settings.locale);
+        if (voice) {
+          u.voice = voice;
+          u.lang = voice.lang || (isJa ? 'ja-JP' : settings.locale);
+        } else {
+          u.lang = isJa ? 'ja-JP' : settings.locale;
+        }
+        u.rate = isJa ? settings.rateJa : settings.rateEn;
+        if (opts.rate != null) u.rate = clampRate_(opts.rate);
+        u.pitch = 1;
+        u.onend = finish;
+        u.onerror = finish;
+        setTimeout(function () {
+          if (settled) return;
+          try { speechSynthesis.resume(); } catch (e2) { /* ignore */ }
+          try {
+            speechSynthesis.speak(u);
+          } catch (e3) {
+            finish();
+            return;
+          }
+          setTimeout(function () {
+            if (settled) return;
+            if (speechSynthesis.speaking || speechSynthesis.pending) return;
+            try {
+              speechSynthesis.speak(u);
+            } catch (e4) { /* ignore */ }
+          }, 80);
+        }, 50);
+      };
+
+      const list = voices();
+      if (!list.length) {
+        let started = false;
+        const once = function () {
+          if (started) return;
+          started = true;
+          speechSynthesis.removeEventListener('voiceschanged', once);
+          fire();
+        };
+        speechSynthesis.addEventListener('voiceschanged', once);
+        setTimeout(once, 400);
+        return;
       }
-      u.rate = isJa ? settings.rateJa : settings.rateEn;
-      if (opts.rate != null) u.rate = clampRate_(opts.rate);
-      u.pitch = 1;
-      u.onend = function () { resolve(); };
-      u.onerror = function () { resolve(); };
-      speechSynthesis.speak(u);
+      fire();
     });
+  }
+
+  function prime() {
+    if (!supported()) return;
+    try {
+      speechSynthesis.resume();
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      u.rate = 10;
+      u.lang = load().locale || 'en-US';
+      speechSynthesis.speak(u);
+    } catch (e) { /* ignore */ }
   }
 
   function stop() {
@@ -2572,7 +2628,7 @@ const TtsModule = (() => {
   }
 
   return {
-    load, save, speak, speakText, stop, pickVoice, pickVoiceForLang,
+    load, save, speak, speakText, prime, stop, pickVoice, pickVoiceForLang,
     refreshTargetButtons, setResultSpeakText, refreshSettingsUi, syncVocabCardTtsForm_, readTtsForm_, bindUi, supported
   };
 })();
@@ -10333,6 +10389,9 @@ function bindVocabCardStart_(btn, scope) {
     if (!window.VocabCardModule) {
       alert('単語カードモジュールの読み込みに失敗しました。ページを再読み込みしてください。');
       return;
+    }
+    if (window.TtsModule && typeof window.TtsModule.prime === 'function') {
+      window.TtsModule.prime();
     }
     await BusyButton.run(btn, async function () {
       try {
