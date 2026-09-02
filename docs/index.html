@@ -804,6 +804,26 @@ body.vocab-link-active #vocab-link-screen { display: flex !important; }
   height: 48px; padding: 0 16px; font-size: 0.95rem; font-weight: bold; border-radius: 8px; cursor: pointer;
 }
 .vl-btn-action:active, .vl-btn-action-sub:active { opacity: 0.8; }
+.vl-ready-screen {
+  justify-content: center;
+  align-items: center;
+  z-index: 105;
+}
+.vl-start-go-btn {
+  background: #38bdf8;
+  color: #0f172a;
+  border: none;
+  min-width: min(80vw, 320px);
+  min-height: 88px;
+  padding: 18px 36px;
+  font-size: 2.4rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  border-radius: 16px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(56, 189, 248, 0.35);
+}
+.vl-start-go-btn:active { transform: scale(0.97); opacity: 0.9; }
 .vl-top-back {
   position: absolute; left: 8px; top: 8px; z-index: 110;
   background: #334155; color: #f8fafc; border: 1px solid #475569;
@@ -2247,6 +2267,10 @@ body.vocab-link-active #vocab-link-screen { display: flex !important; }
         </button>
       </div>
       <div></div>
+    </div>
+
+    <div class="vl-overlay-screen vl-ready-screen" id="vl-ready-screen" style="display: none;">
+      <button type="button" class="vl-start-go-btn" id="vl-ready-start-btn">START!</button>
     </div>
 
     <header class="vl-header">

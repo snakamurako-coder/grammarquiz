@@ -97,6 +97,9 @@ const VocabLinkModule = (function () {
 
   function hideScreen_() {
     stopTimer_();
+    clearBoard_();
+    hideOverlay_('vl-ready-screen');
+    hideOverlay_('vl-result-screen');
     if (window.TtsModule && typeof window.TtsModule.stop === 'function') {
       window.TtsModule.stop();
     }
@@ -110,28 +113,46 @@ const VocabLinkModule = (function () {
     if (settings) settings.style.display = 'block';
   }
 
+  function clearBoard_() {
+    const colLeft = el_('vl-col-left');
+    const colRight = el_('vl-col-right');
+    if (colLeft) colLeft.innerHTML = '';
+    if (colRight) colRight.innerHTML = '';
+  }
+
+  function hideOverlay_(id) {
+    const node = el_(id);
+    if (node) node.style.display = 'none';
+  }
+
   function showStartScreen_() {
     stopTimer_();
+    clearBoard_();
+    hideOverlay_('vl-result-screen');
+    hideOverlay_('vl-ready-screen');
     const start = el_('vl-start-screen');
-    const result = el_('vl-result-screen');
-    if (result) result.style.display = 'none';
     if (start) start.style.display = 'flex';
+  }
+
+  function showReadyScreen_() {
+    hideOverlay_('vl-start-screen');
+    hideOverlay_('vl-result-screen');
+    const ready = el_('vl-ready-screen');
+    if (ready) ready.style.display = 'flex';
   }
 
   function selectMode_(modeKey) {
     currentMode = modeKey;
-    const start = el_('vl-start-screen');
-    if (start) start.style.display = 'none';
-    const count = masterPairs.length;
-    startNewGame_(masterPairs.slice(0, count), false);
+    startNewGame_(masterPairs.slice(0, masterPairs.length), false);
   }
 
   function startNewGame_(pairs, isReview) {
     isReviewMode = !!isReview;
     sessionLogSaved = false;
-    const result = el_('vl-result-screen');
-    if (result) result.style.display = 'none';
     stopTimer_();
+    clearBoard_();
+    hideOverlay_('vl-result-screen');
+    hideOverlay_('vl-start-screen');
 
     currentGamePool = pairs.slice();
     remainingPool = shuffle_(currentGamePool);
@@ -149,6 +170,8 @@ const VocabLinkModule = (function () {
     selectedCard2 = null;
     firstTapTimestamp = null;
     isWrongState = false;
+    batchMatchedCount = 0;
+    currentBatch = [];
 
     const timerDisplay = el_('vl-timer');
     if (timerDisplay) timerDisplay.textContent = '0.00s';
@@ -157,7 +180,13 @@ const VocabLinkModule = (function () {
     const progressText = el_('vl-progress-text');
     if (progressText) progressText.textContent = '残り: ' + currentGamePool.length;
 
+    showReadyScreen_();
+  }
+
+  function beginPlay_() {
+    hideOverlay_('vl-ready-screen');
     loadNextBatch_();
+    startTimer_();
   }
 
   function loadNextBatch_() {
@@ -511,6 +540,9 @@ const VocabLinkModule = (function () {
     if (changeModeBtn) changeModeBtn.addEventListener('click', showStartScreen_);
     const changeModeBtn2 = el_('vl-change-mode-btn-2');
     if (changeModeBtn2) changeModeBtn2.addEventListener('click', showStartScreen_);
+
+    const readyStartBtn = el_('vl-ready-start-btn');
+    if (readyStartBtn) readyStartBtn.addEventListener('click', beginPlay_);
 
     const backBtn = el_('vl-back-btn');
     if (backBtn) backBtn.addEventListener('click', backToSettings_);
