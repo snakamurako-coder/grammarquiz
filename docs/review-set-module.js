@@ -119,8 +119,7 @@ const ReviewSetModule = (() => {
       });
     }
 
-    const limit = resolveLimit_(options, matched.length);
-    return matched.slice(0, limit).map(function (m) { return m.wordObj; });
+    return matched.map(function (m) { return m.wordObj; });
   }
 
   function countByBucket(words, bookName, sheetName) {

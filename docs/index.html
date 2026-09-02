@@ -78,6 +78,20 @@ button:active { opacity: 0.9; }
 #vocab-dummy-options-toggle-row label { margin-bottom: 0; }
 #vocab-dummy-options-section.is-expanded #vocab-dummy-options-toggle-row { margin-bottom: 8px; }
 #vocab-start-btn { font-size: 1.02em; }
+#vocab-pool-dummy-count {
+  box-sizing: border-box;
+  width: 8.4em;
+  min-width: 8.4em;
+  min-height: 96px;
+  padding: 16px 12px;
+  font-size: 32px;
+  line-height: 1.2;
+  text-align: center;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background-color: #f9f9f9;
+  color: inherit;
+}
 .vocab-card-target-panel { margin-bottom: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px; }
 .vocab-card-target-btn { width: 100%; min-height: 52px; padding: 16px 12px; font-size: 1.05em; font-weight: bold; margin-bottom: 10px; }
 .vocab-target-source-tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -7589,6 +7603,62 @@ const VocabQuizGenerator = (() => {
     return buildNormalQuestions(words, pool, bookPool, options, formats);
   }
 
+  function poolAnswerUniqKey_(wordObj, formatKey) {
+    if (VOCAB_EN_LEMMA_POOL_FORMATS[formatKey]) {
+      const lemma = vocabNorm(wordObj['英単語・熟語の表現']);
+      if (!lemma || lemma === VOCAB_UNREGISTERED) return '';
+      return 'en:' + lemmaKey_(lemma);
+    }
+    if (VOCAB_JA_POOL_FORMATS[formatKey]) {
+      const text = vocabNorm(jaTextForPool_(wordObj, formatKey));
+      if (!text || text === VOCAB_UNREGISTERED) return '';
+      return 'ja:' + formatKey + ':' + lemmaKey_(text);
+    }
+    return '';
+  }
+
+  function pickFormatForWord_(wordObj, formats) {
+    const available = (formats || []).filter(function (f) { return vocabFormatAvailable(wordObj, f); });
+    if (!available.length) return '';
+    return available[Math.floor(Math.random() * available.length)];
+  }
+
+  function allocPoolWordsUnique_(need, primary, usedKeys, formatKey) {
+    const out = [];
+    const seenAns = {};
+    const source = vocabShuffle(primary || []);
+    for (let i = 0; i < source.length && out.length < need; i++) {
+      const w = source[i];
+      const k = vocabWordKey(w);
+      if (!k || k === VOCAB_UNREGISTERED.toLowerCase()) continue;
+      if (usedKeys.has(k)) continue;
+      const ansKey = poolAnswerUniqKey_(w, formatKey);
+      if (!ansKey || seenAns[ansKey]) continue;
+      seenAns[ansKey] = true;
+      usedKeys.add(k);
+      out.push(w);
+    }
+    return out;
+  }
+
+  function pickPlannedItems_(words, formats, want) {
+    const shuffled = vocabShuffle(words || []);
+    const planned = [];
+    const usedAns = {};
+    for (let i = 0; i < shuffled.length && planned.length < want; i++) {
+      const wordObj = shuffled[i];
+      const formatKey = pickFormatForWord_(wordObj, formats);
+      if (!formatKey) continue;
+      if (vocabIsPoolFormat(formatKey)) {
+        const ansKey = poolAnswerUniqKey_(wordObj, formatKey);
+        if (!ansKey || usedAns[ansKey]) continue;
+        usedAns[ansKey] = true;
+      }
+      planned.push({ wordObj: wordObj, formatKey: formatKey });
+    }
+    return planned;
+  }
+
   function buildHomeworkQuestions(words, pool, bookPool, options, formats) {
     if (!formats.length) throw new Error('出題形式を1つ以上選択してください。');
     const perSection = options.homeworkPerSection || 5;
@@ -7599,7 +7669,9 @@ const VocabQuizGenerator = (() => {
 
     formats.forEach(function (formatKey) {
       const eligible = (words || []).filter(function (w) { return vocabFormatAvailable(w, formatKey); });
-      const allocated = vocabAllocWordsUnique(perSection, eligible, [], usedKeys);
+      const allocated = vocabIsPoolFormat(formatKey)
+        ? allocPoolWordsUnique_(perSection, eligible, usedKeys, formatKey)
+        : vocabAllocWordsUnique(perSection, eligible, [], usedKeys);
       if (allocated.length < perSection) {
         throw new Error(vocabHomeworkShortageMessage_(formatKey, perSection, allocated.length, rangeCount));
       }
@@ -7635,22 +7707,13 @@ const VocabQuizGenerator = (() => {
   }
 
   function buildNormalQuestions(words, pool, bookPool, options, formats) {
-    const shuffled = vocabShuffle(words);
-    let count = shuffled.length;
+    const sourceLen = (words || []).length;
+    let want = sourceLen;
     if (options.questionCount !== 'all') {
-      count = Math.min(parseInt(options.questionCount, 10) || shuffled.length, shuffled.length);
+      want = Math.min(parseInt(options.questionCount, 10) || sourceLen, sourceLen);
     }
-    const selectedWords = shuffled.slice(0, count);
     const noneRate = 0.25 + Math.random() * 0.0833;
-    const planned = [];
-    selectedWords.forEach(function (wordObj) {
-      const available = formats.filter(function (f) { return vocabFormatAvailable(wordObj, f); });
-      if (!available.length) return;
-      planned.push({
-        wordObj: wordObj,
-        formatKey: available[Math.floor(Math.random() * available.length)]
-      });
-    });
+    const planned = pickPlannedItems_(words, formats, want);
 
     const dummyCount = options.poolDummyCount != null ? options.poolDummyCount : 2;
     const enPoolWords = planned.filter(function (p) { return VOCAB_EN_LEMMA_POOL_FORMATS[p.formatKey]; }).map(function (p) { return p.wordObj; });
@@ -9244,15 +9307,11 @@ function prepareVocabQuestions(words, pool, bookPool, options, srsStates) {
   }
 
   let targetWords = words;
-  let limit = words.length;
-  if (options.questionCount !== 'all') {
-    limit = Math.min(parseInt(options.questionCount, 10) || words.length, words.length);
-  }
   if (options.reviewSetId && window.ReviewSetModule) {
     targetWords = window.ReviewSetModule.selectWords(
       words, options.reviewSetId, options.bookName, options.sheetName, options);
   } else if (window.SrsModule && options.bookName && options.sheetName) {
-    targetWords = window.SrsModule.selectDueWords(words, options.bookName, options.sheetName, limit);
+    targetWords = window.SrsModule.selectDueWords(words, options.bookName, options.sheetName, words.length);
   }
 
   return window.VocabQuizGenerator.buildQuestions(targetWords, pool, bookPool, options);
