@@ -608,6 +608,9 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
   border-radius: 8px; font-weight: 600; cursor: pointer;
 }
 .division-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 180px; overflow-y: auto; }
+.compact-division-section .form-group { margin-bottom: 8px; }
+.compact-division-section .form-group:last-of-type { margin-bottom: 0; }
+.compact-division-section .division-grid,
 .vocab-division-section .division-grid {
   gap: 2px 8px;
   max-height: 168px;
@@ -617,6 +620,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
   border-radius: 8px;
   -webkit-overflow-scrolling: touch;
 }
+.compact-division-section .division-grid .check-item,
 .vocab-division-section .division-grid .check-item {
   min-height: 26px;
   padding: 0 4px;
@@ -625,6 +629,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
   line-height: 1.2;
   border-radius: 4px;
 }
+.compact-division-section .division-grid .check-item input[type="checkbox"],
 .vocab-division-section .division-grid .check-item input[type="checkbox"] {
   width: 16px;
   height: 16px;
@@ -955,13 +960,24 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
 .dashboard-grid { display: flex; flex-direction: column; gap: 14px; }
 .dashboard-card { background: #fff; padding: 14px; border-radius: 10px; border: 1px solid #e0e0e0; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
 .card-title { font-weight: bold; font-size: 1.05em; margin-bottom: 12px; border-bottom: 2px solid #f0f0f0; padding-bottom: 8px; }
+.card-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 0; }
+.card-title-row .card-title { margin-bottom: 0; border-bottom: none; padding-bottom: 0; flex: 1; min-width: 0; }
+.dashboard-card.is-expanded .card-title-row { margin-bottom: 12px; border-bottom: 2px solid #f0f0f0; padding-bottom: 8px; }
+.dashboard-card.is-expanded.weakness-card .card-title-row { border-bottom-color: #ffebee; }
+.dashboard-card.is-expanded.recent-card .card-title-row { border-bottom-color: #e3f2fd; }
+.dashboard-card.is-expanded.progress-card .card-title-row { border-bottom-color: #e8f5e9; }
+.dashboard-card.is-expanded.grammar-area-card .card-title-row { border-bottom-color: #f3e5f5; }
+.log-item-summary { display: flex; align-items: flex-start; gap: 8px; width: 100%; }
+.log-item-summary .log-expand-btn { flex-shrink: 0; }
+.log-item-summary .log-item-head { flex: 1; min-width: 0; }
+.log-item-detail { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #eceff1; }
 .weakness-card .card-title { color: #d32f2f; border-bottom-color: #ffebee; }
 .recent-card .card-title { color: #1976d2; border-bottom-color: #e3f2fd; }
 .progress-card .card-title { color: #388e3c; border-bottom-color: #e8f5e9; }
 .grammar-area-card .card-title { color: #6a1b9a; border-bottom-color: #f3e5f5; }
 
 .dashboard-content { font-size: 0.92em; color: #555; }
-.log-item { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 10px 0; border-bottom: 1px solid #f5f5f5; }
+.log-item[data-collapse-root] { flex-direction: column; align-items: stretch; }
 .log-item:last-child { border-bottom: none; }
 .log-title { font-weight: bold; color: var(--c-text); margin-bottom: 4px; word-break: break-word; }
 .log-meta { font-size: 0.8em; color: #888; }
@@ -1121,25 +1137,33 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         <button type="button" id="mypage-refresh-btn" class="btn-small" style="font-weight:normal;">更新</button>
       </div>
       <div class="dashboard-grid">
-        <!-- 弱点分析 -->
-        <div class="dashboard-card weakness-card">
-          <div class="card-title">🚨 優先して復習すべきセット</div>
-          <div id="weakness-list" class="dashboard-content">タブを開くと読み込みます</div>
+        <div class="dashboard-card weakness-card" data-collapse-root>
+          <div class="card-title-row">
+            <div class="card-title">🚨 優先して復習すべきセット</div>
+            <button type="button" class="btn-small" data-collapse-toggle aria-expanded="false">表示</button>
+          </div>
+          <div id="weakness-list" class="dashboard-content" data-collapse-panel hidden>タブを開くと読み込みます</div>
         </div>
-        <!-- 最近の学習履歴 -->
-        <div class="dashboard-card recent-card">
-          <div class="card-title">🕒 最近の学習履歴 (直近5回)</div>
-          <div id="recent-history-list" class="dashboard-content">タブを開くと読み込みます</div>
+        <div class="dashboard-card recent-card" data-collapse-root>
+          <div class="card-title-row">
+            <div class="card-title">🕒 最近の学習履歴 (直近5回)</div>
+            <button type="button" class="btn-small" data-collapse-toggle aria-expanded="false">表示</button>
+          </div>
+          <div id="recent-history-list" class="dashboard-content" data-collapse-panel hidden>タブを開くと読み込みます</div>
         </div>
-        <!-- 教材（シート）別進捗 -->
-        <div class="dashboard-card progress-card">
-          <div class="card-title">📈 教材（シート）別の進捗</div>
-          <div id="set-progress-list" class="dashboard-content">タブを開くと読み込みます</div>
+        <div class="dashboard-card progress-card" data-collapse-root>
+          <div class="card-title-row">
+            <div class="card-title">📈 教材（シート）別の進捗</div>
+            <button type="button" class="btn-small" data-collapse-toggle aria-expanded="false">表示</button>
+          </div>
+          <div id="set-progress-list" class="dashboard-content" data-collapse-panel hidden>タブを開くと読み込みます</div>
         </div>
-        <!-- ターゲット文法領域別理解度 -->
-        <div class="dashboard-card grammar-area-card">
-          <div class="card-title">📚 ターゲット文法領域別の理解度</div>
-          <div id="grammar-area-progress-list" class="dashboard-content">タブを開くと読み込みます</div>
+        <div class="dashboard-card grammar-area-card" data-collapse-root>
+          <div class="card-title-row">
+            <div class="card-title">📚 ターゲット文法領域別の理解度</div>
+            <button type="button" class="btn-small" data-collapse-toggle aria-expanded="false">表示</button>
+          </div>
+          <div id="grammar-area-progress-list" class="dashboard-content" data-collapse-panel hidden>タブを開くと読み込みます</div>
         </div>
       </div>
     </div>
@@ -1157,7 +1181,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
       <div class="section-title">2. 教材</div>
       <div class="unit-grid" id="unit-container"></div>
     </div>
-    <div class="setting-section">
+    <div class="setting-section compact-division-section">
       <div class="section-title section-title-with-meta">
         <span>3. 絞り込み</span>
         <span id="grammar-filter-count" class="section-title-meta" aria-live="polite"></span>
@@ -1264,7 +1288,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           <select id="vocab-sheet-select"></select>
         </div>
       </div>
-      <div class="setting-section vocab-shared-section vocab-division-section">
+      <div class="setting-section vocab-shared-section vocab-division-section compact-division-section">
         <div class="section-title section-title-with-meta">
           <span>2. 区分で絞り込み（任意）</span>
           <span id="vocab-card-division-count" class="section-title-meta" aria-live="polite"></span>
@@ -1533,7 +1557,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
       <div id="manage-logs-panel" style="display:none;">
         <div class="setting-section" id="mypage-container-inner">
           <div class="section-title">学習記録（直近30回）</div>
-          <p style="font-size:0.85em;color:#666;margin:0 0 10px;">各行の「再現」で、当時の出題設定だけを学習タブに復元します（出た問題そのものは再現しません）。</p>
+          <p style="font-size:0.85em;color:#666;margin:0 0 10px;">最初は見出しと日時だけです。「表示」で詳細と「再現」が出ます。再現は当時の出題設定だけを学習タブに復元します（出た問題そのものは再現しません）。</p>
           <div id="user-logs-list">ログイン後に読み込まれます</div>
         </div>
       </div>
@@ -10972,6 +10996,8 @@ function initModeTabs() {
   if (initModeTabs._done) return;
   initModeTabs._done = true;
   bindMyPageRefreshButton_();
+  bindCollapseToggles_();
+  placeManagePanelBeforeMypage_();
   const tabs = document.querySelectorAll('.mode-tab:not(.manage-sub-tab):not(.vocab-mode-tab)');
   const grammarPanel = document.getElementById('grammar-settings-panel');
   const vocabPanel = document.getElementById('vocab-settings-panel');
@@ -11741,6 +11767,76 @@ function switchManageSubTab_(name) {
   }
 }
 
+function bindCollapseToggles_() {
+  if (bindCollapseToggles_._done) return;
+  bindCollapseToggles_._done = true;
+  document.addEventListener('click', function (e) {
+    const btn = e.target && e.target.closest ? e.target.closest('[data-collapse-toggle]') : null;
+    if (!btn) return;
+    const root = btn.closest('[data-collapse-root]');
+    if (!root) return;
+    const panel = root.querySelector('[data-collapse-panel]');
+    if (!panel) return;
+    const open = panel.hasAttribute('hidden');
+    if (open) panel.removeAttribute('hidden');
+    else panel.setAttribute('hidden', '');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.textContent = open ? '格納' : '表示';
+    root.classList.toggle('is-expanded', open);
+  });
+}
+
+function placeManagePanelBeforeMypage_() {
+  const panel = document.getElementById('manage-panel');
+  const mypage = document.getElementById('mypage-container');
+  if (!panel || !mypage || !mypage.parentNode) return;
+  if (panel.nextElementSibling === mypage) return;
+  mypage.parentNode.insertBefore(panel, mypage);
+}
+
+function renderCollapsibleLogHtml_(log, idx, opts) {
+  opts = opts || {};
+  const isCard = isVocabCardLog_(log);
+  let rateLabel;
+  let asideScore;
+  if (isCard) {
+    const st = getVocabCardLogStats_(log);
+    rateLabel = formatVocabCardViewingTime_(st.viewingSec) + ' / ' + st.cardsNavigated + '枚';
+    asideScore = '<div class="log-score vocab-card-stats">' + escapeHtml_(formatVocabCardViewingTime_(st.viewingSec))
+      + '<br><small>' + escapeHtml_(String(st.cardsNavigated)) + '枚めくり</small></div>';
+  } else {
+    const rate = parseInt(log['正答率'], 10);
+    rateLabel = isNaN(rate) ? (log['正答率'] || '-') : (rate + '%');
+    const scoreClass = !isNaN(rate)
+      ? (rate >= 80 ? 'score-perfect' : rate >= 60 ? 'score-good' : rate >= 40 ? 'score-warn' : 'score-poor')
+      : '';
+    asideScore = '<div class="log-score ' + scoreClass + '">' + escapeHtml_(String(rateLabel)) + '</div>';
+  }
+  const duration = formatLogDuration_(log);
+  const detailParts = [log['モード'] || ''];
+  if (!isCard) detailParts.push('正答率 ' + rateLabel);
+  else detailParts.push(rateLabel);
+  if (duration && !isCard) detailParts.push(duration);
+  const settingsText = formatSessionSettingsText_(log);
+  let html = '<div class="log-item" data-collapse-root>';
+  html += '<div class="log-item-summary">';
+  html += '<button type="button" class="btn-small log-expand-btn" data-collapse-toggle aria-expanded="false">表示</button>';
+  html += '<div class="log-item-head">';
+  html += '<div class="log-title">' + escapeHtml_(log['学習セット名'] || '—') + '</div>';
+  html += '<div class="log-meta">' + escapeHtml_(log['タイムスタンプ'] || '') + '</div>';
+  html += '</div></div>';
+  html += '<div class="log-item-detail" data-collapse-panel hidden>';
+  html += '<div class="log-item-aside" style="flex-direction:row;align-items:center;justify-content:flex-end;margin-bottom:8px;">' + asideScore;
+  if (opts.showReproduce) {
+    html += '<button type="button" class="log-reproduce-btn" data-reproduce-log="' + idx + '">再現</button>';
+  }
+  html += '</div>';
+  html += '<div class="log-meta">' + escapeHtml_(detailParts.filter(Boolean).join(' / ')) + '</div>';
+  html += '<div class="log-settings">' + escapeHtml_(settingsText) + '</div>';
+  html += '</div></div>';
+  return html;
+}
+
 function bindMyPageRefreshButton_() {
   const refreshBtn = document.getElementById('mypage-refresh-btn');
   if (refreshBtn && !refreshBtn._mypageRefreshBound) {
@@ -11823,36 +11919,7 @@ function renderUserLogsList_(logs) {
   const show = lastFetchedLearningLogs_.slice(0, 30);
   let html = '';
   show.forEach(function (log, idx) {
-    const isCard = isVocabCardLog_(log);
-    let rateLabel;
-    let asideScore;
-    if (isCard) {
-      const st = getVocabCardLogStats_(log);
-      rateLabel = formatVocabCardViewingTime_(st.viewingSec) + ' / ' + st.cardsNavigated + '枚';
-      asideScore = '<div class="log-score vocab-card-stats">' + escapeHtml_(formatVocabCardViewingTime_(st.viewingSec))
-        + '<br><small>' + escapeHtml_(String(st.cardsNavigated)) + '枚めくり</small></div>';
-    } else {
-      const rate = parseInt(log['正答率'], 10);
-      rateLabel = isNaN(rate) ? (log['正答率'] || '-') : (rate + '%');
-      asideScore = '<div class="log-score">' + escapeHtml_(String(rateLabel)) + '</div>';
-    }
-    const duration = formatLogDuration_(log);
-    const metaParts = [log['タイムスタンプ'] || '', log['モード'] || ''];
-    if (!isCard) metaParts.push('正答率 ' + rateLabel);
-    else metaParts.push(rateLabel);
-    if (duration && !isCard) metaParts.push(duration);
-    const settingsText = formatSessionSettingsText_(log);
-    html += '<div class="log-item">'
-      + '<div class="log-item-main">'
-      + '<div class="log-title">' + escapeHtml_(log['学習セット名'] || '—') + '</div>'
-      + '<div class="log-meta">' + escapeHtml_(metaParts.filter(Boolean).join(' / ')) + '</div>'
-      + '<div class="log-settings">' + escapeHtml_(settingsText) + '</div>'
-      + '</div>'
-      + '<div class="log-item-aside">'
-      + asideScore
-      + '<button type="button" class="log-reproduce-btn" data-reproduce-log="' + idx + '">再現</button>'
-      + '</div>'
-      + '</div>';
+    html += renderCollapsibleLogHtml_(log, idx, { showReproduce: true });
   });
   el.innerHTML = html;
 }
@@ -12081,35 +12148,8 @@ async function renderMyPage(logs, renderOpts) {
   // 1. 最近の学習履歴 (直近5件) — 設定詳細つき
   const recentLogs = logs.slice(0, 5);
   let recentHtml = '';
-  recentLogs.forEach(log => {
-    const isCard = isVocabCardLog_(log);
-    const duration = formatLogDuration_(log);
-    const metaParts = [log['タイムスタンプ'] || ''];
-    let asideHtml;
-    if (isCard) {
-      const st = getVocabCardLogStats_(log);
-      if (duration) metaParts.push(duration);
-      metaParts.push(st.cardsNavigated + '枚めくり');
-      asideHtml = `<div class="log-score vocab-card-stats">${escapeHtml_(formatVocabCardViewingTime_(st.viewingSec))}<br><small>${escapeHtml_(String(st.cardsNavigated))}枚めくり</small></div>`;
-    } else {
-      const rate = parseInt(log['正答率'], 10) || 0;
-      const scoreClass = rate >= 80 ? 'score-perfect' : rate >= 60 ? 'score-good' : rate >= 40 ? 'score-warn' : 'score-poor';
-      if (duration) metaParts.push(duration);
-      asideHtml = `<div class="log-score ${scoreClass}">${rate}%</div>`;
-    }
-    const settingsText = formatSessionSettingsText_(log);
-    recentHtml += `
-      <div class="log-item">
-        <div class="log-item-main">
-          <div class="log-title">${escapeHtml_(log['学習セット名'] || '—')}</div>
-          <div class="log-meta">${escapeHtml_(metaParts.join(' - '))}</div>
-          <div class="log-settings">${escapeHtml_(settingsText)}</div>
-        </div>
-        <div class="log-item-aside">
-          ${asideHtml}
-        </div>
-      </div>
-    `;
+  recentLogs.forEach(function (log, idx) {
+    recentHtml += renderCollapsibleLogHtml_(log, idx, { showReproduce: false });
   });
   document.getElementById('recent-history-list').innerHTML = recentHtml;
 
