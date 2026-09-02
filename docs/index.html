@@ -88,6 +88,36 @@ button:active { opacity: 0.9; }
 .vocab-mark-mode-switch { display: flex; align-items: center; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
 .vocab-mark-mode-label { font-size: 0.88em; color: #607d8b; }
 .vocab-mark-mode-label.is-active { color: #1565c0; font-weight: bold; }
+.quiz-nav-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.quiz-nav-switch-label {
+  font-size: 0.82em;
+  color: #607d8b;
+  line-height: 1.25;
+  max-width: 9.8em;
+}
+.quiz-nav-switch-label.is-active { color: #1565c0; font-weight: bold; }
+.question-instruction-row .quiz-nav-switch { flex: 1 1 auto; }
+.pool-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.quiz-nav-switch--pool .quiz-nav-switch-label {
+  color: rgba(255,255,255,0.7);
+  font-size: 11px;
+  max-width: 7.2em;
+}
+.quiz-nav-switch--pool .quiz-nav-switch-label.is-active { color: #fff; font-weight: bold; }
+.quiz-nav-switch--pool .slide-switch-slider { background: rgba(255,255,255,0.35); }
+.quiz-nav-switch--pool .slide-switch input:checked + .slide-switch-slider { background: #a5b4fc; }
 .slide-switch { position: relative; display: inline-block; width: 48px; height: 26px; flex-shrink: 0; }
 .slide-switch input { opacity: 0; width: 0; height: 0; }
 .slide-switch-slider { position: absolute; cursor: pointer; inset: 0; background: #cfd8dc; border-radius: 26px; transition: 0.2s; }
@@ -1649,8 +1679,15 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           <p style="font-size:0.9em;color:#666;margin-bottom:12px;">文法・単語クイズ・宿題／小テストで共通です。←→キーでも前／次の問題に移ります（未回答のままでも可）。</p>
           <div class="form-group">
             <label>回答後の動き</label>
-            <button type="button" id="quiz-auto-advance-toggle" class="btn-small" style="width:auto;min-width:220px;"></button>
-            <p class="filter-axis-hint" style="margin-top:8px;">「回答直後に次の問題へ」にすると、決定と同時に次へ進みます。「要「次の問題へ」のボタン押し込み」なら、回答後にボタン（または Enter）で進みます。</p>
+            <div class="quiz-nav-switch vocab-target-source-switch" style="margin:0;">
+              <span class="quiz-nav-switch-label" data-quiz-nav="auto">回答直後に次の問題</span>
+              <label class="slide-switch" title="スライドで切り替え">
+                <input type="checkbox" class="quiz-nav-require-switch" checked aria-label="要「次の問題」操作に切り替え">
+                <span class="slide-switch-slider"></span>
+              </label>
+              <span class="quiz-nav-switch-label" data-quiz-nav="manual">要「次の問題」操作</span>
+            </div>
+            <p class="filter-axis-hint" style="margin-top:8px;">太字側がいま有効です。「回答直後に次の問題」は決定と同時に次へ進みます。「要「次の問題」操作」は、回答後にボタン（または Enter）で進みます。</p>
           </div>
         </div>
         <div class="setting-section">
@@ -1688,7 +1725,14 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
       <div class="question-instruction-wrap">
         <div class="question-instruction-row">
           <button type="button" id="question-instruction-btn" class="btn-instruction-toggle">出題指示を確認する</button>
-          <button type="button" id="auto-advance-toggle" class="btn-instruction-toggle" aria-pressed="false">要「次の問題へ」</button>
+          <div class="quiz-nav-switch">
+            <span class="quiz-nav-switch-label" data-quiz-nav="auto">回答直後に次の問題</span>
+            <label class="slide-switch" title="スライドで切り替え">
+              <input type="checkbox" class="quiz-nav-require-switch" checked aria-label="要「次の問題」操作に切り替え">
+              <span class="slide-switch-slider"></span>
+            </label>
+            <span class="quiz-nav-switch-label" data-quiz-nav="manual">要「次の問題」操作</span>
+          </div>
           <button id="next-btn" class="btn-primary btn-next-in-card" style="display: none;">次の問題へ進む</button>
         </div>
         <div class="question-instruction" id="question-instruction" hidden></div>
@@ -1827,7 +1871,17 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
       <div class="pool-phone-frame">
         <div class="pool-phone-header">
           <span class="assignment-timer pool-header-timer" id="pool-header-status">制限なし</span>
-          <button type="button" class="pool-header-btn" id="pool-toggle-view-btn">一覧で確認</button>
+          <div class="pool-header-actions">
+            <button type="button" class="pool-header-btn" id="pool-toggle-view-btn">一覧で確認</button>
+            <div class="quiz-nav-switch quiz-nav-switch--pool">
+              <span class="quiz-nav-switch-label" data-quiz-nav="auto">回答直後に次の問題</span>
+              <label class="slide-switch" title="スライドで切り替え">
+                <input type="checkbox" class="quiz-nav-require-switch" checked aria-label="要「次の問題」操作に切り替え">
+                <span class="slide-switch-slider"></span>
+              </label>
+              <span class="quiz-nav-switch-label" data-quiz-nav="manual">要「次の問題」操作</span>
+            </div>
+          </div>
         </div>
         <div id="pool-section-nav" class="asg-section-nav pool-section-nav" hidden></div>
         <div class="pool-quiz-container" id="pool-quiz-mode">
@@ -2595,32 +2649,37 @@ const QuizNavSettings = (() => {
     return save({ autoAdvance: !autoAdvance() });
   }
 
-  function label_(on) {
-    return on
-      ? '回答直後に次の問題へ'
-      : '要「次の問題へ」のボタン押し込み';
-  }
-
   function refreshUi() {
     const on = autoAdvance();
-    ['quiz-auto-advance-toggle', 'auto-advance-toggle'].forEach(function (id) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.textContent = label_(on);
-      el.setAttribute('aria-pressed', on ? 'true' : 'false');
+    document.querySelectorAll('.quiz-nav-require-switch').forEach(function (el) {
+      el.checked = !on;
+      el.setAttribute('aria-checked', on ? 'false' : 'true');
+    });
+    document.querySelectorAll('[data-quiz-nav="auto"]').forEach(function (el) {
+      el.classList.toggle('is-active', on);
+    });
+    document.querySelectorAll('[data-quiz-nav="manual"]').forEach(function (el) {
+      el.classList.toggle('is-active', !on);
     });
   }
 
   function bindUi() {
     if (bound) return;
     bound = true;
-    ['quiz-auto-advance-toggle', 'auto-advance-toggle'].forEach(function (id) {
-      const el = document.getElementById(id);
+    document.addEventListener('change', function (e) {
+      const el = e.target && e.target.classList && e.target.classList.contains('quiz-nav-require-switch')
+        ? e.target : null;
       if (!el) return;
-      el.addEventListener('click', function () {
-        toggle();
-        refreshUi();
-      });
+      save({ autoAdvance: !el.checked });
+      refreshUi();
+    });
+    document.addEventListener('click', function (e) {
+      const label = e.target && e.target.closest ? e.target.closest('[data-quiz-nav]') : null;
+      if (!label) return;
+      const mode = label.getAttribute('data-quiz-nav');
+      if (mode !== 'auto' && mode !== 'manual') return;
+      save({ autoAdvance: mode === 'auto' });
+      refreshUi();
     });
     refreshUi();
   }
