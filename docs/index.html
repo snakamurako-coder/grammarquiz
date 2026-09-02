@@ -69,7 +69,15 @@ button:active { opacity: 0.9; }
 .vocab-3a-note { margin: 0 0 10px; padding: 8px 10px; background: #fff8e1; border-radius: 8px; color: #6d4c00; }
 .vocab-3b-subsection { margin-top: 16px; padding-top: 12px; border-top: 1px solid #eceff1; }
 .vocab-3b-subsection:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
-.vocab-3b-subsection .subsection-title { font-size: 0.95em; font-weight: bold; color: #546e7a; margin-bottom: 10px; }
+#vocab-quiz-section .check-item { font-size: 0.88em; min-height: 38px; gap: 8px; }
+#vocab-quiz-section .check-item .opt-ico { flex-shrink: 0; font-size: 1.05em; line-height: 1; }
+#vocab-quiz-section .form-group > label { font-size: 0.84em; }
+#vocab-dummy-options-toggle-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 0;
+}
+#vocab-dummy-options-toggle-row label { margin-bottom: 0; }
+#vocab-dummy-options-section.is-expanded #vocab-dummy-options-toggle-row { margin-bottom: 8px; }
+#vocab-start-btn { font-size: 1.02em; }
 .vocab-card-target-panel { margin-bottom: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px; }
 .vocab-card-target-btn { width: 100%; min-height: 52px; padding: 16px 12px; font-size: 1.05em; font-weight: bold; margin-bottom: 10px; }
 .vocab-target-source-tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -1381,33 +1389,73 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
         <div class="form-group">
           <label>① 和英 / 英和</label>
           <div class="check-list" id="vocab-axis-direction">
-            <label class="check-item"><input type="checkbox" value="jaen" checked> 和英（日本語で出題し英語を解答）</label>
-            <label class="check-item"><input type="checkbox" value="enja"> 英和（英語で出題し日本語を解答）</label>
+            <label class="check-item"><input type="checkbox" value="jaen" checked> <span class="opt-ico" aria-hidden="true">🇯🇵→🇺🇸</span> 和英（日本語で出題し英語を解答）</label>
+            <label class="check-item"><input type="checkbox" value="enja"> <span class="opt-ico" aria-hidden="true">🇺🇸→🇯🇵</span> 英和（英語で出題し日本語を解答）</label>
           </div>
         </div>
         <div class="form-group">
           <label>② 語 / 句 / 例文</label>
           <div class="check-list" id="vocab-axis-grain">
-            <label class="check-item"><input type="checkbox" value="WD" checked> 語to語</label>
-            <label class="check-item"><input type="checkbox" value="PH"> 句to句</label>
-            <label class="check-item"><input type="checkbox" value="EX"> 例文to例文</label>
+            <label class="check-item"><input type="checkbox" value="WD" checked> <span class="opt-ico" aria-hidden="true">🔤</span> 語to語</label>
+            <label class="check-item"><input type="checkbox" value="PH"> <span class="opt-ico" aria-hidden="true">💬</span> 句to句</label>
+            <label class="check-item"><input type="checkbox" value="EX"> <span class="opt-ico" aria-hidden="true">📝</span> 例文to例文</label>
           </div>
           <p class="filter-axis-hint" style="margin-top:6px;">和英の句to句は、チャンクの日本語訳を見て英語チャンクの ( ) に入るものを答えます。</p>
         </div>
         <div class="form-group">
           <label>③ 解答方法</label>
           <div class="check-list" id="vocab-axis-response">
-            <label class="check-item"><input type="radio" name="vocab-response" value="choice" checked> 選択</label>
-            <label class="check-item"><input type="radio" name="vocab-response" value="typing"> タイピング</label>
-            <label class="check-item"><input type="radio" name="vocab-response" value="speech"> 音声入力（STT＋タイピング）</label>
+            <label class="check-item"><input type="radio" name="vocab-response" value="choice" checked> <span class="opt-ico" aria-hidden="true">✅</span> 選択</label>
+            <label class="check-item"><input type="radio" name="vocab-response" value="typing"> <span class="opt-ico" aria-hidden="true">⌨</span> タイピング</label>
+            <label class="check-item"><input type="radio" name="vocab-response" value="speech"> <span class="opt-ico" aria-hidden="true">🎤</span> 音声入力（STT＋タイピング）</label>
           </div>
           <p class="filter-axis-hint" style="margin-top:6px;">音声入力は和英のみです。英和は日本語タイピングになります。</p>
         </div>
         <div class="form-group" id="vocab-choice-style-wrap">
           <label>選択の出し方</label>
           <div class="check-list">
-            <label class="check-item"><input type="radio" name="vocab-choice-style" value="dedicated" checked> 各問専用選択肢</label>
-            <label class="check-item"><input type="radio" name="vocab-choice-style" value="pool"> 選択肢プール（各カード1回）</label>
+            <label class="check-item"><input type="radio" name="vocab-choice-style" value="dedicated" checked> <span class="opt-ico" aria-hidden="true">📋</span> 各問専用選択肢</label>
+            <label class="check-item"><input type="radio" name="vocab-choice-style" value="pool"> <span class="opt-ico" aria-hidden="true">🗂️</span> 選択肢プール（各カード1回）</label>
+          </div>
+        </div>
+        <div class="form-group" id="vocab-dummy-options-section" data-collapse-root>
+          <div id="vocab-dummy-options-toggle-row">
+            <label>🎲 ダミー選出オプション</label>
+            <button type="button" class="btn-small" data-collapse-toggle aria-expanded="false">表示</button>
+          </div>
+          <div data-collapse-panel hidden>
+            <p class="filter-axis-hint" style="margin:0 0 8px;">選択問題の誤答カードの集め方です。普段はいじらなくて大丈夫です。</p>
+            <div class="form-group">
+              <label>選出範囲（不足時は上位範囲へ自動拡張）</label>
+              <select id="vocab-dummy-scope">
+                <option value="sho">同一小区分</option>
+                <option value="chu">同一中区分</option>
+                <option value="dai">同一大区分</option>
+                <option value="sheet" selected>同一シート（教材）</option>
+                <option value="book">同一ブック全体</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>選出条件</label>
+              <select id="vocab-dummy-method">
+                <option value="none" selected>指定なし</option>
+                <option value="samePos">同一品詞選択肢</option>
+                <option value="diffPos">相違品詞選択肢</option>
+                <option value="sameAffix">同一頭文字・接辞</option>
+              </select>
+            </div>
+            <div class="form-group" id="vocab-affix-options" style="display:none;">
+              <label>接辞一致（1〜3文字）</label>
+              <div class="check-list">
+                <label class="check-item"><input type="radio" name="vocab-affix-type" value="prefix" checked> 先頭1〜3文字</label>
+                <label class="check-item"><input type="radio" name="vocab-affix-type" value="suffix"> 語末1〜3文字</label>
+              </div>
+              <select id="vocab-affix-len">
+                <option value="1">1文字</option>
+                <option value="2" selected>2文字</option>
+                <option value="3">3文字</option>
+              </select>
+            </div>
           </div>
         </div>
         </div>
@@ -1446,50 +1494,16 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           </select>
         </div>
         <div class="form-group" id="vocab-pool-dummy-wrap" style="display:none;">
-          <label>選択肢プールのダミー枚数</label>
+          <label>🗂️ 選択肢プールのダミー枚数</label>
           <input type="number" id="vocab-pool-dummy-count" min="0" max="30" value="2" inputmode="numeric">
           <p class="filter-axis-hint" style="margin-top:6px;">正答カード（出題数ぶん・重複なし）に、この枚数のダミーを足します。初期値は +2 です。</p>
         </div>
         <div class="check-list" id="vocab-special-options-wrap">
-          <label class="check-item"><input type="checkbox" id="vocab-include-unknown" checked> 「わからない」選択肢を含める</label>
-          <label class="check-item"><input type="checkbox" id="vocab-include-none" checked> 「この中に正答はない」選択肢を含める</label>
+          <label class="check-item"><input type="checkbox" id="vocab-include-unknown" checked> <span class="opt-ico" aria-hidden="true">🤷</span> 「わからない」選択肢を含める</label>
+          <label class="check-item"><input type="checkbox" id="vocab-include-none" checked> <span class="opt-ico" aria-hidden="true">🚫</span> 「この中に正答はない」選択肢を含める</label>
         </div>
         </div>
-        <div class="vocab-3b-subsection" id="vocab-dummy-options-section">
-        <div class="subsection-title">ダミー選出オプション</div>
-        <div class="form-group">
-          <label>選出範囲（不足時は上位範囲へ自動拡張）</label>
-          <select id="vocab-dummy-scope">
-            <option value="sho">同一小区分</option>
-            <option value="chu">同一中区分</option>
-            <option value="dai">同一大区分</option>
-            <option value="sheet" selected>同一シート（教材）</option>
-            <option value="book">同一ブック全体</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>選出条件</label>
-          <select id="vocab-dummy-method">
-            <option value="none" selected>指定なし</option>
-            <option value="samePos">同一品詞選択肢</option>
-            <option value="diffPos">相違品詞選択肢</option>
-            <option value="sameAffix">同一頭文字・接辞</option>
-          </select>
-        </div>
-        <div class="form-group" id="vocab-affix-options" style="display:none;">
-          <label>接辞一致（1〜3文字）</label>
-          <div class="check-list">
-            <label class="check-item"><input type="radio" name="vocab-affix-type" value="prefix" checked> 先頭1〜3文字</label>
-            <label class="check-item"><input type="radio" name="vocab-affix-type" value="suffix"> 語末1〜3文字</label>
-          </div>
-          <select id="vocab-affix-len">
-            <option value="1">1文字</option>
-            <option value="2" selected>2文字</option>
-            <option value="3">3文字</option>
-          </select>
-        </div>
-        </div>
-      <button id="vocab-start-btn" class="btn-primary">単語クイズを開始する</button>
+      <button id="vocab-start-btn" class="btn-primary">▶ 単語クイズを開始する</button>
       </div>
 
       <div class="setting-section" id="vocab-review-section" data-vocab-mode-panel="review" style="display:none;">
