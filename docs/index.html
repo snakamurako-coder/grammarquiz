@@ -584,6 +584,26 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
   text-align: center; display: none; flex-direction: column; justify-content: center; align-items: center;
   gap: 16px; background: #fff; padding: 24px; border-radius: 20px; width: 100%; flex: 1;
 }
+.register-preset-pick-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 9200;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.register-preset-pick-dialog {
+  background: #fff; border-radius: 12px; width: 100%; max-width: 420px; max-height: 80dvh;
+  overflow: auto; padding: 16px 16px 12px; box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+}
+.register-preset-pick-dialog h3 { margin: 0 0 8px; font-size: 1.05em; color: #37474f; }
+.register-preset-pick-dialog p { margin: 0 0 12px; font-size: 0.88em; color: #607d8b; line-height: 1.4; }
+.register-preset-pick-list { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; }
+.register-preset-pick-item {
+  display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 8px 10px;
+  border: 1px solid #cfd8dc; border-radius: 8px; background: #f7f9fb; cursor: pointer;
+}
+.register-preset-pick-item:has(input:checked) { border-color: #1565c0; background: #e3f2fd; }
+.register-preset-pick-item input { margin-top: 3px; flex-shrink: 0; }
+.register-preset-pick-item .pick-label { font-weight: 700; color: #37474f; font-size: 0.92em; }
+.register-preset-pick-item .pick-snippet { font-size: 0.8em; color: #607d8b; margin-top: 4px; line-height: 1.35; }
+.register-preset-pick-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .vocab-card-modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none;
   justify-content: center; align-items: center; z-index: 9100; padding: 16px;
@@ -3312,37 +3332,52 @@ const PresetModule = (() => {
     return String(expression || '').trim().toLowerCase();
   }
 
-  function findPresetVocabWordInManifest_(manifest, expression) {
+  function findPresetVocabWordsInManifest_(manifest, expression) {
     const key = normalizePresetWordKey_(expression);
-    if (!key || !manifest || !manifest.vocabWords) return null;
-    let found = null;
+    if (!key || !manifest || !manifest.vocabWords) return [];
+    const found = [];
+    const seen = {};
     Object.keys(manifest.vocabWords).forEach(function (manifestKey) {
-      if (found) return;
+      if (seen[manifestKey]) return;
       const entry = manifest.vocabWords[manifestKey];
       const pool = entry.pool || entry.words || [];
       for (let i = 0; i < pool.length; i++) {
         const row = pool[i];
         if (normalizePresetWordKey_(row['英単語・熟語の表現']) !== key) continue;
         const parts = manifestKey.split('::');
-        found = {
+        seen[manifestKey] = true;
+        found.push({
           bookName: parts[0] || '',
           sheetName: parts[1] || '',
           manifestKey: manifestKey,
           row: row
-        };
+        });
         break;
       }
+    });
+    found.sort(function (a, b) {
+      const book = String(a.bookName || '').localeCompare(String(b.bookName || ''), 'ja');
+      if (book) return book;
+      return String(a.sheetName || '').localeCompare(String(b.sheetName || ''), 'ja');
     });
     return found;
   }
 
-  async function findPresetVocabWord(expression) {
+  async function findPresetVocabWords(expression) {
     const result = await resolve_('vocab',
-      function (m) { return findPresetVocabWordInManifest_(m, expression); },
+      function (m) {
+        const list = findPresetVocabWordsInManifest_(m, expression);
+        return list.length ? list : null;
+      },
       function () { return Promise.resolve({ status: 'success', data: null }); },
       false);
-    if (result.status === 'success' && result.data) return result.data;
-    return null;
+    if (result.status === 'success' && result.data && result.data.length) return result.data;
+    return [];
+  }
+
+  async function findPresetVocabWord(expression) {
+    const list = await findPresetVocabWords(expression);
+    return list.length ? list[0] : null;
   }
 
   function isUsableVocabCatalog_(data) {
@@ -3397,6 +3432,7 @@ const PresetModule = (() => {
     getGrammarCatalog: getGrammarCatalog,
     getQuestions: getQuestions,
     findPresetVocabWord: findPresetVocabWord,
+    findPresetVocabWords: findPresetVocabWords,
     clearAll: clearAll,
     refreshAll: refreshAll,
     revalidate: revalidate,
@@ -8252,6 +8288,69 @@ const VocabRegisterModule = (() => {
     saveDraftSoon_();
   }
 
+  function presetMatchLabel_(match) {
+    return (match.bookName || 'プリセット教材') + (match.sheetName ? ' / ' + match.sheetName : '');
+  }
+
+  function presetMatchSnippet_(row) {
+    const bits = [];
+    (window.VOCAB_MEANING_KEYS || VOCAB_MEANING_KEYS).forEach(function (key) {
+      const v = vocabNorm(row && row[key]);
+      if (vocabHasMeaning(v)) bits.push(v);
+    });
+    const s = bits.join(' / ');
+    if (!s) return '意味の記載なし';
+    return s.length > 90 ? s.slice(0, 90) + '…' : s;
+  }
+
+  function choosePresetMatch_(word, matches) {
+    if (!matches || !matches.length) return Promise.resolve(null);
+    if (matches.length === 1) {
+      const match = matches[0];
+      const ok = window.confirm(
+        '"' + word + '" はプリセット教材（' + presetMatchLabel_(match) + '）に登録されています。\n'
+        + '内容をインポートして登録を進めますか？\n'
+        + '（大・中・小区分は除き、既存の意味などを取り込みます）'
+      );
+      return Promise.resolve(ok ? match : null);
+    }
+    return new Promise(function (resolve) {
+      const overlay = document.createElement('div');
+      overlay.className = 'register-preset-pick-overlay';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      let radios = '';
+      matches.forEach(function (m, i) {
+        radios += '<label class="register-preset-pick-item">'
+          + '<input type="radio" name="register-preset-pick" value="' + i + '"' + (i === 0 ? ' checked' : '') + '>'
+          + '<span><span class="pick-label">' + escapeHtml_(presetMatchLabel_(m)) + '</span>'
+          + '<div class="pick-snippet">' + escapeHtml_(presetMatchSnippet_(m.row)) + '</div></span></label>';
+      });
+      overlay.innerHTML = '<div class="register-preset-pick-dialog">'
+        + '<h3>インポート元を選ぶ</h3>'
+        + '<p>「' + escapeHtml_(word) + '」は ' + matches.length + ' 件のプリセットにあります。使うブック／シートを選んでください。</p>'
+        + '<div class="register-preset-pick-list">' + radios + '</div>'
+        + '<div class="register-preset-pick-actions">'
+        + '<button type="button" class="btn-small" data-pick="cancel">使わない</button>'
+        + '<button type="button" class="btn-primary" data-pick="ok" style="width:auto;min-width:120px;">インポート</button>'
+        + '</div></div>';
+      function finish(value) {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        resolve(value);
+      }
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) finish(null);
+      });
+      overlay.querySelector('[data-pick="cancel"]').addEventListener('click', function () { finish(null); });
+      overlay.querySelector('[data-pick="ok"]').addEventListener('click', function () {
+        const selected = overlay.querySelector('input[name="register-preset-pick"]:checked');
+        const idx = selected ? parseInt(selected.value, 10) : 0;
+        finish(matches[idx] || matches[0] || null);
+      });
+      document.body.appendChild(overlay);
+    });
+  }
+
   async function maybePromptPresetImport_(cardIndex, word) {
     const trimmed = String(word || '').trim();
     if (!trimmed || cardStates[cardIndex].submitting) return;
@@ -8259,16 +8358,16 @@ const VocabRegisterModule = (() => {
     if (!key) return;
     if (cardStates[cardIndex].importDeclinedWord === key) return;
     if (cardStates[cardIndex].lastPromptWord === key && cardStates[cardIndex].importedRow) return;
-    if (!window.PresetModule || !PresetModule.findPresetVocabWord) return;
+    if (!window.PresetModule || !PresetModule.findPresetVocabWords) return;
 
-    let match;
+    let matches;
     try {
-      match = await PresetModule.findPresetVocabWord(trimmed);
+      matches = await PresetModule.findPresetVocabWords(trimmed);
     } catch (e) {
       console.warn('プリセット語検索:', e.message || e);
       return;
     }
-    if (!match || !match.row) return;
+    if (!matches || !matches.length) return;
 
     const currentWord = qsCard(cardIndex, '.register-simple-word');
     const detailWord = qsCard(cardIndex, '[data-field="英単語・熟語の表現"]');
@@ -8278,18 +8377,12 @@ const VocabRegisterModule = (() => {
     if (normalizeWordKey_(activeWord) !== key) return;
 
     cardStates[cardIndex].lastPromptWord = key;
-    const sourceLabel = (match.bookName || 'プリセット教材') + (match.sheetName ? ' / ' + match.sheetName : '');
-    const quoted = '"' + trimmed + '"';
-    const ok = window.confirm(
-      quoted + ' はプリセット教材（' + sourceLabel + '）に登録されています。\n'
-      + '内容をインポートして登録を進めますか？\n'
-      + '（大・中・小区分は除き、既存の意味などを取り込みます）'
-    );
-    if (!ok) {
+    const chosen = await choosePresetMatch_(trimmed, matches);
+    if (!chosen) {
       cardStates[cardIndex].importDeclinedWord = key;
       return;
     }
-    applyPresetImport_(cardIndex, match);
+    applyPresetImport_(cardIndex, chosen);
   }
 
   function schedulePresetLookup_(cardIndex, word) {
