@@ -857,7 +857,8 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
 }
 .asg-list-heading .log-title { margin-bottom: 0; flex: 1; min-width: 0; }
 .asg-list-heading .assignment-start-btn,
-.asg-list-heading .assignment-preview-btn { flex-shrink: 0; }
+.asg-list-heading .assignment-preview-btn,
+.asg-list-heading .assignment-reproduce-btn { flex-shrink: 0; }
 .asg-list-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .asg-refresh-warn {
   font-size: 0.85em;
@@ -1531,7 +1532,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
           <span>宿題・小テスト</span>
           <button type="button" id="assignment-refresh-btn" class="btn-small" style="font-weight:normal;">更新</button>
         </div>
-        <p style="font-size:0.9em;color:#666;margin:0 0 12px;">管理者が出した課題に取り組みます。A宿題は範囲を分割して消化できます。B小テストは制限時間・合格ラインがあります。</p>
+        <p style="font-size:0.9em;color:#666;margin:0 0 12px;">管理者が出した課題に取り組みます。A宿題は範囲を分割して消化できます。B小テストは制限時間・合格ラインがあります。達成後は「再現」で同じ内容に再挑戦できます（成績には反映されません）。</p>
         <div id="assignment-session-resume-banner" class="vocab-session-resume-banner" style="display:none;" role="status">
           <span id="assignment-session-resume-text"></span>
           <span class="vocab-session-resume-actions">
@@ -1591,7 +1592,7 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
       <div id="manage-logs-panel" style="display:none;">
         <div class="setting-section" id="mypage-container-inner">
           <div class="section-title">学習記録（直近30回）</div>
-          <p style="font-size:0.85em;color:#666;margin:0 0 10px;">最初は見出しと日時だけです。「表示」で詳細と「再現」が出ます。再現は当時の出題設定だけを学習タブに復元します（出た問題そのものは再現しません）。</p>
+          <p style="font-size:0.85em;color:#666;margin:0 0 10px;">最初は見出しと日時だけです。「表示」で詳細と「再現」が出ます。文法・単語は当時の出題設定を学習タブに復元します（出た問題そのものは再現しません）。宿題・小テストは同じ課題範囲で再出題します（成績・進捗には反映されません）。</p>
           <div id="user-logs-list">ログイン後に読み込まれます</div>
         </div>
       </div>
@@ -10680,8 +10681,20 @@ const SessionSave = (function () {
     if (activePromise) return activePromise;
     activePromise = (async function () {
       if (window.AssignmentModule && AssignmentModule.isActive()) {
+        const act = AssignmentModule.getActive && AssignmentModule.getActive();
+        const practice = !!(act && (act.preview || act.reproduce));
+        const mode = currentAppMode;
+        const title = (act && act.assignment && act.assignment.Title) || '';
         const res = await AssignmentModule.finalizeIfActive();
-        return Object.assign({ status: 'success', assignment: true }, res || {});
+        const out = Object.assign({ status: 'success', assignment: true }, res || {});
+        if (!practice && out.status !== 'error' && title) {
+          try {
+            await saveSessionResultsUnified(mode, title);
+          } catch (e) {
+            console.warn('課題の学習記録保存:', e && e.message ? e.message : e);
+          }
+        }
+        return out;
       }
       if (currentAppMode === 'vocab') return saveVocabSessionResults();
       return saveGrammarSessionResults();
@@ -10809,6 +10822,10 @@ async function buildSessionSummary_(modeOverride, setNameOverride) {
   } else if (mode === 'reading') {
     setName = setNameOverride || currentReadingSetName || '音読';
     setId = 'reading:' + setName;
+  } else if (mode === 'assignment-homework' || mode === 'assignment-quiz' || mode === 'assignment') {
+    const settings = currentSessionSettings || {};
+    setName = setNameOverride || settings.title || '課題';
+    setId = 'assignment:' + (settings.assignmentId || '');
   } else {
     setName = `${getSelectedSubjectName()} - ${GrammarSettingsModule.getSelectedUnits().join(',')}`;
     setId = 'grammar:' + getSelectedSubjectName() + '/' + GrammarSettingsModule.getSelectedUnits().join(',');
@@ -10949,6 +10966,9 @@ if (qPrevBtn) qPrevBtn.addEventListener('click', function () { navigateQuizQuest
 if (qNextBtn) qNextBtn.addEventListener('click', function () { navigateQuizQuestion_(1); });
 
 function getResultSavedMessage_(saveResult) {
+  if (saveResult && saveResult.reproduce) {
+    return '再現の取り組みが終了しました。（成績・進捗には反映されません）';
+  }
   if (saveResult && saveResult.preview) {
     return '予行演習が終了しました。（取り組み期間外のため、成績・進捗には反映されません）';
   }
@@ -11568,6 +11588,19 @@ function captureSessionSettingsSnapshot_(mode) {
       sheetName: (sheetEl && sheetEl.value) || currentReadingSetName || ''
     };
   }
+  if (mode === 'assignment-homework' || mode === 'assignment-quiz' || mode === 'assignment') {
+    if (currentSessionSettings && currentSessionSettings.kind === 'assignment') {
+      return currentSessionSettings;
+    }
+    const act = window.AssignmentModule && AssignmentModule.getActive && AssignmentModule.getActive();
+    const a = act && act.assignment;
+    return {
+      kind: 'assignment',
+      assignmentId: (a && a.Assignment_ID) || '',
+      assignmentKind: (a && a.Kind) || '',
+      title: (a && a.Title) || ''
+    };
+  }
   if (window.GrammarSettingsModule && GrammarSettingsModule.getSessionSettings) {
     return GrammarSettingsModule.getSessionSettings();
   }
@@ -11617,6 +11650,17 @@ function extractSessionSettingsFromLog_(log) {
     if (setName.indexOf(' / ') >= 0) sheetName = setName.split(' / ').pop();
     return { kind: 'reading', bookName: 'マイ単語帳', sheetName: sheetName };
   }
+  if (mode === 'assignment' || mode === 'assignment-homework' || mode === 'assignment-quiz'
+      || mode === '宿題' || mode === '小テスト' || setId.indexOf('assignment:') === 0) {
+    let assignmentId = '';
+    if (setId.indexOf('assignment:') === 0) assignmentId = setId.slice(11);
+    return {
+      kind: 'assignment',
+      assignmentId: assignmentId,
+      assignmentKind: (mode === 'assignment-quiz' || mode === '小テスト') ? 'quiz' : 'homework',
+      title: setName
+    };
+  }
   if (mode === 'grammar' || setId.indexOf('grammar:') === 0 || setName.indexOf(' - ') >= 0) {
     let subject = '';
     let units = [];
@@ -11648,7 +11692,11 @@ function formatSessionSettingsText_(log) {
   const modeLabel = modeRaw === 'grammar' || modeRaw === '文法' ? '文法・語法演習'
     : (modeRaw === 'vocab-card' || modeRaw === '単語カード' ? '単語カード'
       : (modeRaw === 'vocab' || modeRaw === '単語' ? '単語学習'
-        : (modeRaw === 'reading' || modeRaw === '音読' ? '音読練習' : (modeRaw || '不明'))));
+        : (modeRaw === 'reading' || modeRaw === '音読' ? '音読練習'
+          : (modeRaw === 'assignment-quiz' || modeRaw === '小テスト'
+            || (modeRaw === 'assignment' && settings && settings.assignmentKind === 'quiz') ? '小テスト'
+            : (modeRaw === 'assignment' || modeRaw === 'assignment-homework' || modeRaw === '宿題' ? '宿題'
+              : (modeRaw || '不明'))))));
   lines.push('モード: ' + modeLabel);
 
   if (!settings) {
@@ -11761,6 +11809,12 @@ function formatSessionSettingsText_(log) {
   } else if (settings.kind === 'reading') {
     lines.push('ブック: ' + (settings.bookName || 'マイ単語帳'));
     lines.push('シート: ' + (settings.sheetName || '（不明）'));
+  } else if (settings.kind === 'assignment') {
+    lines.push('課題: ' + (settings.title || '（不明）'));
+    lines.push('種別: ' + (settings.assignmentKind === 'quiz' ? '小テスト' : '宿題'));
+    if (settings.settingsSummary) lines.push(settings.settingsSummary);
+    if (settings.reviewWrong) lines.push('ニガテ復習: あり');
+    lines.push('再現時は同じ課題範囲で再出題します（成績・進捗には反映されません）');
   } else {
     lines.push('設定詳細: （種別不明）');
   }
@@ -11815,6 +11869,16 @@ async function reproduceSessionSettings_(log) {
         else showToast_('シート「' + settings.sheetName + '」が見つかりません。キャッシュ更新後に再試行してください');
       }
       showToast_('音読のシート設定を再現しました');
+      return true;
+    }
+    if (settings.kind === 'assignment') {
+      if (!window.AssignmentModule || !AssignmentModule.reproduceById) {
+        showToast_('宿題・小テストの再現に対応していません');
+        return false;
+      }
+      switchMainModeTab_('assignment');
+      await AssignmentModule.reproduceById(settings.assignmentId);
+      showToast_('課題を再現して開始しました（成績・進捗には反映されません）');
       return true;
     }
     showToast_('未対応の学習モードです');

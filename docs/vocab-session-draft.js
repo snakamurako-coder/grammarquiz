@@ -120,6 +120,7 @@ const VocabSessionDraftModule = (() => {
         draft.rangeIds = act.rangeIds || [];
         draft.answerLog = (act.answerLog || []).slice();
         draft.preview = !!act.preview;
+        draft.reproduce = !!act.reproduce;
       }
     }
     return draft;

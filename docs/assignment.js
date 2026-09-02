@@ -254,10 +254,28 @@ const AssignmentModule = (function () {
     if (title) {
       title.textContent = (a.Kind === 'quiz' ? '【小テスト】' : '【宿題】') + a.Title
         + (opts.reviewWrong ? '（ニガテ復習）' : '')
-        + (opts.preview ? '（予行演習）' : '');
+        + (opts.reproduce ? '（再現）' : (opts.preview ? '（予行演習）' : ''));
     }
     const warn = document.getElementById('assignment-preview-warn');
-    if (warn) warn.hidden = !opts.preview;
+    if (warn) {
+      const showWarn = !!(opts.preview || opts.reproduce);
+      warn.hidden = !showWarn;
+      if (opts.reproduce) {
+        warn.textContent = '達成後の再挑戦です。この取り組みは成績・進捗にカウントされません。';
+      } else {
+        warn.textContent = '取り組み期間外のため、この取り組みは成績・進捗にカウントされません。';
+      }
+    }
+  }
+
+  function isAchieved_(row, passState) {
+    const a = row.assignment || {};
+    passState = passState || loadPassState_(a.Assignment_ID);
+    if (a.Kind === 'quiz') {
+      return !!(row.serverAchieved || passState.serverAchieved);
+    }
+    const latest = row.latestSubmission;
+    return !!(latest && String(latest.Status || '') === 'passed');
   }
 
   function timerEls_() {
@@ -555,7 +573,10 @@ const AssignmentModule = (function () {
       html += '<div class="log-item asg-list-item">';
       html += '<div class="log-item-main">';
       html += '<div class="asg-list-heading">';
-      if (phase === 'open') {
+      const achieved = isAchieved_(row, passState);
+      if (achieved) {
+        html += '<button type="button" class="log-reproduce-btn assignment-reproduce-btn" data-idx="' + idx + '">再現</button>';
+      } else if (phase === 'open') {
         html += '<button type="button" class="btn-small assignment-start-btn" data-idx="' + idx + '">取り組む</button>';
       } else if (phase === 'future') {
         html += '<button type="button" class="btn-small assignment-preview-btn" data-idx="' + idx + '">予行演習</button>';
@@ -593,6 +614,9 @@ const AssignmentModule = (function () {
       }
       if (showReport && !serverReported) {
         html += '<p class="asg-report-hint">ノルマ達成済みですがサーバー未確認の場合は「再度報告」を押してください。</p>';
+      }
+      if (achieved) {
+        html += '<p class="asg-report-hint">達成済みです。「再現」で同じ課題範囲に再挑戦できます（成績・進捗には反映されません）。</p>';
       }
       html += '</div>';
       html += '<div class="log-item-aside">';
@@ -632,6 +656,18 @@ const AssignmentModule = (function () {
         const row = listCache_[idx];
         if (!row) return;
         BusyButton.run(btn, function () { return reportAchievement_(row); }, '報告中…');
+      });
+    });
+    wrap.querySelectorAll('.assignment-reproduce-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const idx = parseInt(btn.getAttribute('data-idx'), 10);
+        const row = listCache_[idx];
+        if (!row) return;
+        BusyButton.run(btn, function () {
+          return startAssignment_(row, false, { reproduce: true }).catch(function (e) {
+            showAssignmentError_(e);
+          });
+        }, '再現中…');
       });
     });
   }
@@ -816,11 +852,13 @@ const AssignmentModule = (function () {
     const a = row.assignment;
     if (!a) throw new Error('課題データがありません');
     const phase = getAssignmentWindowPhase_(row);
-    const isPreview = opts.preview === true || phase === 'future';
-    if (phase === 'expired') {
+    const isReproduce = opts.reproduce === true;
+    const isPreview = !isReproduce && (opts.preview === true || phase === 'future');
+    const isPractice = isPreview || isReproduce;
+    if (!isPractice && phase === 'expired') {
       throw new Error('この課題は終了しています（提出期間外）');
     }
-    if (phase !== 'open' && !isPreview) {
+    if (!isPractice && phase !== 'open') {
       throw new Error('この課題はまだ取り組める期間ではありません');
     }
     const sections = coerceSections_(a);
@@ -828,7 +866,7 @@ const AssignmentModule = (function () {
 
     const local = loadLocalProgress_(a.Assignment_ID);
     let data = {};
-    if (!isPreview) {
+    if (!isPractice) {
       const startRes = await post_({
         action: 'startAssignmentAttempt',
         assignmentId: a.Assignment_ID,
@@ -837,21 +875,21 @@ const AssignmentModule = (function () {
       data = startRes.data || {};
     } else {
       data = {
-        submissionId: 'preview_' + a.Assignment_ID + '_' + Date.now(),
+        submissionId: (isReproduce ? 'reproduce_' : 'preview_') + a.Assignment_ID + '_' + Date.now(),
         attemptNo: 0,
         localSession: true
       };
     }
     const buildOpts = {};
-    if (!isPreview && reviewWrong && local.wrongIds && local.wrongIds.length) {
+    if (!isPractice && reviewWrong && local.wrongIds && local.wrongIds.length) {
       buildOpts.onlyWrongIds = local.wrongIds.slice();
-    } else if (!isPreview && a.Kind === 'homework') {
+    } else if (!isPractice && a.Kind === 'homework') {
       buildOpts.skipDoneIds = local.doneIds || [];
     }
 
     const built = await buildQuestionsFromSections_(sections, buildOpts);
     if (!built.questions.length) {
-      if (!isPreview && a.Kind === 'homework' && (local.doneIds || []).length) {
+      if (!isPractice && a.Kind === 'homework' && (local.doneIds || []).length) {
         const submit = await post_({
           action: 'submitAssignmentAttempt',
           submissionId: data.submissionId,
@@ -882,7 +920,8 @@ const AssignmentModule = (function () {
       pointsEarned: 0,
       reviewWrong: !!reviewWrong,
       answerLog: [],
-      preview: isPreview
+      preview: isPractice,
+      reproduce: isReproduce
     };
 
     currentAppMode = a.Kind === 'quiz' ? 'assignment-quiz' : 'assignment-homework';
@@ -893,7 +932,9 @@ const AssignmentModule = (function () {
       assignmentKind: a.Kind,
       title: a.Title,
       reviewWrong: !!reviewWrong,
-      preview: isPreview
+      preview: isPreview,
+      reproduce: isReproduce,
+      settingsSummary: formatAssignmentSettingsView_(a).summary
     };
     currentQuestionDataList = built.questions;
     totalQuestionsCount = built.questions.length;
@@ -912,7 +953,11 @@ const AssignmentModule = (function () {
       if (readingScreen) readingScreen.style.display = 'none';
       screens.game.style.display = 'block';
 
-      setAssignmentSessionBanner_(a, { reviewWrong: !!reviewWrong, preview: isPreview });
+      setAssignmentSessionBanner_(a, {
+        reviewWrong: !!reviewWrong,
+        preview: isPreview,
+        reproduce: isReproduce
+      });
 
       if (activeSession_.deadlineMs) startTimer_(activeSession_.deadlineMs);
       else clearTimer_();
@@ -971,7 +1016,8 @@ const AssignmentModule = (function () {
       pointsEarned: draft.pointsEarned || 0,
       reviewWrong: !!draft.reviewWrong,
       answerLog: (draft.answerLog || []).slice(),
-      preview: !!draft.preview
+      preview: !!draft.preview,
+      reproduce: !!draft.reproduce
     };
 
     currentAppMode = draft.appMode || (assignment.Kind === 'quiz' ? 'assignment-quiz' : 'assignment-homework');
@@ -1008,7 +1054,8 @@ const AssignmentModule = (function () {
     if (banner) {
       setAssignmentSessionBanner_(assignment, {
         reviewWrong: !!draft.reviewWrong,
-        preview: !!draft.preview
+        preview: !!draft.preview && !draft.reproduce,
+        reproduce: !!draft.reproduce
       });
     }
 
@@ -1079,6 +1126,7 @@ const AssignmentModule = (function () {
     clearTimer_();
     const a = activeSession_.assignment;
     if (activeSession_.preview) {
+      const wasReproduce = !!activeSession_.reproduce;
       activeSession_ = null;
       const banner = document.getElementById('assignment-session-banner');
       if (banner) banner.hidden = true;
@@ -1087,7 +1135,8 @@ const AssignmentModule = (function () {
         status: 'success',
         assignment: true,
         preview: true,
-        data: { resultStatus: 'preview' }
+        reproduce: wasReproduce,
+        data: { resultStatus: wasReproduce ? 'reproduce' : 'preview' }
       };
     }
     const durationSec = Math.round((Date.now() - activeSession_.startedAtMs) / 1000);
@@ -1218,6 +1267,17 @@ const AssignmentModule = (function () {
     await refreshList();
   }
 
+  async function reproduceById_(assignmentId) {
+    const id = String(assignmentId || '');
+    if (!id) throw new Error('課題IDがありません');
+    await refreshList();
+    const row = listCache_.find(function (r) {
+      return r.assignment && String(r.assignment.Assignment_ID) === id;
+    });
+    if (!row) throw new Error('課題が見つかりません。宿題・小テスト一覧を更新してから再試行してください。');
+    return startAssignment_(row, false, { reproduce: true });
+  }
+
   async function finalizeIfActive() {
     if (!activeSession_) return null;
     try {
@@ -1254,6 +1314,7 @@ const AssignmentModule = (function () {
     getActive: getActive,
     onAnswered: onAnswered,
     finalizeIfActive: finalizeIfActive,
+    reproduceById: reproduceById_,
     reportAchievement: reportAchievement_,
     persistHomeworkProgress: persistHomeworkProgress_,
     loadLocalProgress: loadLocalProgress_,
