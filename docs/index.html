@@ -5172,6 +5172,8 @@ const GRAMMAR_FORMATS = [
 
 const GRAMMAR_FORMAT_MAP = {};
 GRAMMAR_FORMATS.forEach(function (f) { GRAMMAR_FORMAT_MAP[f.key] = f; });
+window.GRAMMAR_FORMATS = GRAMMAR_FORMATS;
+window.GRAMMAR_FORMAT_MAP = GRAMMAR_FORMAT_MAP;
 
 /** 英文比較用の正規化（空白圧縮・小文字化・引用符統一・文末句読点の無視） */
 function normalizeEnglish(s) {
@@ -6055,6 +6057,8 @@ const VOCAB_FORMATS = [
 ];
 const VOCAB_FORMAT_MAP = {};
 VOCAB_FORMATS.forEach(function (f) { VOCAB_FORMAT_MAP[f.key] = f; });
+window.VOCAB_FORMATS = VOCAB_FORMATS;
+window.VOCAB_FORMAT_MAP = VOCAB_FORMAT_MAP;
 const VOCAB_FORMAT_KEYS = VOCAB_FORMATS.map(function (f) { return f.key; });
 const VOCAB_FORMAT_PRIMARY = {
   W1: 'WD', W4: 'WD', 'vocab-enja': 'WD', 'vocab-jaen': 'WD', PPW: 'WD', 'enja-wd-pool': 'WD',
