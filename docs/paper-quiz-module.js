@@ -1,6 +1,6 @@
 /**
  * A4 問題用紙（記入欄つき）と別紙の採点用模範解
- * 2列レイアウト。1列の問数は 10〜20（既定 15）で調整可能。
+ * 2列レイアウト。1列の問数・文字サイズ・行の高さはプレビューで調整可能。
  */
 const PaperQuizModule = (function () {
   const CHOICE_MARKS = ['ア', 'イ', 'ウ', 'エ', 'オ', 'カ', 'キ', 'ク', 'ケ', 'コ'];
@@ -8,6 +8,12 @@ const PaperQuizModule = (function () {
   const PER_COL_MIN = 10;
   const PER_COL_MAX = 20;
   const PER_COL_DEFAULT = 15;
+  const FONT_KEY = 'dd_paper_quiz_font';
+  const LH_KEY = 'dd_paper_quiz_lh';
+  const FONT_SIZES = [8, 8.5, 9, 9.5, 10, 10.5, 11, 12, 13, 14];
+  const FONT_DEFAULT = 9.5;
+  const LINE_HEIGHTS = [1.15, 1.2, 1.28, 1.35, 1.45, 1.55, 1.7];
+  const LH_DEFAULT = 1.28;
   let lastPreview_ = null;
 
   function clampPerCol_(n) {
@@ -17,16 +23,64 @@ const PaperQuizModule = (function () {
     return n;
   }
 
-  function loadPerCol_() {
+  function nearest_(list, raw, fallback) {
+    const n = parseFloat(raw);
+    if (!n || isNaN(n)) return fallback;
+    let best = list[0];
+    let diff = Math.abs(n - best);
+    for (let i = 1; i < list.length; i++) {
+      const d = Math.abs(n - list[i]);
+      if (d < diff) {
+        best = list[i];
+        diff = d;
+      }
+    }
+    return best;
+  }
+
+  function clampFont_(n) {
+    return nearest_(FONT_SIZES, n, FONT_DEFAULT);
+  }
+
+  function clampLh_(n) {
+    return nearest_(LINE_HEIGHTS, n, LH_DEFAULT);
+  }
+
+  function lsGet_(key, fallback) {
     try {
-      return clampPerCol_(localStorage.getItem(PER_COL_KEY) || PER_COL_DEFAULT);
+      const v = localStorage.getItem(key);
+      return v == null ? fallback : v;
     } catch (e) {
-      return PER_COL_DEFAULT;
+      return fallback;
     }
   }
 
+  function lsSet_(key, val) {
+    try { localStorage.setItem(key, String(val)); } catch (e) { /* ignore */ }
+  }
+
+  function loadPerCol_() {
+    return clampPerCol_(lsGet_(PER_COL_KEY, PER_COL_DEFAULT));
+  }
+
   function savePerCol_(n) {
-    try { localStorage.setItem(PER_COL_KEY, String(clampPerCol_(n))); } catch (e) { /* ignore */ }
+    lsSet_(PER_COL_KEY, clampPerCol_(n));
+  }
+
+  function loadFont_() {
+    return clampFont_(lsGet_(FONT_KEY, FONT_DEFAULT));
+  }
+
+  function saveFont_(n) {
+    lsSet_(FONT_KEY, clampFont_(n));
+  }
+
+  function loadLh_() {
+    return clampLh_(lsGet_(LH_KEY, LH_DEFAULT));
+  }
+
+  function saveLh_(n) {
+    lsSet_(LH_KEY, clampLh_(n));
   }
 
   function escapeHtml_(s) {
@@ -349,35 +403,36 @@ const PaperQuizModule = (function () {
       '.pq-toolbar button:not(.is-on) { background: #334155; color: #fff; }',
       '.pq-toolbar label { font-size: 13px; display: flex; align-items: center; gap: 6px; }',
       '.pq-toolbar select { height: 36px; border-radius: 8px; padding: 0 8px; font-weight: 700; }',
+      'body { --pq-fs: 9.5px; --pq-lh: 1.28; }',
       '.pq-a4 { width: 210mm; min-height: 297mm; margin: 12px auto; padding: 8mm 8mm 10mm; background: #fff;',
       '  box-shadow: 0 2px 10px rgba(0,0,0,.12); }',
       '.pq-a4 + .pq-a4, .pq-sheet-key { page-break-before: always; }',
       '.pq-sheet-key .pq-a4 + .pq-a4 { page-break-before: always; }',
       '.pq-header { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #111; padding-bottom: 5px; margin-bottom: 5px; }',
-      '.pq-title { flex: 1; min-width: 0; font-size: 12px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
-      '.pq-idrow { display: flex; align-items: center; gap: 5px; font-size: 12px; flex-shrink: 0; white-space: nowrap; }',
+      '.pq-title { flex: 1; min-width: 0; font-size: calc(var(--pq-fs) + 2.5px); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
+      '.pq-idrow { display: flex; align-items: center; gap: 5px; font-size: calc(var(--pq-fs) + 2.5px); flex-shrink: 0; white-space: nowrap; }',
       '.pq-idrow span { line-height: 1; }',
       '.pq-box { display: inline-block; border: 1.2px solid #111; height: 8mm; width: 12mm; vertical-align: middle; }',
       '.pq-box-sm { width: 10mm; }',
       '.pq-box-name { width: 32mm; }',
       '.pq-box-score { width: 16mm; }',
       '.pq-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; align-items: start; }',
-      '.pq-sec { font-size: 9.5px; font-weight: 700; line-height: 1.4; min-height: 2.5em; margin: 0 0 4px; }',
-      '.pq-bank { font-size: 9px; line-height: 1.35; margin: 0 0 4px; }',
+      '.pq-sec { font-size: var(--pq-fs); font-weight: 700; line-height: var(--pq-lh); min-height: 2.5em; margin: 0 0 4px; }',
+      '.pq-bank { font-size: calc(var(--pq-fs) * 0.95); line-height: var(--pq-lh); margin: 0 0 4px; }',
       '.pq-pair { display: flex; flex-direction: column; gap: 0; }',
       '.pq-pair-row { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; align-items: stretch; }',
       '.pq-pair-cell { min-height: 1px; }',
       '.pq-pair-cell .pq-item { height: 100%; }',
-      '.pq-item { margin: 0 0 1.6mm; padding: 0; border: 0; font-size: 9.5px; line-height: 1.28; break-inside: avoid; }',
+      '.pq-item { margin: 0 0 1.6mm; padding: 0; border: 0; font-size: var(--pq-fs); line-height: var(--pq-lh); break-inside: avoid; }',
       '.pq-l1, .pq-l2, .pq-l2b, .pq-l3 { word-break: break-word; overflow-wrap: anywhere; }',
       '.pq-no { font-weight: 800; }',
-      '.pq-choice-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 4px; row-gap: 0; margin-top: 1px; font-size: 9.5px; }',
+      '.pq-choice-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 4px; row-gap: 0; margin-top: 1px; font-size: var(--pq-fs); }',
       '.pq-ch.is-ok { font-weight: 800; }',
       '.pq-mark { font-weight: 700; }',
       '.pq-gap { height: 0.95em; }',
       '.pq-uline { border-bottom: 1px solid #111; height: 1.05em; }',
       '.pq-fill { font-weight: 800; color: #9a0000; }',
-      '.pq-exp { font-size: 8.5px; line-height: 1.3; margin-top: 1px; color: #333; }',
+      '.pq-exp { font-size: calc(var(--pq-fs) * 0.9); line-height: var(--pq-lh); margin-top: 1px; color: #333; }',
       '.pq-exp-area { font-weight: 800; }',
       '@page { size: A4; margin: 8mm; }',
       '@media print {',
@@ -397,27 +452,40 @@ const PaperQuizModule = (function () {
     });
   }
 
+  function optionListHtml_(list, current, suffix) {
+    let html = '';
+    list.forEach(function (v) {
+      html += '<option value="' + v + '"' + (v === current ? ' selected' : '') + '>' + v + suffix + '</option>';
+    });
+    return html;
+  }
+
   function openPreview_(questions, meta, perCol) {
     perCol = clampPerCol_(perCol != null ? perCol : loadPerCol_());
     savePerCol_(perCol);
+    const fontSize = loadFont_();
+    const lineHeight = loadLh_();
     lastPreview_ = { questions: questions, meta: meta };
     const items = regroupByFormat_(toItems_(questions));
     if (!items.length) throw new Error('印刷できる問題がありません。');
     meta = Object.assign({ count: items.length }, meta || {});
     const qHtml = sheetHtml_(items, meta, 'question', perCol);
     const kHtml = sheetHtml_(items, meta, 'key', perCol);
-    let optHtml = '';
+    let colOpt = '';
     for (let n = PER_COL_MIN; n <= PER_COL_MAX; n++) {
-      optHtml += '<option value="' + n + '"' + (n === perCol ? ' selected' : '') + '>' + n + '問</option>';
+      colOpt += '<option value="' + n + '"' + (n === perCol ? ' selected' : '') + '>' + n + '問</option>';
     }
     const html = '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>'
       + escapeHtml_(meta.title || '小テスト')
-      + '</title><style>' + cssText_() + '</style></head><body class="print-both">'
+      + '</title><style>' + cssText_() + '</style></head>'
+      + '<body class="print-both" style="--pq-fs:' + fontSize + 'px;--pq-lh:' + lineHeight + '">'
       + '<div class="pq-toolbar">'
       + '<button type="button" data-view="both" class="is-on">問題＋模範解</button>'
       + '<button type="button" data-view="q">問題用紙のみ</button>'
       + '<button type="button" data-view="k">採点用模範解のみ</button>'
-      + '<label>1列の問数 <select id="pq-per-col">' + optHtml + '</select></label>'
+      + '<label>1列の問数 <select id="pq-per-col">' + colOpt + '</select></label>'
+      + '<label>文字サイズ <select id="pq-fs">' + optionListHtml_(FONT_SIZES, fontSize, 'px') + '</select></label>'
+      + '<label>行の高さ <select id="pq-lh">' + optionListHtml_(LINE_HEIGHTS, lineHeight, '') + '</select></label>'
       + '<button type="button" class="pq-print" id="pq-do-print">印刷 / PDF</button>'
       + '<span style="font-size:12px;opacity:.85;">2列×' + perCol + '＝1枚最大' + (perCol * 2) + '問（1列は最大20問）</span>'
       + '</div>'
@@ -429,6 +497,13 @@ const PaperQuizModule = (function () {
       + 'document.getElementById("pq-do-print").onclick=function(){window.print();};'
       + 'var sel=document.getElementById("pq-per-col");'
       + 'sel.onchange=function(){var op=window.opener;if(op&&op.PaperQuizModule&&op.PaperQuizModule.reprint){op.PaperQuizModule.reprint(sel.value);}else{alert("元の学習画面から開き直してください");}};'
+      + 'function applyTypo(){'
+      + 'var fs=document.getElementById("pq-fs").value;var lh=document.getElementById("pq-lh").value;'
+      + 'b.style.setProperty("--pq-fs",fs+"px");b.style.setProperty("--pq-lh",lh);'
+      + 'try{localStorage.setItem("dd_paper_quiz_font",fs);localStorage.setItem("dd_paper_quiz_lh",lh);}catch(e){}'
+      + '}'
+      + 'document.getElementById("pq-fs").onchange=applyTypo;'
+      + 'document.getElementById("pq-lh").onchange=applyTypo;'
       + '})();<\/script></body></html>';
 
     const w = window.open('', 'paper-quiz');
