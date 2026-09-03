@@ -29,6 +29,11 @@ const VocabLinkModule = (function () {
   let sessionLogSaved = false;
   let uiBound = false;
   let lastSortedPool = [];
+  let heardAudioIds = {};
+  let firstPlayLock = false;
+  let pauseStartedAt = null;
+  let pausedSec = 0;
+  let firstPlayToken = 0;
 
   function el_(id) {
     return document.getElementById(id);
@@ -97,6 +102,7 @@ const VocabLinkModule = (function () {
 
   function hideScreen_() {
     stopTimer_();
+    resetAudioLock_(true);
     clearBoard_();
     hideOverlay_('vl-ready-screen');
     hideOverlay_('vl-result-screen');
@@ -127,6 +133,10 @@ const VocabLinkModule = (function () {
 
   function showStartScreen_() {
     stopTimer_();
+    resetAudioLock_(true);
+    if (window.TtsModule && typeof window.TtsModule.stop === 'function') {
+      window.TtsModule.stop();
+    }
     clearBoard_();
     hideOverlay_('vl-result-screen');
     hideOverlay_('vl-ready-screen');
@@ -172,6 +182,8 @@ const VocabLinkModule = (function () {
     isWrongState = false;
     batchMatchedCount = 0;
     currentBatch = [];
+    heardAudioIds = {};
+    resetAudioLock_(true);
 
     const timerDisplay = el_('vl-timer');
     if (timerDisplay) timerDisplay.textContent = '0.00s';
@@ -249,7 +261,13 @@ const VocabLinkModule = (function () {
   }
 
   function startTimer_() {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
     startTime = performance.now();
+    pauseStartedAt = null;
+    pausedSec = 0;
     timerInterval = setInterval(updateTimer_, 10);
   }
 
@@ -260,19 +278,76 @@ const VocabLinkModule = (function () {
     }
   }
 
+  function nowForTimer_() {
+    return pauseStartedAt != null ? pauseStartedAt : performance.now();
+  }
+
   function updateTimer_() {
     if (!startTime) return;
-    const elapsed = (performance.now() - startTime) / 1000 + penaltyTime;
     const timerDisplay = el_('vl-timer');
-    if (timerDisplay) timerDisplay.textContent = elapsed.toFixed(2) + 's';
+    if (timerDisplay) timerDisplay.textContent = getElapsedSec_().toFixed(2) + 's';
+  }
+
+  function pauseTimer_() {
+    if (!startTime || pauseStartedAt != null) return;
+    pauseStartedAt = performance.now();
+    updateTimer_();
+  }
+
+  function resumeTimer_() {
+    if (pauseStartedAt == null) return;
+    pausedSec += (performance.now() - pauseStartedAt) / 1000;
+    pauseStartedAt = null;
+    updateTimer_();
+  }
+
+  function resetAudioLock_(resetPauseAccum) {
+    firstPlayToken += 1;
+    firstPlayLock = false;
+    pauseStartedAt = null;
+    if (resetPauseAccum) pausedSec = 0;
+    document.body.classList.remove('vl-audio-lock');
+    document.querySelectorAll('.vl-card.vl-audio-playing').forEach(function (node) {
+      node.classList.remove('vl-audio-playing');
+    });
+  }
+
+  function setFirstPlayLock_(on, playingCard) {
+    firstPlayLock = !!on;
+    document.body.classList.toggle('vl-audio-lock', firstPlayLock);
+    document.querySelectorAll('.vl-card.vl-audio-playing').forEach(function (node) {
+      node.classList.remove('vl-audio-playing');
+    });
+    if (playingCard && firstPlayLock) playingCard.classList.add('vl-audio-playing');
   }
 
   function handleCardClick_(card) {
     if (card.classList.contains('matched')) return;
+    if (firstPlayLock) return;
     if (!startTime) startTimer_();
     if (isWrongState) clearWrongState_();
 
-    if (card.dataset.speechText) {
+    const isAudio = !!card.dataset.speechText;
+    const pairId = card.dataset.id;
+    const isFirstAudioPlay = isAudio && !heardAudioIds[pairId];
+
+    if (isFirstAudioPlay) {
+      heardAudioIds[pairId] = true;
+      const token = ++firstPlayToken;
+      pauseTimer_();
+      setFirstPlayLock_(true, card);
+      const release = function () {
+        if (token !== firstPlayToken) return;
+        firstPlayToken += 1;
+        setFirstPlayLock_(false);
+        resumeTimer_();
+      };
+      playSpeech_(card.dataset.speechText, card.dataset.speechLang).then(release);
+      setTimeout(release, 20000);
+      return;
+    }
+
+    if (isAudio) {
       playSpeech_(card.dataset.speechText, card.dataset.speechLang);
     }
 
@@ -296,7 +371,7 @@ const VocabLinkModule = (function () {
       const id2 = selectedCard2.dataset.id;
 
       if (id1 === id2) {
-        const thinkDuration = (performance.now() - firstTapTimestamp) / 1000;
+        const thinkDuration = (nowForTimer_() - firstTapTimestamp) / 1000;
         if (statsMap[id1]) statsMap[id1].thinkTime += thinkDuration;
 
         selectedCard1.className = 'vl-card matched';
@@ -353,7 +428,7 @@ const VocabLinkModule = (function () {
 
   function getElapsedSec_() {
     if (!startTime) return penaltyTime;
-    return (performance.now() - startTime) / 1000 + penaltyTime;
+    return (nowForTimer_() - startTime) / 1000 - pausedSec + penaltyTime;
   }
 
   function finishGame_() {

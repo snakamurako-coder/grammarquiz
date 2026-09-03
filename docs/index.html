@@ -740,6 +740,9 @@ body.vocab-link-active #vocab-link-screen { display: flex !important; }
   color: #f1f5f9; cursor: pointer; padding: 0 3px; word-break: break-word; overflow-wrap: anywhere;
 }
 .vl-card.vl-audio-card { font-size: 1.4rem; }
+.vl-card.vl-audio-playing { border-color: #38bdf8; box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45); }
+body.vl-audio-lock .vl-card { opacity: 0.45; pointer-events: none; }
+body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
 .vl-card.selected { background: #f59e0b; color: #000; border-color: #f59e0b; }
 .vl-card.wrong { background: #ef4444; color: #fff; }
 .vl-card.matched { visibility: hidden; pointer-events: none; }
