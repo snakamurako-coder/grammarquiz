@@ -581,6 +581,7 @@ const AssignmentModule = (function () {
       } else if (phase === 'future') {
         html += '<button type="button" class="btn-small assignment-preview-btn" data-idx="' + idx + '">予行演習</button>';
       }
+      html += '<button type="button" class="btn-small assignment-print-btn" data-idx="' + idx + '">印刷</button>';
       html += '<div class="log-title">' + escapeHtml_(a.Title) + ' <span style="font-size:.8em;color:#666;">[' + kindLabel + ']</span></div>';
       html += '</div>';
       if (periodText) {
@@ -668,6 +669,23 @@ const AssignmentModule = (function () {
             showAssignmentError_(e);
           });
         }, '再現中…');
+      });
+    });
+    wrap.querySelectorAll('.assignment-print-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const idx = parseInt(btn.getAttribute('data-idx'), 10);
+        const row = listCache_[idx];
+        if (!row) return;
+        if (!window.PaperQuizModule || typeof window.PaperQuizModule.openFromAssignment !== 'function') {
+          alert('印刷モジュールの読み込みに失敗しました。ページを再読み込みしてください。');
+          return;
+        }
+        BusyButton.run(btn, function () {
+          return window.PaperQuizModule.openFromAssignment(row).catch(function (e) {
+            alert((e && e.message) || e);
+            throw e;
+          });
+        }, '用紙作成中…');
       });
     });
   }
@@ -845,6 +863,14 @@ const AssignmentModule = (function () {
     }
 
     return { questions: all, rangeIds: rangeIds, pointsMax: pointsMax, allRangeIds: rangeIds };
+  }
+
+  async function buildQuestionsForAssignment_(a, opts) {
+    const sections = coerceSections_(a);
+    if (!sections.length) {
+      throw new Error('セクションが空です。管理ダッシュボードで課題を開き直して保存し直してください。');
+    }
+    return buildQuestionsFromSections_(sections, opts || {});
   }
 
   async function startAssignment_(row, reviewWrong, opts) {
@@ -1315,6 +1341,8 @@ const AssignmentModule = (function () {
     onAnswered: onAnswered,
     finalizeIfActive: finalizeIfActive,
     reproduceById: reproduceById_,
+    buildQuestionsFromSections: buildQuestionsFromSections_,
+    buildQuestionsForAssignment: buildQuestionsForAssignment_,
     reportAchievement: reportAchievement_,
     persistHomeworkProgress: persistHomeworkProgress_,
     loadLocalProgress: loadLocalProgress_,

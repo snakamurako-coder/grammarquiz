@@ -1056,7 +1056,10 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
 .asg-list-heading .log-title { margin-bottom: 0; flex: 1; min-width: 0; }
 .asg-list-heading .assignment-start-btn,
 .asg-list-heading .assignment-preview-btn,
-.asg-list-heading .assignment-reproduce-btn { flex-shrink: 0; }
+.asg-list-heading .assignment-reproduce-btn,
+.asg-list-heading .assignment-print-btn { flex-shrink: 0; }
+.paper-quiz-start-row { display: flex; flex-direction: column; gap: 8px; }
+.paper-quiz-start-row .btn-secondary { width: 100%; }
 .asg-list-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .asg-refresh-warn {
   font-size: 0.85em;
@@ -1488,7 +1491,10 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
         <p class="filter-axis-hint" style="margin-top:6px;margin-bottom:0;">「順番通り」かつプリセット「すべて」のときは、絞り込み後の全問が出題されます。「問題数を指定する」にチェックすると右の数値が使われます。</p>
       </div>
     </div>
-    <button id="start-btn" class="btn-primary">学習を開始する</button>
+    <div class="paper-quiz-start-row">
+      <button id="start-btn" class="btn-primary">学習を開始する</button>
+      <button type="button" id="grammar-paper-print-btn" class="btn-secondary">問題用紙を印刷</button>
+    </div>
     </div>
 
     <div id="vocab-settings-panel" style="display: none;">
@@ -1703,7 +1709,10 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
           <label class="check-item"><input type="checkbox" id="vocab-include-none" checked> <span class="opt-ico" aria-hidden="true">🚫</span> 「この中に正答はない」選択肢を含める</label>
         </div>
         </div>
-      <button id="vocab-start-btn" class="btn-primary">▶ 単語クイズを開始する</button>
+      <div class="paper-quiz-start-row">
+        <button id="vocab-start-btn" class="btn-primary">▶ 単語クイズを開始する</button>
+        <button type="button" id="vocab-paper-print-btn" class="btn-secondary">問題用紙を印刷</button>
+      </div>
       </div>
 
       <div class="setting-section" id="vocab-link-section" data-vocab-mode-panel="link" style="display:none;">
@@ -7854,6 +7863,8 @@ const VocabSettingsModule = (() => {
     if (window.VocabLinkModule && VocabLinkModule.syncHomeworkUi_) {
       VocabLinkModule.syncHomeworkUi_(homework);
     }
+    const vocabPrintBtn = document.getElementById('vocab-paper-print-btn');
+    if (vocabPrintBtn) vocabPrintBtn.style.display = homework ? 'none' : '';
     const vocabModeTabs = document.getElementById('vocab-mode-tabs');
     if (vocabModeTabs) vocabModeTabs.style.display = homework ? 'none' : '';
     if (homework) applyVocabModeTab_('quiz', false);
@@ -13109,5 +13120,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (window.VocabSessionDraftModule) VocabSessionDraftModule.init();
 });
 </script>
+<script src="paper-quiz-module.js"></script>
 </body>
 </html>
