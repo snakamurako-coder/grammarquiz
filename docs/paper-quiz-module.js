@@ -10,9 +10,11 @@ const PaperQuizModule = (function () {
   const PER_COL_DEFAULT = 15;
   const FONT_KEY = 'dd_paper_quiz_font';
   const LH_KEY = 'dd_paper_quiz_lh';
-  const FONT_SIZES = [8, 8.5, 9, 9.5, 10, 10.5, 11, 12, 13, 14];
+  const FONT_MIN = 8;
+  const FONT_MAX = 25;
   const FONT_DEFAULT = 9.5;
-  const LINE_HEIGHTS = [1.15, 1.2, 1.28, 1.35, 1.45, 1.55, 1.7];
+  const LH_MIN = 1;
+  const LH_MAX = 3;
   const LH_DEFAULT = 1.28;
   let lastPreview_ = null;
 
@@ -23,27 +25,20 @@ const PaperQuizModule = (function () {
     return n;
   }
 
-  function nearest_(list, raw, fallback) {
-    const n = parseFloat(raw);
-    if (!n || isNaN(n)) return fallback;
-    let best = list[0];
-    let diff = Math.abs(n - best);
-    for (let i = 1; i < list.length; i++) {
-      const d = Math.abs(n - list[i]);
-      if (d < diff) {
-        best = list[i];
-        diff = d;
-      }
-    }
-    return best;
-  }
-
   function clampFont_(n) {
-    return nearest_(FONT_SIZES, n, FONT_DEFAULT);
+    n = parseFloat(n);
+    if (!isFinite(n)) return FONT_DEFAULT;
+    if (n < FONT_MIN) return FONT_MIN;
+    if (n > FONT_MAX) return FONT_MAX;
+    return Math.round(n * 10) / 10;
   }
 
   function clampLh_(n) {
-    return nearest_(LINE_HEIGHTS, n, LH_DEFAULT);
+    n = parseFloat(n);
+    if (!isFinite(n)) return LH_DEFAULT;
+    if (n < LH_MIN) return LH_MIN;
+    if (n > LH_MAX) return LH_MAX;
+    return Math.round(n * 100) / 100;
   }
 
   function lsGet_(key, fallback) {
@@ -402,19 +397,20 @@ const PaperQuizModule = (function () {
       '.pq-toolbar .is-on { background: #38bdf8; color: #0f172a; }',
       '.pq-toolbar button:not(.is-on) { background: #334155; color: #fff; }',
       '.pq-toolbar label { font-size: 13px; display: flex; align-items: center; gap: 6px; }',
-      '.pq-toolbar select { height: 36px; border-radius: 8px; padding: 0 8px; font-weight: 700; }',
+      '.pq-toolbar select, .pq-toolbar input[type=number] { height: 36px; border-radius: 8px; padding: 0 8px; font-weight: 700; }',
+      '.pq-toolbar input[type=number] { width: 76px; }',
       'body { --pq-fs: 9.5px; --pq-lh: 1.28; }',
       '.pq-a4 { width: 210mm; min-height: 297mm; margin: 12px auto; padding: 8mm 8mm 10mm; background: #fff;',
       '  box-shadow: 0 2px 10px rgba(0,0,0,.12); }',
       '.pq-a4 + .pq-a4, .pq-sheet-key { page-break-before: always; }',
       '.pq-sheet-key .pq-a4 + .pq-a4 { page-break-before: always; }',
-      '.pq-header { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #111; padding-bottom: 5px; margin-bottom: 5px; }',
-      '.pq-title { flex: 1; min-width: 0; font-size: calc(var(--pq-fs) + 2.5px); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
-      '.pq-idrow { display: flex; align-items: center; gap: 5px; font-size: calc(var(--pq-fs) + 2.5px); flex-shrink: 0; white-space: nowrap; }',
+      '.pq-header { display: flex; flex-direction: column; align-items: stretch; gap: 5px; border-bottom: 1px solid #111; padding-bottom: 6px; margin-bottom: 6px; }',
+      '.pq-title { width: 100%; font-size: calc(var(--pq-fs) + 2.5px); font-weight: 800; line-height: 1.35; white-space: normal; }',
+      '.pq-idrow { display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: calc(var(--pq-fs) + 2.5px); white-space: nowrap; }',
       '.pq-idrow span { line-height: 1; }',
       '.pq-box { display: inline-block; border: 1.2px solid #111; height: 8mm; width: 12mm; vertical-align: middle; }',
       '.pq-box-sm { width: 10mm; }',
-      '.pq-box-name { width: 32mm; }',
+      '.pq-box-name { width: 68mm; }',
       '.pq-box-score { width: 16mm; }',
       '.pq-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; align-items: start; }',
       '.pq-sec { font-size: var(--pq-fs); font-weight: 700; line-height: var(--pq-lh); min-height: 2.5em; margin: 0 0 4px; }',
@@ -432,6 +428,8 @@ const PaperQuizModule = (function () {
       '.pq-gap { height: 0.95em; }',
       '.pq-uline { border-bottom: 1px solid #111; height: 1.05em; }',
       '.pq-fill { font-weight: 800; color: #9a0000; }',
+      '.pq-sheet-key .pq-fill { display: inline-block; padding-left: 2em; }',
+      '.pq-sheet-key .pq-ch.is-ok { padding-left: 2em; }',
       '.pq-exp { font-size: calc(var(--pq-fs) * 0.9); line-height: var(--pq-lh); margin-top: 1px; color: #333; }',
       '.pq-exp-area { font-weight: 800; }',
       '@page { size: A4; margin: 8mm; }',
@@ -450,14 +448,6 @@ const PaperQuizModule = (function () {
     return (questions || []).map(function (q, i) {
       return { no: i + 1, q: q, points: q._pointsPerQuestion };
     });
-  }
-
-  function optionListHtml_(list, current, suffix) {
-    let html = '';
-    list.forEach(function (v) {
-      html += '<option value="' + v + '"' + (v === current ? ' selected' : '') + '>' + v + suffix + '</option>';
-    });
-    return html;
   }
 
   function openPreview_(questions, meta, perCol) {
@@ -484,10 +474,10 @@ const PaperQuizModule = (function () {
       + '<button type="button" data-view="q">問題用紙のみ</button>'
       + '<button type="button" data-view="k">採点用模範解のみ</button>'
       + '<label>1列の問数 <select id="pq-per-col">' + colOpt + '</select></label>'
-      + '<label>文字サイズ <select id="pq-fs">' + optionListHtml_(FONT_SIZES, fontSize, 'px') + '</select></label>'
-      + '<label>行の高さ <select id="pq-lh">' + optionListHtml_(LINE_HEIGHTS, lineHeight, '') + '</select></label>'
+      + '<label>文字サイズ <input type="number" id="pq-fs" min="8" max="25" step="0.5" value="' + fontSize + '"> px</label>'
+      + '<label>行の高さ <input type="number" id="pq-lh" min="1" max="3" step="0.05" value="' + lineHeight + '"></label>'
       + '<button type="button" class="pq-print" id="pq-do-print">印刷 / PDF</button>'
-      + '<span style="font-size:12px;opacity:.85;">2列×' + perCol + '＝1枚最大' + (perCol * 2) + '問（1列は最大20問）</span>'
+      + '<span style="font-size:12px;opacity:.85;">2列×' + perCol + '＝1枚最大' + (perCol * 2) + '問（文字8〜25px／行1.0〜3.0）</span>'
       + '</div>'
       + qHtml + kHtml
       + '<script>(function(){'
@@ -497,13 +487,19 @@ const PaperQuizModule = (function () {
       + 'document.getElementById("pq-do-print").onclick=function(){window.print();};'
       + 'var sel=document.getElementById("pq-per-col");'
       + 'sel.onchange=function(){var op=window.opener;if(op&&op.PaperQuizModule&&op.PaperQuizModule.reprint){op.PaperQuizModule.reprint(sel.value);}else{alert("元の学習画面から開き直してください");}};'
-      + 'function applyTypo(){'
-      + 'var fs=document.getElementById("pq-fs").value;var lh=document.getElementById("pq-lh").value;'
+      + 'function clamp(n,min,max,fb,dec){n=parseFloat(n);if(!isFinite(n))n=fb;if(n<min)n=min;if(n>max)n=max;var m=Math.pow(10,dec);return Math.round(n*m)/m;}'
+      + 'function applyTypo(commit){'
+      + 'var fsEl=document.getElementById("pq-fs");var lhEl=document.getElementById("pq-lh");'
+      + 'if(!commit&&(fsEl.value===""||lhEl.value===""))return;'
+      + 'var fs=clamp(fsEl.value,8,25,9.5,1);var lh=clamp(lhEl.value,1,3,1.28,2);'
+      + 'if(commit){fsEl.value=fs;lhEl.value=lh;}'
       + 'b.style.setProperty("--pq-fs",fs+"px");b.style.setProperty("--pq-lh",lh);'
-      + 'try{localStorage.setItem("dd_paper_quiz_font",fs);localStorage.setItem("dd_paper_quiz_lh",lh);}catch(e){}'
+      + 'try{localStorage.setItem("dd_paper_quiz_font",String(fs));localStorage.setItem("dd_paper_quiz_lh",String(lh));}catch(e){}'
       + '}'
-      + 'document.getElementById("pq-fs").onchange=applyTypo;'
-      + 'document.getElementById("pq-lh").onchange=applyTypo;'
+      + 'document.getElementById("pq-fs").addEventListener("input",function(){applyTypo(false);});'
+      + 'document.getElementById("pq-lh").addEventListener("input",function(){applyTypo(false);});'
+      + 'document.getElementById("pq-fs").addEventListener("change",function(){applyTypo(true);});'
+      + 'document.getElementById("pq-lh").addEventListener("change",function(){applyTypo(true);});'
       + '})();<\/script></body></html>';
 
     const w = window.open('', 'paper-quiz');
