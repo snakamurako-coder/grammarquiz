@@ -1,8 +1,11 @@
 /**
  * A4 問題用紙（記入欄つき）と別紙の採点用模範解
+ * 2列×各列10問、形式セクション、ヘッダー記入欄は1行
  */
 const PaperQuizModule = (function () {
   const CHOICE_MARKS = ['ア', 'イ', 'ウ', 'エ', 'オ', 'カ', 'キ', 'ク', 'ケ', 'コ'];
+  const PER_COL = 10;
+  const PER_PAGE = 20;
 
   function escapeHtml_(s) {
     return String(s == null ? '' : s)
@@ -22,20 +25,41 @@ const PaperQuizModule = (function () {
   function isUnknownChoice_(c) {
     if (!c) return false;
     if (c.isUnknown) return true;
-    const t = String(c.text || c || '');
-    return t.indexOf('わからない') >= 0;
+    return String(c.text || c || '').indexOf('わからない') >= 0;
   }
 
   function paperChoices_(q) {
     return (q.choices || []).filter(function (c) { return !isUnknownChoice_(c); });
   }
 
-  function formatLabel_(q) {
-    if (q.vocabFormatLabel) return q.vocabFormatLabel;
-    const map = window.GRAMMAR_FORMAT_MAP || {};
-    const meta = map[q.format];
-    if (meta && meta.label) return meta.label;
-    return q.format || '';
+  function paperLabel_(s) {
+    return String(s || '').replace(/タイピング/g, '記述');
+  }
+
+  function formatMeta_(q) {
+    const f = String(q.format || '');
+    const vmap = window.VOCAB_FORMAT_MAP || {};
+    const gmap = window.GRAMMAR_FORMAT_MAP || {};
+    if (vmap[f]) {
+      return {
+        key: f,
+        label: paperLabel_(vmap[f].label || f),
+        instruction: vmap[f].instruction || ''
+      };
+    }
+    if (gmap[f]) {
+      return {
+        key: f,
+        label: paperLabel_(gmap[f].label || f),
+        instruction: gmap[f].instruction || ''
+      };
+    }
+    return { key: f || '?', label: paperLabel_(q.vocabFormatLabel || f || ''), instruction: '' };
+  }
+
+  function formatKeyDisp_(key) {
+    if (/^[A-H]$/.test(key)) return '形式' + key;
+    return '形式' + key;
   }
 
   function isGrammarQ_(q) {
@@ -46,8 +70,7 @@ const PaperQuizModule = (function () {
   function explanationOf_(q) {
     if (!isGrammarQ_(q)) return '';
     const fn = window.normalizeExplanationField_;
-    const raw = fn ? fn(q.explanation) : String(q.explanation || '').trim();
-    return raw;
+    return fn ? fn(q.explanation) : String(q.explanation || '').trim();
   }
 
   function correctTextOf_(q) {
@@ -70,144 +93,112 @@ const PaperQuizModule = (function () {
     return '';
   }
 
-  function completedSentence_(q) {
-    if (q.answerPrefix != null || q.answerSuffix != null) {
-      const inner = q.expectedInner || q.mcqAnswer || q.correctText || '';
-      if (q.answerPrefix || q.answerSuffix || inner) {
-        return joinEn_(q.answerPrefix || q.mcqPrefix || '', inner, q.answerSuffix || q.mcqSuffix || '');
-      }
+  function clozeText_(q, filled) {
+    const prefix = q.answerPrefix || q.mcqPrefix || '';
+    const suffix = q.answerSuffix || q.mcqSuffix || '';
+    const inner = filled
+      ? ('(' + filled + ')')
+      : '(　)';
+    if (prefix || suffix) return joinEn_(prefix, inner, suffix);
+    return '';
+  }
+
+  function hasCloze_(q) {
+    return !!(q.answerPrefix || q.mcqPrefix || q.answerSuffix || q.mcqSuffix);
+  }
+
+  function stemJa_(q) {
+    return String(q.japanese || q.promptJa || '').trim();
+  }
+
+  function stemEn_(q) {
+    if (q.format === 'H') return String(q.presentedSentence || '');
+    if (q.promptEn) return String(q.promptEn);
+    const f = String(q.format || '');
+    if (q.word && (f.indexOf('enja') >= 0 || (!stemJa_(q) && f !== 'vocab-jaen'))) {
+      return String(q.word);
     }
     return '';
   }
 
-  function clozeHtml_(prefix, suffix, filled) {
-    const p = escapeHtml_(prefix || '');
-    const s = escapeHtml_(suffix || '');
-    const mid = filled
-      ? '<span class="pq-fill">' + escapeHtml_(filled) + '</span>'
-      : '<span class="pq-blank">____________________</span>';
-    return '<div class="pq-cloze">' + p + (p ? ' ' : '') + mid + (s && !/^[.,!?;:]/.test(s) ? ' ' : '') + s + '</div>';
-  }
-
-  function linesHtml_(n) {
-    n = n || 2;
-    let html = '<div class="pq-lines">';
-    for (let i = 0; i < n; i++) html += '<div class="pq-line"></div>';
+  function choiceGridHtml_(choices, mode) {
+    let html = '<div class="pq-choice-grid">';
+    choices.forEach(function (c, i) {
+      const mark = CHOICE_MARKS[i] || String(i + 1);
+      const on = mode === 'key' && c.isCorrect;
+      html += '<div class="pq-ch' + (on ? ' is-ok' : '') + '">';
+      html += '<span class="pq-mark">' + mark + '</span> ' + escapeHtml_(c.text || '');
+      html += '</div>';
+    });
     html += '</div>';
     return html;
   }
 
-  function choiceListHtml_(choices, mode) {
-    let html = '<ol class="pq-choices">';
-    choices.forEach(function (c, i) {
-      const mark = CHOICE_MARKS[i] || String(i + 1);
-      const text = escapeHtml_(c.text || '');
-      const on = mode === 'key' && c.isCorrect;
-      html += '<li class="' + (on ? 'pq-choice-correct' : '') + '">';
-      html += '<span class="pq-mark">' + (on ? '●' : '○') + mark + '</span> ' + text;
-      html += '</li>';
-    });
-    html += '</ol>';
-    return html;
-  }
-
-  function tokensHtml_(tokens) {
+  function tokensLine_(tokens) {
     if (!tokens || !tokens.length) return '';
-    return '<div class="pq-tokens">【語句】 ' + tokens.map(function (t) {
-      return '<span class="pq-token">' + escapeHtml_(t) + '</span>';
-    }).join(' ') + '</div>';
+    return tokens.map(function (t) { return escapeHtml_(t); }).join(' / ');
   }
 
-  function stemHtml_(q) {
-    let html = '';
-    const ja = q.japanese || q.promptJa || '';
-    if (ja) html += '<div class="pq-ja">' + escapeHtml_(ja) + '</div>';
-    if (q.posLabel) html += '<div class="pq-meta">' + escapeHtml_(q.posLabel) + '</div>';
-    const en = q.presentedSentence || q.promptEn || q.word || '';
-    const showEn = q.format === 'H' || !!q.promptEn || !!q.presentedSentence
-      || (q.word && !ja)
-      || (q.word && String(q.format || '').indexOf('enja') >= 0);
-    if (en && showEn) html += '<div class="pq-en">' + escapeHtml_(en) + '</div>';
+  function sectionHeadHtml_(q, sectionCount, sectionNo, mode) {
+    const meta = formatMeta_(q);
+    const prefix = sectionCount > 1 ? ('セクション' + sectionNo + '　') : '';
+    const line = prefix + formatKeyDisp_(meta.key) + '：【' + meta.label + '】' + meta.instruction;
+    let html = '<div class="pq-sec">' + escapeHtml_(line) + '</div>';
+    if (q.sharedPool && q.sharedPool.length) {
+      html += '<div class="pq-bank">語群　' + q.sharedPool.map(function (t) {
+        return escapeHtml_(t);
+      }).join('　／　') + '</div>';
+    }
     return html;
-  }
-
-  function responseHtml_(q, mode) {
-    const isKey = mode === 'key';
-    const correct = correctTextOf_(q);
-    const f = String(q.format || '');
-    const choices = paperChoices_(q);
-    const prefix = q.answerPrefix || q.mcqPrefix || '';
-    const suffix = q.answerSuffix || q.mcqSuffix || '';
-
-    if (f === 'H') {
-      if (isKey) {
-        return '<div class="pq-tf"><span class="pq-fill">' + escapeHtml_(correct) + '</span></div>';
-      }
-      return '<div class="pq-tf">□ 正しい　　□ 誤っている</div>';
-    }
-
-    if (choices.length && q.sharedPool) {
-      if (prefix || suffix) {
-        return clozeHtml_(prefix, suffix, isKey ? (q.expectedInner || q.mcqAnswer || correct) : '')
-          + (isKey ? '<div class="pq-key-line">正答: <span class="pq-fill">' + escapeHtml_(correct) + '</span></div>' : '');
-      }
-      if (isKey) {
-        return '<div class="pq-key-line">正答: <span class="pq-fill">' + escapeHtml_(correct) + '</span></div>';
-      }
-      return linesHtml_(1);
-    }
-
-    if (choices.length) {
-      return choiceListHtml_(choices, mode);
-    }
-
-    if (f === 'E' || f === 'C' || f === 'D') {
-      let html = tokensHtml_(q.poolTokens);
-      html += clozeHtml_(prefix, suffix, isKey ? (q.expectedInner || '') : '');
-      if (isKey) {
-        const full = completedSentence_(q);
-        if (full) html += '<div class="pq-key-line">完成文: <span class="pq-fill">' + escapeHtml_(full) + '</span></div>';
-      } else {
-        html += linesHtml_(1);
-      }
-      return html;
-    }
-
-    if (prefix || suffix || f === 'B' || f === 'F' || f === 'W2' || f === 'W3' || f === 'W5' || f === 'W6') {
-      const inner = isKey ? (q.expectedInner || q.mcqAnswer || correct) : '';
-      let html = clozeHtml_(prefix, suffix, inner);
-      if (isKey) {
-        const full = completedSentence_(q);
-        if (full && full !== inner) html += '<div class="pq-key-line">完成文: <span class="pq-fill">' + escapeHtml_(full) + '</span></div>';
-      } else {
-        html += linesHtml_(f === 'A' ? 0 : 1);
-      }
-      return html;
-    }
-
-    if (isKey) {
-      return '<div class="pq-key-line"><span class="pq-fill">' + escapeHtml_(correct) + '</span></div>';
-    }
-    return linesHtml_(f === 'A' || f === 'W1' || f === 'W4' ? 3 : 2);
   }
 
   function itemHtml_(item, mode) {
     const q = item.q;
-    const label = formatLabel_(q);
+    const isKey = mode === 'key';
+    const correct = correctTextOf_(q);
+    const choices = paperChoices_(q);
+    const ja = stemJa_(q);
+    const cloze = clozeText_(q, isKey ? (q.expectedInner || q.mcqAnswer || '') : '');
+    const en = cloze || stemEn_(q);
+    const f = String(q.format || '');
+
     let html = '<article class="pq-item">';
-    html += '<div class="pq-item-head"><span class="pq-no">' + item.no + '</span>';
-    if (label) html += '<span class="pq-fmt">' + escapeHtml_(label) + '</span>';
-    if (item.points != null) html += '<span class="pq-pts">' + escapeHtml_(String(item.points)) + '点</span>';
-    html += '</div>';
-    html += stemHtml_(q);
-    html += responseHtml_(q, mode);
-    if (mode === 'key' && isGrammarQ_(q)) {
+    html += '<div class="pq-l1"><span class="pq-no">' + item.no + '.</span> '
+      + escapeHtml_(ja || (f === 'H' ? '' : (en && !ja ? en : ''))) + '</div>';
+
+    if (f === 'H') {
+      html += '<div class="pq-l2">' + escapeHtml_(q.presentedSentence || '') + '</div>';
+      if (isKey) html += '<div class="pq-l3"><span class="pq-fill">' + escapeHtml_(correct) + '</span></div>';
+      else html += '<div class="pq-l3">□ 正しい　□ 誤っている</div>';
+    } else if (f === 'E' || f === 'C' || f === 'D') {
+      html += '<div class="pq-l2">' + (cloze ? escapeHtml_(cloze) : '') + '</div>';
+      html += '<div class="pq-l2b">' + tokensLine_(q.poolTokens) + '</div>';
+      if (isKey) {
+        html += '<div class="pq-l3"><span class="pq-fill">' + escapeHtml_(correct) + '</span></div>';
+      } else {
+        html += '<div class="pq-gap"></div><div class="pq-uline"></div>';
+      }
+    } else if (choices.length) {
+      if (en && ja) html += '<div class="pq-l2">' + escapeHtml_(en) + '</div>';
+      else if (en && !ja) { /* already on l1 */ }
+      else if (cloze) html += '<div class="pq-l2">' + escapeHtml_(cloze) + '</div>';
+      html += choiceGridHtml_(choices, mode);
+    } else {
+      if (en && ja) html += '<div class="pq-l2">' + escapeHtml_(en) + '</div>';
+      if (isKey) {
+        html += '<div class="pq-l3"><span class="pq-fill">' + escapeHtml_(correct) + '</span></div>';
+      } else {
+        html += '<div class="pq-gap"></div><div class="pq-uline"></div>';
+      }
+    }
+
+    if (isKey && isGrammarQ_(q)) {
       const exp = explanationOf_(q);
       const area = String(q.grammarArea || '').trim();
       if (area || exp) {
         html += '<div class="pq-exp">';
-        if (area) html += '<div class="pq-exp-area">' + escapeHtml_(area) + '</div>';
-        if (exp) html += '<div class="pq-exp-body">' + escapeHtml_(exp) + '</div>';
+        if (area) html += '<span class="pq-exp-area">' + escapeHtml_(area) + '</span> ';
+        if (exp) html += escapeHtml_(exp);
         html += '</div>';
       }
     }
@@ -216,54 +207,96 @@ const PaperQuizModule = (function () {
   }
 
   function headerHtml_(meta, sheetKind) {
-    const title = sheetKind === 'key' ? '採点用　模範解' : '問題用紙';
-    const sub = sheetKind === 'key' ? '（別紙・学習者用ではありません）' : '';
+    const kind = sheetKind === 'key' ? '採点用模範解' : '問題用紙';
+    const extra = sheetKind === 'key' ? '（別紙）' : '';
     let html = '<header class="pq-header">';
-    html += '<div class="pq-title-block">';
-    html += '<div class="pq-kicker">' + escapeHtml_(title) + sub + '</div>';
-    html += '<h1>' + escapeHtml_(meta.title || '小テスト') + '</h1>';
-    if (meta.subtitle) html += '<p class="pq-sub">' + escapeHtml_(meta.subtitle) + '</p>';
-    if (meta.pointsMax) html += '<p class="pq-sub">満点 ' + escapeHtml_(String(meta.pointsMax)) + ' 点　／　' + escapeHtml_(String(meta.count)) + ' 問</p>';
-    else html += '<p class="pq-sub">' + escapeHtml_(String(meta.count)) + ' 問</p>';
+    html += '<div class="pq-title">' + escapeHtml_(kind) + extra + '　'
+      + escapeHtml_(meta.title || '小テスト');
+    if (meta.pointsMax) html += '　' + escapeHtml_(String(meta.count)) + '問／満点' + escapeHtml_(String(meta.pointsMax));
+    else html += '　' + escapeHtml_(String(meta.count || '')) + '問';
     html += '</div>';
-    html += '<table class="pq-idbox"><tbody>';
-    html += '<tr><th>学年</th><td></td><th>組</th><td></td></tr>';
-    html += '<tr><th>番号</th><td></td><th>氏名</th><td class="pq-name"></td></tr>';
-    html += '<tr><th>点数</th><td class="pq-score" colspan="3"></td></tr>';
-    html += '</tbody></table>';
+    html += '<div class="pq-idrow">'
+      + '<span>学年</span><span class="pq-box"></span>'
+      + '<span>組</span><span class="pq-box pq-box-sm"></span>'
+      + '<span>番号</span><span class="pq-box pq-box-sm"></span>'
+      + '<span>氏名</span><span class="pq-box pq-box-name"></span>'
+      + '<span>点数</span><span class="pq-box pq-box-score"></span>'
+      + '</div>';
     html += '</header>';
     return html;
   }
 
-  function poolBannerHtml_(items, mode) {
-    const seen = {};
-    const banks = [];
+  function regroupByFormat_(items) {
+    const order = [];
+    const buckets = {};
     items.forEach(function (it) {
-      const pool = it.q.sharedPool;
-      if (!pool || !pool.length) return;
-      const key = pool.join('\u0001');
-      if (seen[key]) return;
-      seen[key] = true;
-      banks.push(pool);
+      const k = String((it.q && it.q.format) || 'other');
+      if (!buckets[k]) {
+        buckets[k] = [];
+        order.push(k);
+      }
+      buckets[k].push(it);
     });
-    if (!banks.length) return '';
+    const out = [];
+    order.forEach(function (k) {
+      buckets[k].forEach(function (it) { out.push(it); });
+    });
+    out.forEach(function (it, i) { it.no = i + 1; });
+    return out;
+  }
+
+  function uniqueFormatCount_(items) {
+    const seen = {};
+    let n = 0;
+    items.forEach(function (it) {
+      const k = String((it.q && it.q.format) || '');
+      if (!seen[k]) {
+        seen[k] = true;
+        n += 1;
+      }
+    });
+    return n;
+  }
+
+  function columnFlowHtml_(colItems, mode, allItems, sectionCount) {
     let html = '';
-    banks.forEach(function (pool, i) {
-      html += '<div class="pq-bank"><strong>語群' + (banks.length > 1 ? (i + 1) : '') + '</strong>　';
-      html += pool.map(function (t) { return escapeHtml_(t); }).join('　／　');
-      html += '</div>';
+    colItems.forEach(function (it) {
+      const idx = allItems.indexOf(it);
+      const prev = idx > 0 ? allItems[idx - 1] : null;
+      const curFmt = String(it.q.format || '');
+      const prevFmt = prev ? String(prev.q.format || '') : '';
+      if (!prev || curFmt !== prevFmt) {
+        let sectionNo = 1;
+        const seen = {};
+        for (let i = 0; i <= idx; i++) {
+          const fk = String(allItems[i].q.format || '');
+          if (!seen[fk]) {
+            seen[fk] = true;
+            sectionNo = Object.keys(seen).length;
+          }
+        }
+        html += sectionHeadHtml_(it.q, sectionCount, sectionNo, mode);
+      }
+      html += itemHtml_(it, mode);
     });
-    if (mode === 'question') {
-      html += '<p class="pq-bank-note">語群の語句を使って答えなさい（同じ語を二度使わない）。</p>';
-    }
     return html;
   }
 
   function sheetHtml_(items, meta, mode) {
+    const grouped = regroupByFormat_(items);
+    const sectionCount = uniqueFormatCount_(grouped);
     let html = '<section class="pq-sheet pq-sheet-' + mode + '">';
-    html += headerHtml_(meta, mode);
-    html += poolBannerHtml_(items, mode);
-    items.forEach(function (it) { html += itemHtml_(it, mode); });
+    for (let p = 0; p < grouped.length; p += PER_PAGE) {
+      const pageItems = grouped.slice(p, p + PER_PAGE);
+      const left = pageItems.slice(0, PER_COL);
+      const right = pageItems.slice(PER_COL, PER_PAGE);
+      html += '<div class="pq-a4">';
+      html += headerHtml_(meta, mode);
+      html += '<div class="pq-cols">';
+      html += '<div class="pq-col">' + columnFlowHtml_(left, mode, grouped, sectionCount) + '</div>';
+      html += '<div class="pq-col">' + columnFlowHtml_(right, mode, grouped, sectionCount) + '</div>';
+      html += '</div></div>';
+    }
     html += '</section>';
     return html;
   }
@@ -271,54 +304,45 @@ const PaperQuizModule = (function () {
   function cssText_() {
     return [
       '* { box-sizing: border-box; }',
-      'html, body { margin: 0; padding: 0; background: #e8e8e8; color: #111; font-family: "Hiragino Sans", "Yu Gothic", Meiryo, sans-serif; }',
-      '.pq-toolbar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; background: #1e293b; color: #fff; }',
+      'html, body { margin: 0; padding: 0; background: #e8e8e8; color: #111;',
+      '  font-family: "Hiragino Sans", "Yu Gothic", Meiryo, sans-serif; }',
+      '.pq-toolbar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;',
+      '  padding: 10px 16px; background: #1e293b; color: #fff; }',
       '.pq-toolbar button { min-height: 40px; padding: 8px 14px; border-radius: 8px; border: 0; cursor: pointer; font-weight: 700; }',
       '.pq-toolbar .is-on { background: #38bdf8; color: #0f172a; }',
       '.pq-toolbar button:not(.is-on) { background: #334155; color: #fff; }',
       '.pq-print { background: #22c55e !important; color: #052e16 !important; }',
-      '.pq-page { width: 210mm; min-height: 297mm; margin: 16px auto; padding: 14mm 14mm 16mm; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.12); }',
-      '.pq-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; border-bottom: 2px solid #111; padding-bottom: 8px; margin-bottom: 12px; }',
-      '.pq-title-block { flex: 1; min-width: 0; }',
-      '.pq-kicker { font-size: 12px; font-weight: 800; letter-spacing: .08em; }',
-      'h1 { font-size: 18px; margin: 4px 0 6px; }',
-      '.pq-sub { margin: 0; font-size: 11px; color: #333; }',
-      '.pq-idbox { border-collapse: collapse; font-size: 12px; flex-shrink: 0; }',
-      '.pq-idbox th, .pq-idbox td { border: 1px solid #111; padding: 4px 8px; }',
-      '.pq-idbox th { background: #f3f3f3; width: 2.6em; text-align: center; }',
-      '.pq-idbox td { min-width: 3.2em; height: 22px; }',
-      '.pq-idbox td.pq-name { min-width: 8em; }',
-      '.pq-idbox td.pq-score { min-width: 4em; }',
-      '.pq-bank { font-size: 12px; border: 1px solid #333; padding: 8px; margin-bottom: 8px; line-height: 1.6; }',
-      '.pq-bank-note { font-size: 11px; margin: 0 0 10px; }',
-      '.pq-item { break-inside: avoid; page-break-inside: avoid; border-bottom: 1px dotted #999; padding: 8px 0 10px; }',
-      '.pq-item-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }',
-      '.pq-no { font-weight: 800; font-size: 14px; }',
-      '.pq-fmt, .pq-pts { font-size: 11px; color: #444; }',
-      '.pq-ja { font-size: 13px; font-weight: 700; margin: 2px 0; }',
-      '.pq-en { font-size: 13px; margin: 2px 0; }',
-      '.pq-meta { font-size: 11px; color: #555; }',
-      '.pq-cloze { font-size: 13px; margin: 6px 0; line-height: 1.7; }',
-      '.pq-blank { display: inline-block; min-width: 8em; border-bottom: 1px solid #111; }',
-      '.pq-fill { font-weight: 800; text-decoration: underline; color: #9a0000; }',
-      '.pq-lines { margin: 6px 0 0; }',
-      '.pq-line { border-bottom: 1px solid #333; height: 22px; }',
-      '.pq-choices { list-style: none; padding: 0; margin: 6px 0 0; font-size: 13px; }',
-      '.pq-choices li { margin: 3px 0; }',
-      '.pq-mark { font-family: monospace; margin-right: 4px; }',
-      '.pq-choice-correct { font-weight: 800; }',
-      '.pq-tokens { font-size: 12px; margin: 6px 0; }',
-      '.pq-token { display: inline-block; border: 1px solid #333; padding: 1px 6px; margin: 2px; }',
-      '.pq-tf { margin: 8px 0; font-size: 13px; }',
-      '.pq-key-line { margin-top: 4px; font-size: 13px; }',
-      '.pq-exp { margin-top: 6px; background: #fff8e1; border-left: 3px solid #f9a825; padding: 6px 8px; font-size: 11px; line-height: 1.5; }',
-      '.pq-exp-area { font-weight: 800; margin-bottom: 2px; }',
-      '.pq-sheet-key { page-break-before: always; }',
-      '@page { size: A4; margin: 12mm; }',
+      '.pq-a4 { width: 210mm; min-height: 297mm; margin: 12px auto; padding: 8mm 8mm 10mm; background: #fff;',
+      '  box-shadow: 0 2px 10px rgba(0,0,0,.12); }',
+      '.pq-a4 + .pq-a4, .pq-sheet-key { page-break-before: always; }',
+      '.pq-sheet-key .pq-a4 + .pq-a4 { page-break-before: always; }',
+      '.pq-header { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #111; padding-bottom: 3px; margin-bottom: 5px; }',
+      '.pq-title { flex: 1; min-width: 0; font-size: 11px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
+      '.pq-idrow { display: flex; align-items: center; gap: 3px; font-size: 10px; flex-shrink: 0; white-space: nowrap; }',
+      '.pq-idrow span { line-height: 1; }',
+      '.pq-box { display: inline-block; border: 1px solid #111; height: 16px; width: 28px; vertical-align: middle; }',
+      '.pq-box-sm { width: 22px; }',
+      '.pq-box-name { width: 72px; }',
+      '.pq-box-score { width: 36px; }',
+      '.pq-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; align-items: start; }',
+      '.pq-sec { font-size: 9.5px; font-weight: 700; line-height: 1.35; margin: 0 0 3px; }',
+      '.pq-bank { font-size: 9px; line-height: 1.35; margin: 0 0 4px; }',
+      '.pq-item { margin: 0 0 2.6mm; padding: 0; border: 0; font-size: 10px; line-height: 1.32; break-inside: avoid; }',
+      '.pq-l1, .pq-l2, .pq-l2b, .pq-l3 { word-break: break-word; overflow-wrap: anywhere; }',
+      '.pq-no { font-weight: 800; }',
+      '.pq-choice-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 4px; row-gap: 0; margin-top: 1px; font-size: 9.5px; }',
+      '.pq-ch.is-ok { font-weight: 800; }',
+      '.pq-mark { font-weight: 700; }',
+      '.pq-gap { height: 0.95em; }',
+      '.pq-uline { border-bottom: 1px solid #111; height: 1.05em; }',
+      '.pq-fill { font-weight: 800; color: #9a0000; }',
+      '.pq-exp { font-size: 8.5px; line-height: 1.3; margin-top: 1px; color: #333; }',
+      '.pq-exp-area { font-weight: 800; }',
+      '@page { size: A4; margin: 8mm; }',
       '@media print {',
       '  body { background: #fff; }',
       '  .pq-toolbar { display: none !important; }',
-      '  .pq-page { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }',
+      '  .pq-a4 { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }',
       '  body.print-q .pq-sheet-key { display: none !important; }',
       '  body.print-k .pq-sheet-question { display: none !important; }',
       '  body.print-k .pq-sheet-key { page-break-before: auto; }',
@@ -328,16 +352,12 @@ const PaperQuizModule = (function () {
 
   function toItems_(questions) {
     return (questions || []).map(function (q, i) {
-      return {
-        no: i + 1,
-        q: q,
-        points: q._pointsPerQuestion
-      };
+      return { no: i + 1, q: q, points: q._pointsPerQuestion };
     });
   }
 
   function openPreview_(questions, meta) {
-    const items = toItems_(questions);
+    const items = regroupByFormat_(toItems_(questions));
     if (!items.length) throw new Error('印刷できる問題がありません。');
     meta = Object.assign({ count: items.length }, meta || {});
     const qHtml = sheetHtml_(items, meta, 'question');
@@ -350,9 +370,9 @@ const PaperQuizModule = (function () {
       + '<button type="button" data-view="q">問題用紙のみ</button>'
       + '<button type="button" data-view="k">採点用模範解のみ</button>'
       + '<button type="button" class="pq-print" id="pq-do-print">印刷 / PDF</button>'
-      + '<span style="font-size:12px;opacity:.85;">問題用紙と採点用模範解は別ページです</span>'
+      + '<span style="font-size:12px;opacity:.85;">1枚あたり最大20問（2列×10）／模範解は別ページ</span>'
       + '</div>'
-      + '<div class="pq-page">' + qHtml + kHtml + '</div>'
+      + qHtml + kHtml
       + '<script>(function(){'
       + 'var b=document.body;document.querySelectorAll("[data-view]").forEach(function(btn){'
       + 'btn.addEventListener("click",function(){b.className="print-"+btn.getAttribute("data-view");'
@@ -361,9 +381,7 @@ const PaperQuizModule = (function () {
       + '})();<\/script></body></html>';
 
     const w = window.open('', 'paper-quiz');
-    if (!w) {
-      throw new Error('印刷ウィンドウを開けませんでした。ポップアップを許可してください。');
-    }
+    if (!w) throw new Error('印刷ウィンドウを開けませんでした。ポップアップを許可してください。');
     w.document.open();
     w.document.write(html);
     w.document.close();
@@ -398,7 +416,7 @@ const PaperQuizModule = (function () {
       questions: questions,
       meta: {
         title: (subject || '文法・語法演習') + (units.length ? ' / ' + units.join(', ') : ''),
-        subtitle: '文法・語法演習　形式: ' + options.formats.join(', '),
+        subtitle: '文法・語法演習',
         count: questions.length
       }
     };
@@ -472,9 +490,7 @@ const PaperQuizModule = (function () {
         const run = window.BusyButton && BusyButton.run
           ? BusyButton.run(gBtn, openFromGrammar, '用紙作成中…')
           : openFromGrammar();
-        Promise.resolve(run).catch(function (e) {
-          alert(e.message || e);
-        });
+        Promise.resolve(run).catch(function (e) { alert(e.message || e); });
       });
     }
     const vBtn = document.getElementById('vocab-paper-print-btn');
@@ -484,9 +500,7 @@ const PaperQuizModule = (function () {
         const run = window.BusyButton && BusyButton.run
           ? BusyButton.run(vBtn, openFromVocab, '用紙作成中…')
           : openFromVocab();
-        Promise.resolve(run).catch(function (e) {
-          alert(e.message || e);
-        });
+        Promise.resolve(run).catch(function (e) { alert(e.message || e); });
       });
     }
   }
