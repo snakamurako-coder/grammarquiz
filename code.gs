@@ -27,7 +27,16 @@ const PROP = {
   /** 双方向デプロイ間の auth トークン同期先（未設定時は DEFAULT_* から推定） */
   PEER_WEBAPP_URL: 'PEER_WEBAPP_URL',
   /** registerAuthToken / exportAuthToken 用（未設定時は CLIENT_SECRET） */
-  AUTH_MIRROR_SECRET: 'AUTH_MIRROR_SECRET'
+  AUTH_MIRROR_SECRET: 'AUTH_MIRROR_SECRET',
+  /** 課題点検票（whitelist 名簿 → 提出転記） */
+  CHECK_YEAR: 'CHECK_YEAR',
+  CHECK_FOLDER_ID: 'CHECK_FOLDER_ID',
+  CHECK_ASSIGNMENT_SS_ID: 'CHECK_ASSIGNMENT_SS_ID',
+  CHECK_QUIZ_PF_SS_ID: 'CHECK_QUIZ_PF_SS_ID',
+  CHECK_QUIZ_SCORE_SS_ID: 'CHECK_QUIZ_SCORE_SS_ID',
+  CHECK_SCOPE_GRADE: 'CHECK_SCOPE_GRADE',
+  CHECK_SCOPE_CLASS: 'CHECK_SCOPE_CLASS',
+  CHECK_SCOPE_NUMBER: 'CHECK_SCOPE_NUMBER'
 };
 
 const AUTH_CACHE_PREFIX = 'auth_';
@@ -1157,6 +1166,7 @@ function ensureEnvironment() {
     ensureVocabularyResources_();
     syncWhitelistCacheIfStale_();
     syncSampleQuestionBooksIfNeeded_();
+    try { ensureCheckExportTrigger_(); } catch (e) { /* トリガー権限が無い実行文脈では無視 */ }
     return props.getProperties();
   }
   return setupEnvironmentWithLock_(false);
@@ -1252,6 +1262,7 @@ function setupEnvironment_(force) {
     props.setProperty(PROP.PAGES_URL, DEFAULT_PAGES_URL);
     created.push('PAGES_URL');
   }
+  try { ensureCheckExportTrigger_(); } catch (e) { /* セットアップ時点でトリガー不可でも続行 */ }
 
   const result = {
     parentFolderId: parentFolder.getId(),
@@ -1404,11 +1415,11 @@ function ensureAppBookSheets_(ss) {
 
 /** whitelist に attribute1～5 列を追加（既存行は保持） */
 function ensureWhitelistColumns_(whitelist) {
-  const required = ['account', 'name', 'grade', 'class', 'attribute1', 'attribute2', 'attribute3', 'attribute4', 'attribute5'];
+  const required = ['account', 'name', 'grade', 'class', 'number', 'attribute1', 'attribute2', 'attribute3', 'attribute4', 'attribute5'];
   if (whitelist.getLastRow() === 0 || String(whitelist.getRange(1, 1).getValue() || '') === '') {
     whitelist.clear();
     whitelist.appendRow(required);
-    whitelist.appendRow(['example@example.com', 'サンプル太郎', '1', 'A', '', '', '', '', '']);
+    whitelist.appendRow(['example@example.com', 'サンプル太郎', '1', 'A', '1', '', '', '', '', '']);
     whitelist.getRange(1, 1, 1, required.length).setFontWeight('bold');
     return;
   }
@@ -2437,13 +2448,20 @@ const ASSIGNMENT_HEADERS = [
 const SUBMISSION_HEADERS = [
   'Submission_ID', 'Assignment_ID', 'Account', 'Attempt_No', 'Status',
   'Score', 'Correct', 'Total', 'Points', 'Points_Max', 'Duration_Sec', 'Timed_Out',
-  'Progress_JSON', 'Detail_JSON', 'Submitted_At'
+  'Progress_JSON', 'Detail_JSON', 'Submitted_At', 'Check_Exported'
 ];
+
+const CHECK_FOLDER_NAME = 'DigitalDrill_点検票';
+const CHECK_HEADER_ROWS = 5;
+const CHECK_ROSTER_COLS = 7;
+const CHECK_EXPORT_TRIGGER_FN = 'syncCheckSheetsPending';
+const CHECK_EXPORT_BATCH = 80;
 
 function ensureAssignmentSheets_(ss) {
   ensureSheetWithHeaders_(ss, 'assignments', ASSIGNMENT_HEADERS);
   migrateSheetHeaders_(ss.getSheetByName('assignments'), ASSIGNMENT_HEADERS);
   ensureSheetWithHeaders_(ss, 'assignment_submissions', SUBMISSION_HEADERS);
+  migrateSheetHeaders_(ss.getSheetByName('assignment_submissions'), SUBMISSION_HEADERS);
 }
 
 /** 既存シートの1行目に不足ヘッダ列を追加（データ行は保持） */
@@ -3281,7 +3299,7 @@ function apiSubmitAssignmentAttempt_(requestData) {
     JSON.stringify(requestData.detail || {}),
     now
   ];
-  sheet.getRange(row._row, 1, 1, SUBMISSION_HEADERS.length).setValues([values]);
+  sheet.getRange(row._row, 1, 1, values.length).setValues([values]);
   return {
     status: 'success',
     data: {
@@ -3296,6 +3314,758 @@ function apiSubmitAssignmentAttempt_(requestData) {
       passed: status === 'passed'
     }
   };
+}
+
+// =========================================================
+// 課題点検票（whitelist 名簿 → 提出の未転記分を時間トリガーで追記）
+// =========================================================
+
+function compactRangeLabel_(items) {
+  const seen = {};
+  const arr = [];
+  let list = items;
+  if (list == null || list === '') list = [];
+  else if (!Array.isArray(list)) list = [list];
+  list.forEach(function (x) {
+    const s = String(x || '').trim();
+    if (!s || seen[s]) return;
+    seen[s] = true;
+    arr.push(s);
+  });
+  if (!arr.length) return '';
+  arr.sort(naturalLabelSort_);
+  if (arr.length === 1) return arr[0];
+  return arr[0] + '～' + arr[arr.length - 1];
+}
+
+function checkModeLabel_(mode) {
+  const m = String(mode || '').toLowerCase();
+  if (m === 'vocab') return '単語';
+  if (m === 'grammar') return '文法';
+  if (m === 'reading') return '音読';
+  if (m === 'conversation' || m === 'ai') return '会話';
+  if (!m) return '課題';
+  return m.length <= 2 ? m : m.slice(0, 2);
+}
+
+function vocabSheetLabels_(sec) {
+  if (!sec) return [];
+  if (Array.isArray(sec.sheetNames) && sec.sheetNames.length) return sec.sheetNames;
+  if (Array.isArray(sec.sheets) && sec.sheets.length) return sec.sheets;
+  if (sec.sheetName) return [sec.sheetName];
+  return [];
+}
+
+/** 行5見出し: 単語：コーパス4500・Stage1～14・Stage1 */
+function buildCheckColumnTitle_(asg) {
+  const sections = (asg && asg.Sections) || parseSectionsJson_(asg && asg.Sections_JSON);
+  if (!sections.length) return String((asg && asg.Title) || (asg && asg.Assignment_ID) || '課題');
+  const parts = sections.map(function (sec) {
+    const mode = String(sec.mode || '').toLowerCase();
+    const label = checkModeLabel_(mode);
+    let book = '';
+    let sheetRange = '';
+    let dai = '';
+    if (mode === 'vocab') {
+      book = String(sec.bookName || '').trim();
+      sheetRange = compactRangeLabel_(vocabSheetLabels_(sec));
+      dai = compactRangeLabel_((sec.filters && sec.filters.dai) || []);
+    } else if (mode === 'grammar') {
+      book = String(sec.subject || '').trim();
+      sheetRange = compactRangeLabel_(sec.units || []);
+      dai = compactRangeLabel_((sec.filters && sec.filters.dai) || []);
+    } else {
+      book = String(sec.bookName || sec.subject || (asg && asg.Title) || '').trim();
+      sheetRange = compactRangeLabel_(vocabSheetLabels_(sec).concat(sec.units || []));
+      dai = compactRangeLabel_((sec.filters && sec.filters.dai) || []);
+    }
+    const tail = [book, sheetRange, dai].filter(Boolean).join('・');
+    return tail ? (label + '：' + tail) : label;
+  });
+  return parts.filter(Boolean).join('／') || String((asg && asg.Title) || '');
+}
+
+function formatCheckDateOnly_(value) {
+  const ms = parseLooseDate_(value);
+  if (ms == null) return '';
+  return Utilities.formatDate(new Date(ms), Session.getScriptTimeZone() || 'Asia/Tokyo', 'M/d');
+}
+
+/** 提出日行: 期限があればそれ、なければ期間終了日（日付のみ） */
+function checkDueDateLabel_(asg) {
+  return formatCheckDateOnly_(asg && asg.Deadline) || formatCheckDateOnly_(asg && asg.Window_End) || '';
+}
+
+function isCheckExportableSubmission_(asg, row) {
+  const status = String((row && row.Status) || '');
+  if (!asg) return false;
+  if (asg.Kind === 'quiz') return status === 'passed';
+  return status === 'passed' || status === 'submitted' || status === 'forced';
+}
+
+function isCheckExportedFlag_(value) {
+  const s = String(value == null ? '' : value).trim().toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes';
+}
+
+function getCheckYear_() {
+  const y = String(PropertiesService.getScriptProperties().getProperty(PROP.CHECK_YEAR) || '').trim();
+  if (y) return y;
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy');
+}
+
+function checkBookFileName_(kind, year) {
+  if (kind === 'quiz_pf') return '【' + year + '】デジドリ小テスト点検票(合否)';
+  if (kind === 'quiz_score') return '【' + year + '】デジドリ小テスト点検票(点数)';
+  return '【' + year + '】デジドリ課題点検票';
+}
+
+function checkPropKeyForKind_(kind) {
+  if (kind === 'quiz_pf') return PROP.CHECK_QUIZ_PF_SS_ID;
+  if (kind === 'quiz_score') return PROP.CHECK_QUIZ_SCORE_SS_ID;
+  return PROP.CHECK_ASSIGNMENT_SS_ID;
+}
+
+function gradeToCheckSheetName_(grade) {
+  const g = String(grade || '').trim();
+  if (!g) return '未分類＠入力';
+  if (/＠入力$/.test(g)) return g;
+  if (/年$/.test(g)) return g + '＠入力';
+  return g + '年＠入力';
+}
+
+function normalizeGradeToken_(s) {
+  return String(s || '').trim().toLowerCase().replace(/年$/, '');
+}
+
+function normalizeClassToken_(s) {
+  return String(s || '').trim().toLowerCase().replace(/組$/, '');
+}
+
+function parseCheckCsvTokens_(raw) {
+  return String(raw || '').split(/[,、]/).map(function (s) {
+    return String(s || '').trim();
+  }).filter(Boolean);
+}
+
+/** 番号フィルタ: 1,2,5 または 1-20 を許可。空＝制限なし */
+function parseCheckNumberFilter_(raw) {
+  const tokens = parseCheckCsvTokens_(raw);
+  if (!tokens.length) return null;
+  const allowed = {};
+  tokens.forEach(function (tok) {
+    const m = String(tok).match(/^(\d+)\s*[-~～]\s*(\d+)$/);
+    if (m) {
+      const a = parseInt(m[1], 10);
+      const b = parseInt(m[2], 10);
+      const lo = Math.min(a, b);
+      const hi = Math.max(a, b);
+      for (let n = lo; n <= hi; n++) allowed[n] = true;
+      return;
+    }
+    const n = parseInt(tok, 10);
+    if (!isNaN(n)) allowed[n] = true;
+  });
+  return allowed;
+}
+
+function readCheckScope_() {
+  const props = PropertiesService.getScriptProperties();
+  return {
+    grade: String(props.getProperty(PROP.CHECK_SCOPE_GRADE) || '').trim(),
+    className: String(props.getProperty(PROP.CHECK_SCOPE_CLASS) || '').trim(),
+    number: String(props.getProperty(PROP.CHECK_SCOPE_NUMBER) || '').trim()
+  };
+}
+
+function matchCheckScopeField_(filterRaw, value, normalizer) {
+  const tokens = parseCheckCsvTokens_(filterRaw);
+  if (!tokens.length) return true;
+  const got = normalizer(value);
+  if (!got) return false;
+  for (let i = 0; i < tokens.length; i++) {
+    if (normalizer(tokens[i]) === got) return true;
+  }
+  return false;
+}
+
+function studentMatchesCheckScope_(st, scope) {
+  scope = scope || readCheckScope_();
+  if (!matchCheckScopeField_(scope.grade, st.grade, normalizeGradeToken_)) return false;
+  if (!matchCheckScopeField_(scope.className, st.className, normalizeClassToken_)) return false;
+  const allowedNums = parseCheckNumberFilter_(scope.number);
+  if (allowedNums) {
+    const n = parseInt(st.number, 10);
+    if (isNaN(n) || !allowedNums[n]) return false;
+  }
+  return true;
+}
+
+function listWhitelistStudentsForCheck_() {
+  const ss = openAppSpreadsheet_();
+  const rows = sheetRowsToObjects_(ss.getSheetByName('whitelist'));
+  const scope = readCheckScope_();
+  const out = [];
+  rows.forEach(function (r) {
+    const account = String(r.account || '').trim().toLowerCase();
+    const cls = String(r.class || '').trim();
+    if (!account) return;
+    if (cls.toLowerCase() === 'admin') return;
+    const st = {
+      account: account,
+      name: String(r.name || '').trim(),
+      grade: String(r.grade || '').trim(),
+      className: cls,
+      number: String(r.number != null && r.number !== '' ? r.number : (r['番号'] || '')).trim()
+    };
+    if (!studentMatchesCheckScope_(st, scope)) return;
+    out.push(st);
+  });
+  out.sort(function (a, b) {
+    const g = naturalLabelSort_(a.grade, b.grade);
+    if (g) return g;
+    const c = naturalLabelSort_(a.className, b.className);
+    if (c) return c;
+    const na = parseInt(a.number, 10);
+    const nb = parseInt(b.number, 10);
+    if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb;
+    return naturalLabelSort_(a.name || a.account, b.name || b.account);
+  });
+  return out;
+}
+
+function getOrCreateCheckFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const existingId = props.getProperty(PROP.CHECK_FOLDER_ID);
+  if (existingId) {
+    try {
+      return DriveApp.getFolderById(existingId);
+    } catch (e) { /* fall through */ }
+  }
+  const parentId = props.getProperty(PROP.PARENT_FOLDER_ID);
+  const parent = parentId ? DriveApp.getFolderById(parentId) : getScriptParentFolder_();
+  let folder = findChildFolderByName_(parent, CHECK_FOLDER_NAME);
+  if (!folder) folder = parent.createFolder(CHECK_FOLDER_NAME);
+  props.setProperty(PROP.CHECK_FOLDER_ID, folder.getId());
+  return folder;
+}
+
+function openOrCreateCheckBook_(kind) {
+  const props = PropertiesService.getScriptProperties();
+  const propKey = checkPropKeyForKind_(kind);
+  const configured = String(props.getProperty(propKey) || '').trim();
+  if (configured) {
+    return SpreadsheetApp.openById(configured);
+  }
+  const year = getCheckYear_();
+  const fileName = checkBookFileName_(kind, year);
+  const folder = getOrCreateCheckFolder_();
+  const existing = findChildSpreadsheetByName_(folder, fileName);
+  if (existing) {
+    props.setProperty(propKey, existing.getId());
+    return SpreadsheetApp.open(existing);
+  }
+  const ss = createSpreadsheetInFolder_(fileName, folder);
+  props.setProperty(propKey, ss.getId());
+  const leftover = ss.getSheetByName('シート1') || ss.getSheets()[0];
+  if (leftover) leftover.setName('準備中');
+  return ss;
+}
+
+function applyCheckSheetLayout_(sheet, sheetName, bookType) {
+  try {
+    sheet.setName(sheetName);
+  } catch (e) { /* 既存名を維持 */ }
+
+  let a1Val = '提出物';
+  if (bookType === 'quiz_pf') a1Val = '小テスト(合否)';
+  if (bookType === 'quiz_score') a1Val = '小テスト(点数)';
+
+  const headers = [
+    ['組', '', '', '', '', '', '通し番号→'],
+    ['', '', '', '', '', '', '提出率→'],
+    ['', '', '', '', '', '', '返却可否→'],
+    ['', '', '', '', '', '', '提出日→'],
+    ['組', '番号', 'ID', '氏名', '性別', '提出率', '提出数']
+  ];
+  sheet.getRange(1, 1, CHECK_HEADER_ROWS, CHECK_ROSTER_COLS).setValues(headers);
+  sheet.getRange('A1').setValue(a1Val);
+  if (bookType === 'quiz_pf' || bookType === 'quiz_score') {
+    sheet.getRange('B1').setValue(80);
+    sheet.getRange('C1').setValue('点合格');
+  }
+
+  const range = sheet.getRange('H6:AZ205');
+  const rules = [];
+  if (bookType === 'assignment') {
+    rules.push(
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('提').setBackground('#b7e1cd').setFontColor('#0f5132').setRanges([range]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('未').setBackground('#f4c7c3').setFontColor('#842029').setRanges([range]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('再').setBackground('#fce8b2').setFontColor('#664d03').setRanges([range]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('休').setBackground('#d9d2e9').setFontColor('#351c75').setRanges([range]).build()
+    );
+  } else if (bookType === 'quiz_pf') {
+    rules.push(
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('○').setBackground('#d1e7dd').setFontColor('#0f5132').setRanges([range]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('×').setBackground('#f8d7da').setFontColor('#842029').setRanges([range]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('休').setBackground('#d9d2e9').setFontColor('#351c75').setRanges([range]).build()
+    );
+  } else {
+    rules.push(
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('休').setBackground('#d9d2e9').setFontColor('#351c75').setRanges([range]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=AND(ISNUMBER(H6), H6>=$B$1)').setBackground('#d1e7dd').setFontColor('#0f5132').setRanges([range]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=AND(ISNUMBER(H6), H6<$B$1)').setBackground('#f8d7da').setFontColor('#842029').setRanges([range]).build()
+    );
+  }
+  sheet.setConditionalFormatRules(rules);
+  sheet.setFrozenRows(CHECK_HEADER_ROWS);
+  sheet.setFrozenColumns(CHECK_ROSTER_COLS);
+}
+
+function ensureCheckInputSheet_(ss, sheetName, bookType) {
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    const placeholders = ['準備中', 'シート1', 'Sheet1'];
+    let reusable = null;
+    for (let i = 0; i < placeholders.length; i++) {
+      const cand = ss.getSheetByName(placeholders[i]);
+      if (cand && ss.getSheets().length === 1) {
+        reusable = cand;
+        break;
+      }
+    }
+    if (!reusable && ss.getSheets().length === 1) {
+      const only = ss.getSheets()[0];
+      if (only.getLastRow() === 0) reusable = only;
+    }
+    sheet = reusable || ss.insertSheet(sheetName);
+    applyCheckSheetLayout_(sheet, sheetName, bookType);
+    return sheet;
+  }
+  const a1 = String(sheet.getRange(1, 1).getValue() || '');
+  const r5c1 = String(sheet.getRange(CHECK_HEADER_ROWS, 1).getValue() || '');
+  if (!a1 && !r5c1) {
+    applyCheckSheetLayout_(sheet, sheetName, bookType);
+  } else if (r5c1 !== '組' && sheet.getLastRow() <= 1) {
+    applyCheckSheetLayout_(sheet, sheetName, bookType);
+  }
+  return sheet;
+}
+
+function checkRosterFormulaRate_(rowIndex) {
+  return '=IF(COUNTA($H$5:$AZ$5)=0, 0, G' + rowIndex + '/COUNTA($H$5:$AZ$5))';
+}
+
+function checkRosterFormulaCount_(rowIndex) {
+  return '=COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',"提")+COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',1)+COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',"○")';
+}
+
+function ensureCheckRosterRows_(sheet, students) {
+  const lastRow = Math.max(CHECK_HEADER_ROWS, sheet.getLastRow());
+  const idMap = {};
+  if (lastRow > CHECK_HEADER_ROWS) {
+    const ids = sheet.getRange(CHECK_HEADER_ROWS + 1, 3, lastRow - CHECK_HEADER_ROWS, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      const id = String(ids[i][0] || '').trim().toLowerCase();
+      if (id) idMap[id] = CHECK_HEADER_ROWS + 1 + i;
+    }
+  }
+  const classCounts = {};
+  students.forEach(function (st) {
+    const existingRow = idMap[st.account];
+    if (existingRow) {
+      sheet.getRange(existingRow, 1).setValue(st.className || '');
+      if (st.number !== '') sheet.getRange(existingRow, 2).setValue(st.number);
+      sheet.getRange(existingRow, 3).setValue(st.account);
+      sheet.getRange(existingRow, 4).setValue(st.name || '');
+      return;
+    }
+    const cls = st.className || '';
+    classCounts[cls] = (classCounts[cls] || 0) + 1;
+    const rowIndex = sheet.getLastRow() + 1;
+    const startRow = Math.max(rowIndex, CHECK_HEADER_ROWS + 1);
+    const numVal = st.number !== '' ? st.number : classCounts[cls];
+    const rowOut = [
+      cls,
+      numVal,
+      st.account,
+      st.name || '',
+      '',
+      checkRosterFormulaRate_(startRow),
+      checkRosterFormulaCount_(startRow)
+    ];
+    sheet.getRange(startRow, 1, 1, CHECK_ROSTER_COLS).setValues([rowOut]);
+    sheet.getRange(startRow, 6).setNumberFormat('0.0%');
+    idMap[st.account] = startRow;
+  });
+  return idMap;
+}
+
+function findCheckTaskCol_(sheet, assignmentId) {
+  const lastCol = sheet.getLastColumn();
+  if (lastCol <= CHECK_ROSTER_COLS) return 0;
+  const ids = sheet.getRange(1, CHECK_ROSTER_COLS + 1, 1, lastCol - CHECK_ROSTER_COLS).getValues()[0];
+  const want = String(assignmentId || '');
+  for (let i = 0; i < ids.length; i++) {
+    if (String(ids[i] || '') === want) return CHECK_ROSTER_COLS + 1 + i;
+  }
+  return 0;
+}
+
+function nextCheckTaskCol_(sheet) {
+  const lastCol = sheet.getLastColumn();
+  if (lastCol <= CHECK_ROSTER_COLS) return CHECK_ROSTER_COLS + 1;
+  const ids = sheet.getRange(1, CHECK_ROSTER_COLS + 1, 1, lastCol - CHECK_ROSTER_COLS).getValues()[0];
+  for (let i = 0; i < ids.length; i++) {
+    if (!ids[i]) return CHECK_ROSTER_COLS + 1 + i;
+  }
+  return lastCol + 1;
+}
+
+function ensureCheckTaskColumn_(sheet, asg) {
+  let col = findCheckTaskCol_(sheet, asg.Assignment_ID);
+  if (!col) {
+    col = nextCheckTaskCol_(sheet);
+    if (col > sheet.getMaxColumns()) {
+      sheet.insertColumnsAfter(sheet.getMaxColumns(), col - sheet.getMaxColumns());
+    }
+    sheet.getRange(1, col).setValue(asg.Assignment_ID);
+  }
+  sheet.getRange(4, col).setValue(checkDueDateLabel_(asg));
+  const titleCell = sheet.getRange(5, col);
+  titleCell.setValue(buildCheckColumnTitle_(asg));
+  titleCell.setWrap(true);
+  sheet.setColumnWidth(col, 92);
+  return col;
+}
+
+function checkCellIsProtected_(value) {
+  const s = String(value == null ? '' : value).trim();
+  if (!s) return false;
+  return s === '休' || s === '再' || s === '未' || s === '×';
+}
+
+function writeCheckCellIfEmpty_(sheet, row, col, value) {
+  if (!row || !col || value === '' || value == null) return false;
+  const cell = sheet.getRange(row, col);
+  const cur = cell.getValue();
+  if (checkCellIsProtected_(cur)) return true;
+  if (String(cur == null ? '' : cur).trim() !== '') return true;
+  cell.setValue(value);
+  return true;
+}
+
+function checkValueForKind_(kind, row) {
+  if (kind === 'quiz_score') {
+    const n = parseFloat(row.Score);
+    return isNaN(n) ? '' : n;
+  }
+  if (kind === 'quiz_pf') return '○';
+  return '提';
+}
+
+function kindsForAssignment_(asg) {
+  if (asg && asg.Kind === 'quiz') return ['quiz_pf', 'quiz_score'];
+  return ['assignment'];
+}
+
+/** 点検票ブックの見出し・名簿・課題列をすぐ整備（転記はしない） */
+function prepareCheckBooksStructure_() {
+  const ssApp = openAppSpreadsheet_();
+  const students = listWhitelistStudentsForCheck_();
+  const byGrade = {};
+  students.forEach(function (st) {
+    const key = gradeToCheckSheetName_(st.grade);
+    if (!byGrade[key]) byGrade[key] = [];
+    byGrade[key].push(st);
+  });
+  const assignments = sheetRowsToObjects_(ssApp.getSheetByName('assignments')).map(normalizeAssignmentRow_);
+  const books = {
+    assignment: openOrCreateCheckBook_('assignment'),
+    quiz_pf: openOrCreateCheckBook_('quiz_pf'),
+    quiz_score: openOrCreateCheckBook_('quiz_score')
+  };
+  const sheetCache = {};
+  function sheetFor(kind, gradeSheetName) {
+    const cacheKey = kind + '\t' + gradeSheetName;
+    if (sheetCache[cacheKey]) return sheetCache[cacheKey];
+    const sh = ensureCheckInputSheet_(books[kind], gradeSheetName, kind);
+    ensureCheckRosterRows_(sh, byGrade[gradeSheetName] || []);
+    sheetCache[cacheKey] = sh;
+    return sh;
+  }
+
+  const gradeSheets = Object.keys(byGrade);
+  if (!gradeSheets.length) {
+    ['assignment', 'quiz_pf', 'quiz_score'].forEach(function (kind) {
+      ensureCheckInputSheet_(books[kind], '未分類＠入力', kind);
+    });
+  } else {
+    gradeSheets.forEach(function (gradeSheetName) {
+      ['assignment', 'quiz_pf', 'quiz_score'].forEach(function (kind) {
+        sheetFor(kind, gradeSheetName);
+      });
+    });
+  }
+
+  assignments.forEach(function (asg) {
+    if (!asg.Assignment_ID) return;
+    const kinds = kindsForAssignment_(asg);
+    const targets = gradeSheets.length ? gradeSheets : ['未分類＠入力'];
+    targets.forEach(function (gradeSheetName) {
+      kinds.forEach(function (kind) {
+        ensureCheckTaskColumn_(sheetFor(kind, gradeSheetName), asg);
+      });
+    });
+  });
+
+  return {
+    students: students,
+    byGrade: byGrade,
+    assignments: assignments,
+    books: books,
+    sheetFor: sheetFor,
+    gradeSheets: gradeSheets,
+    studentCount: students.length,
+    assignmentCount: assignments.length,
+    urls: {
+      assignment: books.assignment.getUrl(),
+      quiz_pf: books.quiz_pf.getUrl(),
+      quiz_score: books.quiz_score.getUrl()
+    }
+  };
+}
+
+function ensureCheckExportTrigger_() {
+  const cache = CacheService.getScriptCache();
+  if (cache.get('check_export_trigger_ok')) return { installed: true, cached: true };
+  const triggers = ScriptApp.getProjectTriggers();
+  let found = false;
+  for (let i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === CHECK_EXPORT_TRIGGER_FN) {
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    ScriptApp.newTrigger(CHECK_EXPORT_TRIGGER_FN).timeBased().everyMinutes(10).create();
+  }
+  cache.put('check_export_trigger_ok', '1', 21600);
+  return { installed: true, created: !found };
+}
+
+/** 時間トリガー入口：正本の未転記提出だけ点検票へ追記 */
+function syncCheckSheetsPending() {
+  return exportPendingCheckSubmissions_({ source: 'trigger' });
+}
+
+function exportPendingCheckSubmissions_(opts) {
+  opts = opts || {};
+  const cache = CacheService.getScriptCache();
+  if (cache.get('check_export_running')) {
+    return { status: 'error', message: '点検票の転記処理が実行中です。しばらくしてから再試行してください。' };
+  }
+  cache.put('check_export_running', '1', 180);
+  try {
+    try { ensureCheckExportTrigger_(); } catch (eTrig) { /* ignore */ }
+    const prepared = prepareCheckBooksStructure_();
+    const students = prepared.students;
+    const byGrade = prepared.byGrade;
+    const assignments = prepared.assignments;
+    const asgById = {};
+    assignments.forEach(function (a) { asgById[a.Assignment_ID] = a; });
+    const books = prepared.books;
+    const sheetFor = prepared.sheetFor;
+
+    const ssApp = openAppSpreadsheet_();
+    const subSheet = ssApp.getSheetByName('assignment_submissions');
+    migrateSheetHeaders_(subSheet, SUBMISSION_HEADERS);
+    const exportedCol = SUBMISSION_HEADERS.indexOf('Check_Exported') + 1;
+    const subs = sheetRowsToObjects_(subSheet);
+    const studentByAccount = {};
+    students.forEach(function (st) { studentByAccount[st.account] = st; });
+
+    let exported = 0;
+    let skipped = 0;
+    let pendingLeft = 0;
+    for (let i = 0; i < subs.length; i++) {
+      const row = subs[i];
+      if (isCheckExportedFlag_(row.Check_Exported)) {
+        skipped++;
+        continue;
+      }
+      const asg = asgById[String(row.Assignment_ID || '')];
+      if (!isCheckExportableSubmission_(asg, row)) continue;
+      if (exported >= CHECK_EXPORT_BATCH) {
+        pendingLeft++;
+        continue;
+      }
+      const account = String(row.Account || '').toLowerCase();
+      const st = studentByAccount[account];
+      if (!st) continue;
+      const gradeSheetName = gradeToCheckSheetName_(st.grade);
+      const kinds = kindsForAssignment_(asg);
+      let okAll = true;
+      kinds.forEach(function (kind) {
+        const sh = sheetFor(kind, gradeSheetName);
+        const idMap = ensureCheckRosterRows_(sh, byGrade[gradeSheetName] || []);
+        const studentRow = idMap[account];
+        const col = ensureCheckTaskColumn_(sh, asg);
+        const val = checkValueForKind_(kind, row);
+        if (!writeCheckCellIfEmpty_(sh, studentRow, col, val)) okAll = false;
+      });
+      if (okAll && exportedCol > 0) {
+        subSheet.getRange(row._row, exportedCol).setValue(1);
+        exported++;
+      } else {
+        pendingLeft++;
+      }
+    }
+
+    const urls = {
+      assignment: books.assignment.getUrl(),
+      quiz_pf: books.quiz_pf.getUrl(),
+      quiz_score: books.quiz_score.getUrl()
+    };
+    return {
+      status: 'success',
+      data: {
+        exported: exported,
+        alreadyExported: skipped,
+        pendingLeft: pendingLeft,
+        gradeSheets: prepared.gradeSheets,
+        studentCount: prepared.studentCount,
+        urls: urls
+      }
+    };
+  } catch (e) {
+    return { status: 'error', message: String(e.message || e) };
+  } finally {
+    cache.remove('check_export_running');
+  }
+}
+
+function readCheckSheetSettings_() {
+  const props = PropertiesService.getScriptProperties();
+  function bookInfo_(kind) {
+    const id = String(props.getProperty(checkPropKeyForKind_(kind)) || '').trim();
+    let url = '';
+    let title = '';
+    if (id) {
+      try {
+        const ss = SpreadsheetApp.openById(id);
+        url = ss.getUrl();
+        title = ss.getName();
+      } catch (e) { /* ignore */ }
+    }
+    return { id: id, url: url, title: title };
+  }
+  let triggerInstalled = false;
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    for (let i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === CHECK_EXPORT_TRIGGER_FN) {
+        triggerInstalled = true;
+        break;
+      }
+    }
+  } catch (e) { /* ignore */ }
+  return {
+    year: getCheckYear_(),
+    assignment: bookInfo_('assignment'),
+    quiz_pf: bookInfo_('quiz_pf'),
+    quiz_score: bookInfo_('quiz_score'),
+    scopeGrade: String(props.getProperty(PROP.CHECK_SCOPE_GRADE) || '').trim(),
+    scopeClass: String(props.getProperty(PROP.CHECK_SCOPE_CLASS) || '').trim(),
+    scopeNumber: String(props.getProperty(PROP.CHECK_SCOPE_NUMBER) || '').trim(),
+    triggerInstalled: triggerInstalled
+  };
+}
+
+function apiAdminGetCheckSheetSettings() {
+  try {
+    const access = checkDashboardAccess_();
+    if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
+      return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
+    }
+    return { status: 'success', data: readCheckSheetSettings_() };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiAdminSaveCheckSheetSettings(settings) {
+  try {
+    const access = checkDashboardAccess_();
+    if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
+      return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
+    }
+    settings = settings || {};
+    const props = PropertiesService.getScriptProperties();
+    const year = String(settings.year || '').trim();
+    if (year) props.setProperty(PROP.CHECK_YEAR, year);
+    function saveId_(key, raw) {
+      const id = String(raw || '').trim();
+      if (id) props.setProperty(key, id);
+      else props.deleteProperty(key);
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'assignmentId')) {
+      saveId_(PROP.CHECK_ASSIGNMENT_SS_ID, settings.assignmentId);
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'quizPfId')) {
+      saveId_(PROP.CHECK_QUIZ_PF_SS_ID, settings.quizPfId);
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'quizScoreId')) {
+      saveId_(PROP.CHECK_QUIZ_SCORE_SS_ID, settings.quizScoreId);
+    }
+    function saveScope_(key, raw) {
+      const v = String(raw == null ? '' : raw).trim();
+      if (v) props.setProperty(key, v);
+      else props.deleteProperty(key);
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'scopeGrade')) {
+      saveScope_(PROP.CHECK_SCOPE_GRADE, settings.scopeGrade);
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'scopeClass')) {
+      saveScope_(PROP.CHECK_SCOPE_CLASS, settings.scopeClass);
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'scopeNumber')) {
+      saveScope_(PROP.CHECK_SCOPE_NUMBER, settings.scopeNumber);
+    }
+    try { ensureCheckExportTrigger_(); } catch (eTrig) { /* 後続の整備は続ける */ }
+    let prepared = null;
+    try {
+      prepared = prepareCheckBooksStructure_();
+    } catch (ePrep) {
+      return {
+        status: 'error',
+        message: '設定は保存しましたが、点検票の見出し・名簿整備に失敗しました: ' + (ePrep.message || ePrep)
+      };
+    }
+    const data = readCheckSheetSettings_();
+    data.studentCount = prepared.studentCount;
+    data.gradeSheets = prepared.gradeSheets;
+    data.assignmentCount = prepared.assignmentCount;
+    return {
+      status: 'success',
+      data: data,
+      message: '設定を保存し、点検票の見出しと名簿を整備しました（対象 ' + prepared.studentCount + ' 人）'
+    };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiAdminSyncCheckSheetsNow() {
+  try {
+    const access = checkDashboardAccess_();
+    if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
+      return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
+    }
+    return exportPendingCheckSubmissions_({ source: 'manual' });
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
 }
 
 /** dashboard.html 用（google.script.run） */

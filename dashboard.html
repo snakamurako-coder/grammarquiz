@@ -122,6 +122,26 @@ th{background:#f5f5f5}
   </div>
 
   <div class="setting-section">
+    <div class="section-title">課題点検票（名簿転記）</div>
+    <p class="hint">whitelist の学年・組・番号で対象メンバーを絞り、該当者だけの点検用名簿を作ります（空欄＝その区分は制限なし。番号は 1-20 のような範囲も可）。既存ブックIDを保存した時点で見出し・名簿・課題列を整備します。提出結果の追記は時間トリガー（10分ごと）です。提出日は期限、なければ期間終了日。見出し例: 単語：コーパス4500・Stage1～14・Stage1</p>
+    <div class="form-grid">
+      <div class="form-group"><label>年度（ブック名用）</label><input id="check-year" type="text" placeholder="例: 2026"></div>
+      <div class="form-group"><label>対象学年（空＝全員、カンマ可）</label><input id="check-scope-grade" type="text" placeholder="例: 1,2"></div>
+      <div class="form-group"><label>対象組（空＝全員、カンマ可）</label><input id="check-scope-class" type="text" placeholder="例: A,B"></div>
+      <div class="form-group"><label>対象番号（空＝全員、1-20 可）</label><input id="check-scope-number" type="text" placeholder="例: 1-20, 25"></div>
+      <div class="form-group"><label>提出物 SS ID（空＝自動作成）</label><input id="check-assign-id" type="text" placeholder="スプレッドシートID"></div>
+      <div class="form-group"><label>小テスト合否 SS ID</label><input id="check-quiz-pf-id" type="text"></div>
+      <div class="form-group"><label>小テスト点数 SS ID</label><input id="check-quiz-score-id" type="text"></div>
+    </div>
+    <p class="hint" id="check-trigger-status" style="margin-top:4px;"></p>
+    <div id="check-book-links" class="hint"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+      <button type="button" id="check-save-btn" class="btn-small">設定を保存して名簿を整備</button>
+      <button type="button" id="check-sync-btn" class="btn-small">未転記分を今すぐ転記</button>
+    </div>
+  </div>
+
+  <div class="setting-section">
     <div class="section-title">セッション集約（直近100件）</div>
     <p style="font-size:.85em;color:#666;">プリセット学習の概要は Google フォーム回答先スプレッドシートに即時反映されます。本体 SS は制限付き共有にしてください。</p>
     <button type="button" id="refresh-summaries-btn" class="btn-small">再読込</button>
@@ -130,7 +150,7 @@ th{background:#f5f5f5}
 
   <div class="setting-section">
     <div class="section-title">ホワイトリスト</div>
-    <p style="font-size:.85em;color:#666;">本体スプレッドシートの whitelist シートを編集してください（ここは閲覧のみ）。<code>attribute1</code>～<code>attribute5</code> は管理者が自由にラベル付け（習熟度・性別など）し、課題の配布対象に使えます。宿題管理は class 列に <code>admin</code> と入力したアカウントのみ。</p>
+    <p style="font-size:.85em;color:#666;">本体スプレッドシートの whitelist シートを編集してください（ここは閲覧のみ）。<code>number</code> は出席番号（点検票の「番号」列・スコープ絞り込みに使用）。<code>attribute1</code>～<code>attribute5</code> は管理者が自由にラベル付け（習熟度・性別など）し、課題の配布対象に使えます。宿題管理は class 列に <code>admin</code> と入力したアカウントのみ。</p>
     <div id="whitelist-wrap" style="overflow-x:auto;margin-top:8px;">読込中...</div>
   </div>
 
@@ -462,10 +482,11 @@ async function loadWhitelist() {
       wrap.innerHTML = '<p>登録ユーザーがありません。</p>';
       return;
     }
-    var html = '<table><thead><tr><th>account</th><th>name</th><th>grade</th><th>class</th><th>attribute1</th><th>attribute2</th><th>attribute3</th><th>attribute4</th><th>attribute5</th></tr></thead><tbody>';
+    var html = '<table><thead><tr><th>account</th><th>name</th><th>grade</th><th>class</th><th>number</th><th>attribute1</th><th>attribute2</th><th>attribute3</th><th>attribute4</th><th>attribute5</th></tr></thead><tbody>';
     rows.forEach(function (r) {
       html += '<tr><td>' + escapeHtml(r.account || '') + '</td><td>' + escapeHtml(r.name || '') + '</td>';
       html += '<td>' + escapeHtml(r.grade || '') + '</td><td>' + escapeHtml(r.class || '') + '</td>';
+      html += '<td>' + escapeHtml(r.number || '') + '</td>';
       html += '<td>' + escapeHtml(r.attribute1 || '') + '</td><td>' + escapeHtml(r.attribute2 || '') + '</td>';
       html += '<td>' + escapeHtml(r.attribute3 || '') + '</td><td>' + escapeHtml(r.attribute4 || '') + '</td>';
       html += '<td>' + escapeHtml(r.attribute5 || '') + '</td></tr>';
@@ -474,6 +495,108 @@ async function loadWhitelist() {
     wrap.innerHTML = html;
   } catch (e) {
     wrap.innerHTML = '<p style="color:#c62828;">' + escapeHtml(e.message) + '</p>';
+  }
+}
+
+function fillCheckBookLinks_(data) {
+  var el = document.getElementById('check-book-links');
+  if (!el || !data) return;
+  var items = [
+    ['提出物', data.assignment],
+    ['小テスト合否', data.quiz_pf],
+    ['小テスト点数', data.quiz_score]
+  ];
+  var html = items.map(function (pair) {
+    var label = pair[0];
+    var info = pair[1] || {};
+    if (info.url) {
+      return '<a href="' + escapeHtml(info.url) + '" target="_blank" rel="noopener">' + label + '（' + escapeHtml(info.title || '開く') + '）</a>';
+    }
+    return label + '：未作成';
+  });
+  el.innerHTML = html.join(' ／ ');
+}
+
+async function loadCheckSheetSettings() {
+  try {
+    var result = await gasRun('apiAdminGetCheckSheetSettings');
+    if (result.status !== 'success') throw new Error(result.message);
+    var d = result.data || {};
+    document.getElementById('check-year').value = d.year || '';
+    document.getElementById('check-scope-grade').value = d.scopeGrade || '';
+    document.getElementById('check-scope-class').value = d.scopeClass || '';
+    document.getElementById('check-scope-number').value = d.scopeNumber || '';
+    document.getElementById('check-assign-id').value = (d.assignment && d.assignment.id) || '';
+    document.getElementById('check-quiz-pf-id').value = (d.quiz_pf && d.quiz_pf.id) || '';
+    document.getElementById('check-quiz-score-id').value = (d.quiz_score && d.quiz_score.id) || '';
+    document.getElementById('check-trigger-status').textContent = d.triggerInstalled
+      ? '時間トリガー: 有効（10分ごと・未転記分のみ）'
+      : '時間トリガー: 未設定（「設定を保存」または「今すぐ転記」で作成を試みます）';
+    fillCheckBookLinks_(d);
+  } catch (e) {
+    document.getElementById('check-trigger-status').textContent = '点検票設定の読込に失敗: ' + (e.message || e);
+  }
+}
+
+async function saveCheckSheetSettings() {
+  var btn = document.getElementById('check-save-btn');
+  var prev = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '名簿を整備中…';
+  }
+  try {
+    var result = await gasRun('apiAdminSaveCheckSheetSettings', {
+      year: document.getElementById('check-year').value.trim(),
+      scopeGrade: document.getElementById('check-scope-grade').value.trim(),
+      scopeClass: document.getElementById('check-scope-class').value.trim(),
+      scopeNumber: document.getElementById('check-scope-number').value.trim(),
+      assignmentId: document.getElementById('check-assign-id').value.trim(),
+      quizPfId: document.getElementById('check-quiz-pf-id').value.trim(),
+      quizScoreId: document.getElementById('check-quiz-score-id').value.trim()
+    });
+    if (result.status !== 'success') throw new Error(result.message);
+    var d = result.data || {};
+    fillCheckBookLinks_(d);
+    showBanner(result.message || '点検票の設定を保存しました', true);
+    await loadCheckSheetSettings();
+  } catch (e) {
+    showBanner(e.message || String(e), false);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prev || '設定を保存して名簿を整備';
+    }
+  }
+}
+
+async function syncCheckSheetsNow() {
+  var btn = document.getElementById('check-sync-btn');
+  var prev = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '転記中…';
+  }
+  try {
+    var result = await gasRun('apiAdminSyncCheckSheetsNow');
+    if (result.status !== 'success') throw new Error(result.message);
+    var d = result.data || {};
+    showBanner('転記しました（今回 ' + (d.exported || 0) + ' 件、未処理 ' + (d.pendingLeft || 0) + ' 件）', true);
+    if (d.urls) {
+      fillCheckBookLinks_({
+        assignment: { url: d.urls.assignment, title: '提出物' },
+        quiz_pf: { url: d.urls.quiz_pf, title: '合否' },
+        quiz_score: { url: d.urls.quiz_score, title: '点数' }
+      });
+    }
+    await loadCheckSheetSettings();
+  } catch (e) {
+    showBanner(e.message || String(e), false);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prev || '未転記分を今すぐ転記';
+    }
   }
 }
 
@@ -487,6 +610,8 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('asg-delete-btn').addEventListener('click', deleteSelectedAssignments);
   document.getElementById('sub-refresh-btn').addEventListener('click', loadSubmissions);
   document.getElementById('refresh-summaries-btn').addEventListener('click', loadSummaries);
+  document.getElementById('check-save-btn').addEventListener('click', saveCheckSheetSettings);
+  document.getElementById('check-sync-btn').addEventListener('click', syncCheckSheetsNow);
 
   AssignmentSectionBuilder.init().catch(function (e) {
     showBanner('教材カタログの読込に失敗: ' + (e.message || e), false);
@@ -495,6 +620,7 @@ document.addEventListener('DOMContentLoaded', function() {
   loadSubmissions();
   loadSummaries();
   loadWhitelist();
+  loadCheckSheetSettings();
 });
 </script>
 </body>
