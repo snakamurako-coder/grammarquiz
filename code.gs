@@ -2463,6 +2463,7 @@ const CHECK_HEADER_ROWS = 5;
 const CHECK_ROSTER_COLS = 7;
 const CHECK_EXPORT_TRIGGER_FN = 'syncCheckSheetsPending';
 const CHECK_EXPORT_BATCH = 80;
+const CHECK_DEFAULT_INPUT_SHEET = '名簿＠入力';
 
 function ensureAssignmentSheets_(ss) {
   ensureSheetWithHeaders_(ss, 'assignments', ASSIGNMENT_HEADERS);
@@ -3433,12 +3434,22 @@ function checkPropKeyForKind_(kind) {
   return PROP.CHECK_ASSIGNMENT_SS_ID;
 }
 
-function gradeToCheckSheetName_(grade) {
-  const g = String(grade || '').trim();
-  if (!g) return '未分類＠入力';
-  if (/＠入力$/.test(g)) return g;
-  if (/年$/.test(g)) return g + '＠入力';
-  return g + '年＠入力';
+/**
+ * 1ブックにつき入力シートは1枚。
+ * 既存の＠入力が1枚だけならそれを使う（課題点検アプリの「1年＠入力」など）。
+ * 0枚または複数枚（学年IDで分裂した残骸）なら「名簿＠入力」にまとめる。
+ */
+function resolveCheckInputSheetName_(ss) {
+  if (!ss) return CHECK_DEFAULT_INPUT_SHEET;
+  const inputs = [];
+  const sheets = ss.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    const name = sheets[i].getName();
+    if (/＠入力$/.test(name)) inputs.push(name);
+  }
+  if (inputs.indexOf(CHECK_DEFAULT_INPUT_SHEET) >= 0) return CHECK_DEFAULT_INPUT_SHEET;
+  if (inputs.length === 1) return inputs[0];
+  return CHECK_DEFAULT_INPUT_SHEET;
 }
 
 function normalizeGradeToken_(s) {
@@ -3838,16 +3849,10 @@ function kindsForAssignment_(asg) {
   return ['assignment'];
 }
 
-/** 点検票ブックの見出し・名簿・課題列をすぐ整備（転記はしない） */
+/** 点検票ブックの見出し・名簿・課題列をすぐ整備（転記はしない）。入力シートはブックあたり1枚。 */
 function prepareCheckBooksStructure_() {
   const ssApp = openAppSpreadsheet_();
   const students = listWhitelistStudentsForCheck_();
-  const byGrade = {};
-  students.forEach(function (st) {
-    const key = gradeToCheckSheetName_(st.grade);
-    if (!byGrade[key]) byGrade[key] = [];
-    byGrade[key].push(st);
-  });
   const assignments = sheetRowsToObjects_(ssApp.getSheetByName('assignments')).map(normalizeAssignmentRow_);
   const books = {
     assignment: openOrCreateCheckBook_('assignment'),
@@ -3855,46 +3860,39 @@ function prepareCheckBooksStructure_() {
     quiz_score: openOrCreateCheckBook_('quiz_score')
   };
   const sheetCache = {};
-  function sheetFor(kind, gradeSheetName) {
-    const cacheKey = kind + '\t' + gradeSheetName;
-    if (sheetCache[cacheKey]) return sheetCache[cacheKey];
-    const sh = ensureCheckInputSheet_(books[kind], gradeSheetName, kind);
-    ensureCheckRosterRows_(sh, byGrade[gradeSheetName] || []);
-    sheetCache[cacheKey] = sh;
+  function sheetFor(kind) {
+    if (sheetCache[kind]) return sheetCache[kind];
+    const sheetName = resolveCheckInputSheetName_(books[kind]);
+    const sh = ensureCheckInputSheet_(books[kind], sheetName, kind);
+    ensureCheckRosterRows_(sh, students);
+    sheetCache[kind] = sh;
     return sh;
   }
 
-  const gradeSheets = Object.keys(byGrade);
-  if (!gradeSheets.length) {
-    ['assignment', 'quiz_pf', 'quiz_score'].forEach(function (kind) {
-      ensureCheckInputSheet_(books[kind], '未分類＠入力', kind);
-    });
-  } else {
-    gradeSheets.forEach(function (gradeSheetName) {
-      ['assignment', 'quiz_pf', 'quiz_score'].forEach(function (kind) {
-        sheetFor(kind, gradeSheetName);
-      });
-    });
-  }
+  ['assignment', 'quiz_pf', 'quiz_score'].forEach(function (kind) {
+    sheetFor(kind);
+  });
 
   assignments.forEach(function (asg) {
     if (!asg.Assignment_ID) return;
-    const kinds = kindsForAssignment_(asg);
-    const targets = gradeSheets.length ? gradeSheets : ['未分類＠入力'];
-    targets.forEach(function (gradeSheetName) {
-      kinds.forEach(function (kind) {
-        ensureCheckTaskColumn_(sheetFor(kind, gradeSheetName), asg);
-      });
+    kindsForAssignment_(asg).forEach(function (kind) {
+      ensureCheckTaskColumn_(sheetFor(kind), asg);
     });
   });
 
+  const inputSheets = {
+    assignment: sheetFor('assignment').getName(),
+    quiz_pf: sheetFor('quiz_pf').getName(),
+    quiz_score: sheetFor('quiz_score').getName()
+  };
+
   return {
     students: students,
-    byGrade: byGrade,
     assignments: assignments,
     books: books,
     sheetFor: sheetFor,
-    gradeSheets: gradeSheets,
+    gradeSheets: [inputSheets.assignment],
+    inputSheets: inputSheets,
     studentCount: students.length,
     assignmentCount: assignments.length,
     urls: {
@@ -3939,7 +3937,6 @@ function exportPendingCheckSubmissions_(opts) {
     try { ensureCheckExportTrigger_(); } catch (eTrig) { /* ignore */ }
     const prepared = prepareCheckBooksStructure_();
     const students = prepared.students;
-    const byGrade = prepared.byGrade;
     const assignments = prepared.assignments;
     const asgById = {};
     assignments.forEach(function (a) { asgById[a.Assignment_ID] = a; });
@@ -3972,12 +3969,11 @@ function exportPendingCheckSubmissions_(opts) {
       const account = String(row.Account || '').toLowerCase();
       const st = studentByAccount[account];
       if (!st) continue;
-      const gradeSheetName = gradeToCheckSheetName_(st.grade);
       const kinds = kindsForAssignment_(asg);
       let okAll = true;
       kinds.forEach(function (kind) {
-        const sh = sheetFor(kind, gradeSheetName);
-        const idMap = ensureCheckRosterRows_(sh, byGrade[gradeSheetName] || []);
+        const sh = sheetFor(kind);
+        const idMap = ensureCheckRosterRows_(sh, students);
         const studentRow = idMap[account];
         const col = ensureCheckTaskColumn_(sh, asg);
         const val = checkValueForKind_(kind, row);

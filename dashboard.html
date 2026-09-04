@@ -123,7 +123,7 @@ th{background:#f5f5f5}
 
   <div class="setting-section">
     <div class="section-title">課題点検票（名簿転記）</div>
-    <p class="hint">whitelist の学年・組・番号・attribute1～5 で対象メンバーを絞り、該当者だけの点検用名簿を作ります（空欄＝その区分は制限なし。番号は 1-20 のような範囲も可。属性は列同士 AND、同一列はカンマ区切り OR）。既存ブックIDを保存した時点で見出し・名簿・課題列を整備します。提出結果の追記は時間トリガー（10分ごと）です。</p>
+    <p class="hint">スコープに該当するメンバーは、ブックあたり入力シート1枚にまとめます（見出しの下の各行）。学年ごとにシートを分けません。既存の＠入力が1枚だけならそれを使い、無い／複数ある場合は「名簿＠入力」です。提出結果の追記は時間トリガー（10分ごと）です。</p>
     <div class="form-grid">
       <div class="form-group"><label>年度（ブック名用）</label><input id="check-year" type="text" placeholder="例: 2026"></div>
       <div class="form-group"><label>対象学年（空＝全員、カンマ可）</label><input id="check-scope-grade" type="text" placeholder="例: 1,2"></div>
