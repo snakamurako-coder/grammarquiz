@@ -123,13 +123,10 @@ th{background:#f5f5f5}
 
   <div class="setting-section">
     <div class="section-title">課題点検票（名簿転記）</div>
-    <p class="hint">スコープに該当するメンバーは、ブックあたり入力シート1枚にまとめます（見出しの下の各行）。学年ごとにシートを分けません。既存の＠入力が1枚だけならそれを使い、無い／複数ある場合は「名簿＠入力」です。提出結果の追記は時間トリガー（10分ごと）です。</p>
+    <p class="hint">スコープに該当するメンバーは、ブックあたり入力シート1枚にまとめます（見出しの下の各行）。学年ごとにシートを分けません。既存の＠入力が1枚だけならそれを使い、無い／複数ある場合は「名簿＠入力」です。学年の切り出しにIDの桁は使いません（必要なら attribute で絞ってください）。提出結果の追記は時間トリガー（10分ごと）です。</p>
     <div class="form-grid">
       <div class="form-group"><label>年度（ブック名用）</label><input id="check-year" type="text" placeholder="例: 2026"></div>
       <div class="form-group"><label>対象学年（空＝全員、カンマ可）</label><input id="check-scope-grade" type="text" placeholder="例: 1,2"></div>
-      <div class="form-group"><label>学年はIDの何桁目か（空＝gradeをそのまま学年）</label><input id="check-grade-id-digit" type="text" placeholder="例: 3 または 2-3">
-        <p class="hint">whitelist の grade が学籍番号などのIDのとき、数字だけを左から数えた桁。例: ID <code>24103</code> で 2桁目が学年なら <code>2</code>。2桁にまたがるなら <code>2-3</code>。</p>
-      </div>
       <div class="form-group"><label>対象組（空＝全員、カンマ可）</label><input id="check-scope-class" type="text" placeholder="例: A,B"></div>
       <div class="form-group"><label>対象番号（空＝全員、1-20 可）</label><input id="check-scope-number" type="text" placeholder="例: 1-20, 25"></div>
       <div class="form-group"><label>対象 attribute1（空＝制限なし）</label><input id="check-scope-attr1" type="text" placeholder="例: 上級,中級"></div>
@@ -532,7 +529,6 @@ async function loadCheckSheetSettings() {
     var d = result.data || {};
     document.getElementById('check-year').value = d.year || '';
     document.getElementById('check-scope-grade').value = d.scopeGrade || '';
-    document.getElementById('check-grade-id-digit').value = d.gradeIdDigit || '';
     document.getElementById('check-scope-class').value = d.scopeClass || '';
     document.getElementById('check-scope-number').value = d.scopeNumber || '';
     document.getElementById('check-scope-attr1').value = d.scopeAttr1 || '';
@@ -543,9 +539,7 @@ async function loadCheckSheetSettings() {
     document.getElementById('check-assign-id').value = (d.assignment && d.assignment.id) || '';
     document.getElementById('check-quiz-pf-id').value = (d.quiz_pf && d.quiz_pf.id) || '';
     document.getElementById('check-quiz-score-id').value = (d.quiz_score && d.quiz_score.id) || '';
-    document.getElementById('check-trigger-status').textContent = d.triggerInstalled
-      ? '時間トリガー: 有効（10分ごと・未転記分のみ）'
-      : '時間トリガー: 未設定（「設定を保存」または「今すぐ転記」で作成を試みます）';
+    document.getElementById('check-trigger-status').textContent = '提出の転記は時間トリガー（約10分ごと）。この画面ではトリガー状態を確認しません。';
     fillCheckBookLinks_(d);
   } catch (e) {
     document.getElementById('check-trigger-status').textContent = '点検票設定の読込に失敗: ' + (e.message || e);
@@ -563,7 +557,6 @@ async function saveCheckSheetSettings() {
     var result = await gasRun('apiAdminSaveCheckSheetSettings', {
       year: document.getElementById('check-year').value.trim(),
       scopeGrade: document.getElementById('check-scope-grade').value.trim(),
-      gradeIdDigit: document.getElementById('check-grade-id-digit').value.trim(),
       scopeClass: document.getElementById('check-scope-class').value.trim(),
       scopeNumber: document.getElementById('check-scope-number').value.trim(),
       scopeAttr1: document.getElementById('check-scope-attr1').value.trim(),

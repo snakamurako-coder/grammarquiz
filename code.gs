@@ -41,9 +41,7 @@ const PROP = {
   CHECK_SCOPE_ATTR2: 'CHECK_SCOPE_ATTR2',
   CHECK_SCOPE_ATTR3: 'CHECK_SCOPE_ATTR3',
   CHECK_SCOPE_ATTR4: 'CHECK_SCOPE_ATTR4',
-  CHECK_SCOPE_ATTR5: 'CHECK_SCOPE_ATTR5',
-  /** whitelist.grade がIDのとき、左から何桁目を学年とするか（例: 3 または 2-3） */
-  CHECK_GRADE_ID_DIGIT: 'CHECK_GRADE_ID_DIGIT'
+  CHECK_SCOPE_ATTR5: 'CHECK_SCOPE_ATTR5'
 };
 
 const AUTH_CACHE_PREFIX = 'auth_';
@@ -3447,7 +3445,6 @@ function resolveCheckInputSheetName_(ss) {
     const name = sheets[i].getName();
     if (/＠入力$/.test(name)) inputs.push(name);
   }
-  if (inputs.indexOf(CHECK_DEFAULT_INPUT_SHEET) >= 0) return CHECK_DEFAULT_INPUT_SHEET;
   if (inputs.length === 1) return inputs[0];
   return CHECK_DEFAULT_INPUT_SHEET;
 }
@@ -3458,50 +3455,6 @@ function normalizeGradeToken_(s) {
 
 function normalizeClassToken_(s) {
   return String(s || '').trim().toLowerCase().replace(/組$/, '');
-}
-
-/**
- * 学年桁の指定を解釈する。左から1始まり。
- * 例: "3" → 3桁目だけ、"2-3" → 2〜3桁目。空・不正は null。
- */
-function parseGradeIdDigitSpec_(raw) {
-  const s = String(raw || '').trim();
-  if (!s) return null;
-  const m = s.match(/^(\d+)\s*[-~～]\s*(\d+)$/);
-  let from;
-  let to;
-  if (m) {
-    from = parseInt(m[1], 10);
-    to = parseInt(m[2], 10);
-  } else if (/^\d+$/.test(s)) {
-    from = parseInt(s, 10);
-    to = from;
-  } else {
-    return null;
-  }
-  if (!from || from < 1 || !to || to < 1) return null;
-  if (from > to) {
-    const tmp = from;
-    from = to;
-    to = tmp;
-  }
-  return { from: from, to: to };
-}
-
-/** ID文字列から数字だけを取り、指定桁を学年として返す */
-function extractGradeFromIdDigits_(rawId, spec) {
-  if (!spec) return String(rawId || '').trim();
-  const digits = String(rawId || '').replace(/\D/g, '');
-  if (!digits) return '';
-  if (spec.from > digits.length) return '';
-  return digits.slice(spec.from - 1, spec.to);
-}
-
-function effectiveStudentGrade_(rawGrade, scope) {
-  scope = scope || readCheckScope_();
-  const spec = parseGradeIdDigitSpec_(scope.gradeIdDigit);
-  if (!spec) return String(rawGrade || '').trim();
-  return extractGradeFromIdDigits_(rawGrade, spec);
 }
 
 function parseCheckCsvTokens_(raw) {
@@ -3537,7 +3490,6 @@ function readCheckScope_() {
     grade: String(props.getProperty(PROP.CHECK_SCOPE_GRADE) || '').trim(),
     className: String(props.getProperty(PROP.CHECK_SCOPE_CLASS) || '').trim(),
     number: String(props.getProperty(PROP.CHECK_SCOPE_NUMBER) || '').trim(),
-    gradeIdDigit: String(props.getProperty(PROP.CHECK_GRADE_ID_DIGIT) || '').trim(),
     attribute1: String(props.getProperty(PROP.CHECK_SCOPE_ATTR1) || '').trim(),
     attribute2: String(props.getProperty(PROP.CHECK_SCOPE_ATTR2) || '').trim(),
     attribute3: String(props.getProperty(PROP.CHECK_SCOPE_ATTR3) || '').trim(),
@@ -3584,12 +3536,10 @@ function listWhitelistStudentsForCheck_() {
     const cls = String(r.class || '').trim();
     if (!account) return;
     if (cls.toLowerCase() === 'admin') return;
-    const rawGrade = String(r.grade || '').trim();
     const st = {
       account: account,
       name: String(r.name || '').trim(),
-      gradeRaw: rawGrade,
-      grade: effectiveStudentGrade_(rawGrade, scope),
+      grade: String(r.grade || '').trim(),
       className: cls,
       number: String(r.number != null && r.number !== '' ? r.number : (r['番号'] || '')).trim(),
       attribute1: String(r.attribute1 || '').trim(),
@@ -3742,30 +3692,33 @@ function checkRosterFormulaCount_(rowIndex) {
 
 function ensureCheckRosterRows_(sheet, students) {
   const lastRow = Math.max(CHECK_HEADER_ROWS, sheet.getLastRow());
+  const existingCount = Math.max(0, lastRow - CHECK_HEADER_ROWS);
   const idMap = {};
-  if (lastRow > CHECK_HEADER_ROWS) {
-    const ids = sheet.getRange(CHECK_HEADER_ROWS + 1, 3, lastRow - CHECK_HEADER_ROWS, 1).getValues();
-    for (let i = 0; i < ids.length; i++) {
-      const id = String(ids[i][0] || '').trim().toLowerCase();
+  let rosterAD = [];
+  if (existingCount > 0) {
+    rosterAD = sheet.getRange(CHECK_HEADER_ROWS + 1, 1, existingCount, 4).getValues();
+    for (let i = 0; i < rosterAD.length; i++) {
+      const id = String(rosterAD[i][2] || '').trim().toLowerCase();
       if (id) idMap[id] = CHECK_HEADER_ROWS + 1 + i;
     }
   }
   const classCounts = {};
+  const newRows = [];
   students.forEach(function (st) {
-    const existingRow = idMap[st.account];
-    if (existingRow) {
-      sheet.getRange(existingRow, 1).setValue(st.className || '');
-      if (st.number !== '') sheet.getRange(existingRow, 2).setValue(st.number);
-      sheet.getRange(existingRow, 3).setValue(st.account);
-      sheet.getRange(existingRow, 4).setValue(st.name || '');
-      return;
-    }
     const cls = st.className || '';
     classCounts[cls] = (classCounts[cls] || 0) + 1;
-    const rowIndex = sheet.getLastRow() + 1;
-    const startRow = Math.max(rowIndex, CHECK_HEADER_ROWS + 1);
+    const existingRow = idMap[st.account];
+    if (existingRow) {
+      const idx = existingRow - CHECK_HEADER_ROWS - 1;
+      rosterAD[idx][0] = cls;
+      if (st.number !== '') rosterAD[idx][1] = st.number;
+      rosterAD[idx][2] = st.account;
+      rosterAD[idx][3] = st.name || '';
+      return;
+    }
+    const startRow = CHECK_HEADER_ROWS + 1 + existingCount + newRows.length;
     const numVal = st.number !== '' ? st.number : classCounts[cls];
-    const rowOut = [
+    newRows.push([
       cls,
       numVal,
       st.account,
@@ -3773,11 +3726,17 @@ function ensureCheckRosterRows_(sheet, students) {
       '',
       checkRosterFormulaRate_(startRow),
       checkRosterFormulaCount_(startRow)
-    ];
-    sheet.getRange(startRow, 1, 1, CHECK_ROSTER_COLS).setValues([rowOut]);
-    sheet.getRange(startRow, 6).setNumberFormat('0.0%');
+    ]);
     idMap[st.account] = startRow;
   });
+  if (existingCount > 0) {
+    sheet.getRange(CHECK_HEADER_ROWS + 1, 1, existingCount, 4).setValues(rosterAD);
+  }
+  if (newRows.length) {
+    const start = CHECK_HEADER_ROWS + 1 + existingCount;
+    sheet.getRange(start, 1, newRows.length, CHECK_ROSTER_COLS).setValues(newRows);
+    sheet.getRange(start, 6, newRows.length, 1).setNumberFormat('0.0%');
+  }
   return idMap;
 }
 
@@ -3849,58 +3808,82 @@ function kindsForAssignment_(asg) {
   return ['assignment'];
 }
 
-/** 点検票ブックの見出し・名簿・課題列をすぐ整備（転記はしない）。入力シートはブックあたり1枚。 */
-function prepareCheckBooksStructure_() {
+function configuredCheckBookKinds_() {
+  const props = PropertiesService.getScriptProperties();
+  const kinds = [];
+  if (String(props.getProperty(PROP.CHECK_ASSIGNMENT_SS_ID) || '').trim()) kinds.push('assignment');
+  if (String(props.getProperty(PROP.CHECK_QUIZ_PF_SS_ID) || '').trim()) kinds.push('quiz_pf');
+  if (String(props.getProperty(PROP.CHECK_QUIZ_SCORE_SS_ID) || '').trim()) kinds.push('quiz_score');
+  if (!kinds.length) kinds.push('assignment');
+  return kinds;
+}
+
+function summarizeCheckPrepare_(runtime) {
+  return {
+    studentCount: runtime.students.length,
+    assignmentCount: runtime.assignments.length,
+    kinds: runtime.kinds.slice(),
+    inputSheets: runtime.inputSheets,
+    gradeSheets: runtime.kinds.map(function (k) { return runtime.inputSheets[k]; }),
+    urls: runtime.urls
+  };
+}
+
+/** 点検票ブックの見出し・名簿をすぐ整備。ID指定があるブックだけ触る。 */
+function prepareCheckBooksRuntime_(opts) {
+  opts = opts || {};
+  const includeTaskColumns = !!opts.includeTaskColumns;
   const ssApp = openAppSpreadsheet_();
   const students = listWhitelistStudentsForCheck_();
-  const assignments = sheetRowsToObjects_(ssApp.getSheetByName('assignments')).map(normalizeAssignmentRow_);
-  const books = {
-    assignment: openOrCreateCheckBook_('assignment'),
-    quiz_pf: openOrCreateCheckBook_('quiz_pf'),
-    quiz_score: openOrCreateCheckBook_('quiz_score')
-  };
+  const assignments = includeTaskColumns
+    ? sheetRowsToObjects_(ssApp.getSheetByName('assignments')).map(normalizeAssignmentRow_)
+    : [];
+  const kinds = configuredCheckBookKinds_();
+  const books = {};
+  const inputSheets = {};
+  const urls = {};
   const sheetCache = {};
+
   function sheetFor(kind) {
     if (sheetCache[kind]) return sheetCache[kind];
+    books[kind] = openOrCreateCheckBook_(kind);
     const sheetName = resolveCheckInputSheetName_(books[kind]);
     const sh = ensureCheckInputSheet_(books[kind], sheetName, kind);
     ensureCheckRosterRows_(sh, students);
     sheetCache[kind] = sh;
+    inputSheets[kind] = sh.getName();
+    urls[kind] = books[kind].getUrl();
     return sh;
   }
 
-  ['assignment', 'quiz_pf', 'quiz_score'].forEach(function (kind) {
+  kinds.forEach(function (kind) {
     sheetFor(kind);
   });
 
-  assignments.forEach(function (asg) {
-    if (!asg.Assignment_ID) return;
-    kindsForAssignment_(asg).forEach(function (kind) {
-      ensureCheckTaskColumn_(sheetFor(kind), asg);
+  if (includeTaskColumns) {
+    assignments.forEach(function (asg) {
+      if (!asg.Assignment_ID) return;
+      kindsForAssignment_(asg).forEach(function (kind) {
+        if (kinds.indexOf(kind) < 0) return;
+        ensureCheckTaskColumn_(sheetFor(kind), asg);
+      });
     });
-  });
+  }
 
-  const inputSheets = {
-    assignment: sheetFor('assignment').getName(),
-    quiz_pf: sheetFor('quiz_pf').getName(),
-    quiz_score: sheetFor('quiz_score').getName()
-  };
-
+  SpreadsheetApp.flush();
   return {
     students: students,
     assignments: assignments,
+    kinds: kinds,
     books: books,
     sheetFor: sheetFor,
-    gradeSheets: [inputSheets.assignment],
     inputSheets: inputSheets,
-    studentCount: students.length,
-    assignmentCount: assignments.length,
-    urls: {
-      assignment: books.assignment.getUrl(),
-      quiz_pf: books.quiz_pf.getUrl(),
-      quiz_score: books.quiz_score.getUrl()
-    }
+    urls: urls
   };
+}
+
+function prepareCheckBooksStructure_(opts) {
+  return summarizeCheckPrepare_(prepareCheckBooksRuntime_(opts));
 }
 
 function ensureCheckExportTrigger_() {
@@ -3934,14 +3917,13 @@ function exportPendingCheckSubmissions_(opts) {
   }
   cache.put('check_export_running', '1', 180);
   try {
-    try { ensureCheckExportTrigger_(); } catch (eTrig) { /* ignore */ }
-    const prepared = prepareCheckBooksStructure_();
-    const students = prepared.students;
-    const assignments = prepared.assignments;
+    try { /* ダッシュボードからはトリガー一覧を触らない（権限待ちで固まる） */ } catch (eTrig) { /* ignore */ }
+    const runtime = prepareCheckBooksRuntime_({ includeTaskColumns: true });
+    const students = runtime.students;
+    const assignments = runtime.assignments;
     const asgById = {};
     assignments.forEach(function (a) { asgById[a.Assignment_ID] = a; });
-    const books = prepared.books;
-    const sheetFor = prepared.sheetFor;
+    const sheetFor = runtime.sheetFor;
 
     const ssApp = openAppSpreadsheet_();
     const subSheet = ssApp.getSheetByName('assignment_submissions');
@@ -3971,7 +3953,10 @@ function exportPendingCheckSubmissions_(opts) {
       if (!st) continue;
       const kinds = kindsForAssignment_(asg);
       let okAll = true;
+      let wroteAny = false;
       kinds.forEach(function (kind) {
+        if (runtime.kinds.indexOf(kind) < 0) return;
+        wroteAny = true;
         const sh = sheetFor(kind);
         const idMap = ensureCheckRosterRows_(sh, students);
         const studentRow = idMap[account];
@@ -3979,6 +3964,7 @@ function exportPendingCheckSubmissions_(opts) {
         const val = checkValueForKind_(kind, row);
         if (!writeCheckCellIfEmpty_(sh, studentRow, col, val)) okAll = false;
       });
+      if (!wroteAny) continue;
       if (okAll && exportedCol > 0) {
         subSheet.getRange(row._row, exportedCol).setValue(1);
         exported++;
@@ -3987,20 +3973,16 @@ function exportPendingCheckSubmissions_(opts) {
       }
     }
 
-    const urls = {
-      assignment: books.assignment.getUrl(),
-      quiz_pf: books.quiz_pf.getUrl(),
-      quiz_score: books.quiz_score.getUrl()
-    };
+    const summary = summarizeCheckPrepare_(runtime);
     return {
       status: 'success',
       data: {
         exported: exported,
         alreadyExported: skipped,
         pendingLeft: pendingLeft,
-        gradeSheets: prepared.gradeSheets,
-        studentCount: prepared.studentCount,
-        urls: urls
+        gradeSheets: summary.gradeSheets,
+        studentCount: summary.studentCount,
+        urls: summary.urls
       }
     };
   } catch (e) {
@@ -4014,27 +3996,13 @@ function readCheckSheetSettings_() {
   const props = PropertiesService.getScriptProperties();
   function bookInfo_(kind) {
     const id = String(props.getProperty(checkPropKeyForKind_(kind)) || '').trim();
-    let url = '';
-    let title = '';
-    if (id) {
-      try {
-        const ss = SpreadsheetApp.openById(id);
-        url = ss.getUrl();
-        title = ss.getName();
-      } catch (e) { /* ignore */ }
-    }
-    return { id: id, url: url, title: title };
+    if (!id) return { id: '', url: '', title: '' };
+    return {
+      id: id,
+      url: 'https://docs.google.com/spreadsheets/d/' + id + '/edit',
+      title: '開く'
+    };
   }
-  let triggerInstalled = false;
-  try {
-    const triggers = ScriptApp.getProjectTriggers();
-    for (let i = 0; i < triggers.length; i++) {
-      if (triggers[i].getHandlerFunction() === CHECK_EXPORT_TRIGGER_FN) {
-        triggerInstalled = true;
-        break;
-      }
-    }
-  } catch (e) { /* ignore */ }
   return {
     year: getCheckYear_(),
     assignment: bookInfo_('assignment'),
@@ -4043,13 +4011,12 @@ function readCheckSheetSettings_() {
     scopeGrade: String(props.getProperty(PROP.CHECK_SCOPE_GRADE) || '').trim(),
     scopeClass: String(props.getProperty(PROP.CHECK_SCOPE_CLASS) || '').trim(),
     scopeNumber: String(props.getProperty(PROP.CHECK_SCOPE_NUMBER) || '').trim(),
-    gradeIdDigit: String(props.getProperty(PROP.CHECK_GRADE_ID_DIGIT) || '').trim(),
     scopeAttr1: String(props.getProperty(PROP.CHECK_SCOPE_ATTR1) || '').trim(),
     scopeAttr2: String(props.getProperty(PROP.CHECK_SCOPE_ATTR2) || '').trim(),
     scopeAttr3: String(props.getProperty(PROP.CHECK_SCOPE_ATTR3) || '').trim(),
     scopeAttr4: String(props.getProperty(PROP.CHECK_SCOPE_ATTR4) || '').trim(),
     scopeAttr5: String(props.getProperty(PROP.CHECK_SCOPE_ATTR5) || '').trim(),
-    triggerInstalled: triggerInstalled
+    triggerInstalled: null
   };
 }
 
@@ -4103,9 +4070,7 @@ function apiAdminSaveCheckSheetSettings(settings) {
     if (Object.prototype.hasOwnProperty.call(settings, 'scopeNumber')) {
       saveScope_(PROP.CHECK_SCOPE_NUMBER, settings.scopeNumber);
     }
-    if (Object.prototype.hasOwnProperty.call(settings, 'gradeIdDigit')) {
-      saveScope_(PROP.CHECK_GRADE_ID_DIGIT, settings.gradeIdDigit);
-    }
+    try { props.deleteProperty('CHECK_GRADE_ID_DIGIT'); } catch (eDel) { /* 廃止済み設定 */ }
     if (Object.prototype.hasOwnProperty.call(settings, 'scopeAttr1')) {
       saveScope_(PROP.CHECK_SCOPE_ATTR1, settings.scopeAttr1);
     }
@@ -4121,10 +4086,9 @@ function apiAdminSaveCheckSheetSettings(settings) {
     if (Object.prototype.hasOwnProperty.call(settings, 'scopeAttr5')) {
       saveScope_(PROP.CHECK_SCOPE_ATTR5, settings.scopeAttr5);
     }
-    try { ensureCheckExportTrigger_(); } catch (eTrig) { /* 後続の整備は続ける */ }
     let prepared = null;
     try {
-      prepared = prepareCheckBooksStructure_();
+      prepared = prepareCheckBooksStructure_({ includeTaskColumns: false });
     } catch (ePrep) {
       return {
         status: 'error',
@@ -4134,11 +4098,28 @@ function apiAdminSaveCheckSheetSettings(settings) {
     const data = readCheckSheetSettings_();
     data.studentCount = prepared.studentCount;
     data.gradeSheets = prepared.gradeSheets;
+    data.inputSheets = prepared.inputSheets;
     data.assignmentCount = prepared.assignmentCount;
+    if (prepared.urls) {
+      ['assignment', 'quiz_pf', 'quiz_score'].forEach(function (k) {
+        if (prepared.urls[k] && data[k]) data[k].url = prepared.urls[k];
+      });
+    }
+    const labels = { assignment: '提出物', quiz_pf: '小テスト合否', quiz_score: '小テスト点数' };
+    const sheetBits = (prepared.kinds || []).map(function (k) {
+      return (labels[k] || k) + '「' + (prepared.inputSheets[k] || CHECK_DEFAULT_INPUT_SHEET) + '」';
+    });
+    let message = '設定を保存し、' + (sheetBits.join('・') || '点検票') +
+      ' に対象 ' + prepared.studentCount + ' 人の名簿を整備しました。';
+    if (!prepared.studentCount) {
+      message += ' 0人です。学年・組・番号・attribute が whitelist と一致しているか確認してください。';
+    } else {
+      message += ' 課題列と提出結果は「今すぐ転記」または時間トリガーで追記します。';
+    }
     return {
       status: 'success',
       data: data,
-      message: '設定を保存し、点検票の見出しと名簿を整備しました（対象 ' + prepared.studentCount + ' 人）'
+      message: message
     };
   } catch (e) {
     return { status: 'error', message: e.toString() };
