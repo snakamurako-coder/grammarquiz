@@ -36,7 +36,14 @@ const PROP = {
   CHECK_QUIZ_SCORE_SS_ID: 'CHECK_QUIZ_SCORE_SS_ID',
   CHECK_SCOPE_GRADE: 'CHECK_SCOPE_GRADE',
   CHECK_SCOPE_CLASS: 'CHECK_SCOPE_CLASS',
-  CHECK_SCOPE_NUMBER: 'CHECK_SCOPE_NUMBER'
+  CHECK_SCOPE_NUMBER: 'CHECK_SCOPE_NUMBER',
+  CHECK_SCOPE_ATTR1: 'CHECK_SCOPE_ATTR1',
+  CHECK_SCOPE_ATTR2: 'CHECK_SCOPE_ATTR2',
+  CHECK_SCOPE_ATTR3: 'CHECK_SCOPE_ATTR3',
+  CHECK_SCOPE_ATTR4: 'CHECK_SCOPE_ATTR4',
+  CHECK_SCOPE_ATTR5: 'CHECK_SCOPE_ATTR5',
+  /** whitelist.grade がIDのとき、左から何桁目を学年とするか（例: 3 または 2-3） */
+  CHECK_GRADE_ID_DIGIT: 'CHECK_GRADE_ID_DIGIT'
 };
 
 const AUTH_CACHE_PREFIX = 'auth_';
@@ -3442,6 +3449,50 @@ function normalizeClassToken_(s) {
   return String(s || '').trim().toLowerCase().replace(/組$/, '');
 }
 
+/**
+ * 学年桁の指定を解釈する。左から1始まり。
+ * 例: "3" → 3桁目だけ、"2-3" → 2〜3桁目。空・不正は null。
+ */
+function parseGradeIdDigitSpec_(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  const m = s.match(/^(\d+)\s*[-~～]\s*(\d+)$/);
+  let from;
+  let to;
+  if (m) {
+    from = parseInt(m[1], 10);
+    to = parseInt(m[2], 10);
+  } else if (/^\d+$/.test(s)) {
+    from = parseInt(s, 10);
+    to = from;
+  } else {
+    return null;
+  }
+  if (!from || from < 1 || !to || to < 1) return null;
+  if (from > to) {
+    const tmp = from;
+    from = to;
+    to = tmp;
+  }
+  return { from: from, to: to };
+}
+
+/** ID文字列から数字だけを取り、指定桁を学年として返す */
+function extractGradeFromIdDigits_(rawId, spec) {
+  if (!spec) return String(rawId || '').trim();
+  const digits = String(rawId || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (spec.from > digits.length) return '';
+  return digits.slice(spec.from - 1, spec.to);
+}
+
+function effectiveStudentGrade_(rawGrade, scope) {
+  scope = scope || readCheckScope_();
+  const spec = parseGradeIdDigitSpec_(scope.gradeIdDigit);
+  if (!spec) return String(rawGrade || '').trim();
+  return extractGradeFromIdDigits_(rawGrade, spec);
+}
+
 function parseCheckCsvTokens_(raw) {
   return String(raw || '').split(/[,、]/).map(function (s) {
     return String(s || '').trim();
@@ -3474,7 +3525,13 @@ function readCheckScope_() {
   return {
     grade: String(props.getProperty(PROP.CHECK_SCOPE_GRADE) || '').trim(),
     className: String(props.getProperty(PROP.CHECK_SCOPE_CLASS) || '').trim(),
-    number: String(props.getProperty(PROP.CHECK_SCOPE_NUMBER) || '').trim()
+    number: String(props.getProperty(PROP.CHECK_SCOPE_NUMBER) || '').trim(),
+    gradeIdDigit: String(props.getProperty(PROP.CHECK_GRADE_ID_DIGIT) || '').trim(),
+    attribute1: String(props.getProperty(PROP.CHECK_SCOPE_ATTR1) || '').trim(),
+    attribute2: String(props.getProperty(PROP.CHECK_SCOPE_ATTR2) || '').trim(),
+    attribute3: String(props.getProperty(PROP.CHECK_SCOPE_ATTR3) || '').trim(),
+    attribute4: String(props.getProperty(PROP.CHECK_SCOPE_ATTR4) || '').trim(),
+    attribute5: String(props.getProperty(PROP.CHECK_SCOPE_ATTR5) || '').trim()
   };
 }
 
@@ -3498,6 +3555,11 @@ function studentMatchesCheckScope_(st, scope) {
     const n = parseInt(st.number, 10);
     if (isNaN(n) || !allowedNums[n]) return false;
   }
+  if (!isTargetFieldMatch_(scope.attribute1, st.attribute1)) return false;
+  if (!isTargetFieldMatch_(scope.attribute2, st.attribute2)) return false;
+  if (!isTargetFieldMatch_(scope.attribute3, st.attribute3)) return false;
+  if (!isTargetFieldMatch_(scope.attribute4, st.attribute4)) return false;
+  if (!isTargetFieldMatch_(scope.attribute5, st.attribute5)) return false;
   return true;
 }
 
@@ -3511,12 +3573,19 @@ function listWhitelistStudentsForCheck_() {
     const cls = String(r.class || '').trim();
     if (!account) return;
     if (cls.toLowerCase() === 'admin') return;
+    const rawGrade = String(r.grade || '').trim();
     const st = {
       account: account,
       name: String(r.name || '').trim(),
-      grade: String(r.grade || '').trim(),
+      gradeRaw: rawGrade,
+      grade: effectiveStudentGrade_(rawGrade, scope),
       className: cls,
-      number: String(r.number != null && r.number !== '' ? r.number : (r['番号'] || '')).trim()
+      number: String(r.number != null && r.number !== '' ? r.number : (r['番号'] || '')).trim(),
+      attribute1: String(r.attribute1 || '').trim(),
+      attribute2: String(r.attribute2 || '').trim(),
+      attribute3: String(r.attribute3 || '').trim(),
+      attribute4: String(r.attribute4 || '').trim(),
+      attribute5: String(r.attribute5 || '').trim()
     };
     if (!studentMatchesCheckScope_(st, scope)) return;
     out.push(st);
@@ -3978,6 +4047,12 @@ function readCheckSheetSettings_() {
     scopeGrade: String(props.getProperty(PROP.CHECK_SCOPE_GRADE) || '').trim(),
     scopeClass: String(props.getProperty(PROP.CHECK_SCOPE_CLASS) || '').trim(),
     scopeNumber: String(props.getProperty(PROP.CHECK_SCOPE_NUMBER) || '').trim(),
+    gradeIdDigit: String(props.getProperty(PROP.CHECK_GRADE_ID_DIGIT) || '').trim(),
+    scopeAttr1: String(props.getProperty(PROP.CHECK_SCOPE_ATTR1) || '').trim(),
+    scopeAttr2: String(props.getProperty(PROP.CHECK_SCOPE_ATTR2) || '').trim(),
+    scopeAttr3: String(props.getProperty(PROP.CHECK_SCOPE_ATTR3) || '').trim(),
+    scopeAttr4: String(props.getProperty(PROP.CHECK_SCOPE_ATTR4) || '').trim(),
+    scopeAttr5: String(props.getProperty(PROP.CHECK_SCOPE_ATTR5) || '').trim(),
     triggerInstalled: triggerInstalled
   };
 }
@@ -4031,6 +4106,24 @@ function apiAdminSaveCheckSheetSettings(settings) {
     }
     if (Object.prototype.hasOwnProperty.call(settings, 'scopeNumber')) {
       saveScope_(PROP.CHECK_SCOPE_NUMBER, settings.scopeNumber);
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'gradeIdDigit')) {
+      saveScope_(PROP.CHECK_GRADE_ID_DIGIT, settings.gradeIdDigit);
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'scopeAttr1')) {
+      saveScope_(PROP.CHECK_SCOPE_ATTR1, settings.scopeAttr1);
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'scopeAttr2')) {
+      saveScope_(PROP.CHECK_SCOPE_ATTR2, settings.scopeAttr2);
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'scopeAttr3')) {
+      saveScope_(PROP.CHECK_SCOPE_ATTR3, settings.scopeAttr3);
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'scopeAttr4')) {
+      saveScope_(PROP.CHECK_SCOPE_ATTR4, settings.scopeAttr4);
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'scopeAttr5')) {
+      saveScope_(PROP.CHECK_SCOPE_ATTR5, settings.scopeAttr5);
     }
     try { ensureCheckExportTrigger_(); } catch (eTrig) { /* 後続の整備は続ける */ }
     let prepared = null;

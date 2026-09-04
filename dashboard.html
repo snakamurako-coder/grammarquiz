@@ -123,12 +123,20 @@ th{background:#f5f5f5}
 
   <div class="setting-section">
     <div class="section-title">課題点検票（名簿転記）</div>
-    <p class="hint">whitelist の学年・組・番号で対象メンバーを絞り、該当者だけの点検用名簿を作ります（空欄＝その区分は制限なし。番号は 1-20 のような範囲も可）。既存ブックIDを保存した時点で見出し・名簿・課題列を整備します。提出結果の追記は時間トリガー（10分ごと）です。提出日は期限、なければ期間終了日。見出し例: 単語：コーパス4500・Stage1～14・Stage1</p>
+    <p class="hint">whitelist の学年・組・番号・attribute1～5 で対象メンバーを絞り、該当者だけの点検用名簿を作ります（空欄＝その区分は制限なし。番号は 1-20 のような範囲も可。属性は列同士 AND、同一列はカンマ区切り OR）。既存ブックIDを保存した時点で見出し・名簿・課題列を整備します。提出結果の追記は時間トリガー（10分ごと）です。</p>
     <div class="form-grid">
       <div class="form-group"><label>年度（ブック名用）</label><input id="check-year" type="text" placeholder="例: 2026"></div>
       <div class="form-group"><label>対象学年（空＝全員、カンマ可）</label><input id="check-scope-grade" type="text" placeholder="例: 1,2"></div>
+      <div class="form-group"><label>学年はIDの何桁目か（空＝gradeをそのまま学年）</label><input id="check-grade-id-digit" type="text" placeholder="例: 3 または 2-3">
+        <p class="hint">whitelist の grade が学籍番号などのIDのとき、数字だけを左から数えた桁。例: ID <code>24103</code> で 2桁目が学年なら <code>2</code>。2桁にまたがるなら <code>2-3</code>。</p>
+      </div>
       <div class="form-group"><label>対象組（空＝全員、カンマ可）</label><input id="check-scope-class" type="text" placeholder="例: A,B"></div>
       <div class="form-group"><label>対象番号（空＝全員、1-20 可）</label><input id="check-scope-number" type="text" placeholder="例: 1-20, 25"></div>
+      <div class="form-group"><label>対象 attribute1（空＝制限なし）</label><input id="check-scope-attr1" type="text" placeholder="例: 上級,中級"></div>
+      <div class="form-group"><label>対象 attribute2</label><input id="check-scope-attr2" type="text"></div>
+      <div class="form-group"><label>対象 attribute3</label><input id="check-scope-attr3" type="text"></div>
+      <div class="form-group"><label>対象 attribute4</label><input id="check-scope-attr4" type="text"></div>
+      <div class="form-group"><label>対象 attribute5</label><input id="check-scope-attr5" type="text"></div>
       <div class="form-group"><label>提出物 SS ID（空＝自動作成）</label><input id="check-assign-id" type="text" placeholder="スプレッドシートID"></div>
       <div class="form-group"><label>小テスト合否 SS ID</label><input id="check-quiz-pf-id" type="text"></div>
       <div class="form-group"><label>小テスト点数 SS ID</label><input id="check-quiz-score-id" type="text"></div>
@@ -524,8 +532,14 @@ async function loadCheckSheetSettings() {
     var d = result.data || {};
     document.getElementById('check-year').value = d.year || '';
     document.getElementById('check-scope-grade').value = d.scopeGrade || '';
+    document.getElementById('check-grade-id-digit').value = d.gradeIdDigit || '';
     document.getElementById('check-scope-class').value = d.scopeClass || '';
     document.getElementById('check-scope-number').value = d.scopeNumber || '';
+    document.getElementById('check-scope-attr1').value = d.scopeAttr1 || '';
+    document.getElementById('check-scope-attr2').value = d.scopeAttr2 || '';
+    document.getElementById('check-scope-attr3').value = d.scopeAttr3 || '';
+    document.getElementById('check-scope-attr4').value = d.scopeAttr4 || '';
+    document.getElementById('check-scope-attr5').value = d.scopeAttr5 || '';
     document.getElementById('check-assign-id').value = (d.assignment && d.assignment.id) || '';
     document.getElementById('check-quiz-pf-id').value = (d.quiz_pf && d.quiz_pf.id) || '';
     document.getElementById('check-quiz-score-id').value = (d.quiz_score && d.quiz_score.id) || '';
@@ -549,8 +563,14 @@ async function saveCheckSheetSettings() {
     var result = await gasRun('apiAdminSaveCheckSheetSettings', {
       year: document.getElementById('check-year').value.trim(),
       scopeGrade: document.getElementById('check-scope-grade').value.trim(),
+      gradeIdDigit: document.getElementById('check-grade-id-digit').value.trim(),
       scopeClass: document.getElementById('check-scope-class').value.trim(),
       scopeNumber: document.getElementById('check-scope-number').value.trim(),
+      scopeAttr1: document.getElementById('check-scope-attr1').value.trim(),
+      scopeAttr2: document.getElementById('check-scope-attr2').value.trim(),
+      scopeAttr3: document.getElementById('check-scope-attr3').value.trim(),
+      scopeAttr4: document.getElementById('check-scope-attr4').value.trim(),
+      scopeAttr5: document.getElementById('check-scope-attr5').value.trim(),
       assignmentId: document.getElementById('check-assign-id').value.trim(),
       quizPfId: document.getElementById('check-quiz-pf-id').value.trim(),
       quizScoreId: document.getElementById('check-quiz-score-id').value.trim()
