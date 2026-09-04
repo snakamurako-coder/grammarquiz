@@ -10,6 +10,7 @@ const AssignmentModule = (function () {
   let listRefreshPromise_ = null;
   let activeSession_ = null;
   let timerId_ = null;
+  let finishSessionPromise_ = null;
   const POST_TIMEOUT_MS = 20000;
 
   function apiUrl_() {
@@ -1147,6 +1148,16 @@ const AssignmentModule = (function () {
   }
 
   async function finishActiveSession_(opts) {
+    opts = opts || {};
+    if (finishSessionPromise_) return finishSessionPromise_;
+    if (!activeSession_) return null;
+    finishSessionPromise_ = finishActiveSessionCore_(opts).finally(function () {
+      finishSessionPromise_ = null;
+    });
+    return finishSessionPromise_;
+  }
+
+  async function finishActiveSessionCore_(opts) {
     opts = opts || {};
     if (!activeSession_) return null;
     clearTimer_();

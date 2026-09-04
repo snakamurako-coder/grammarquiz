@@ -2545,6 +2545,35 @@ function hasAssignmentAchievement_(subSheet, assignmentId, account) {
   return null;
 }
 
+/** 宿題の進行中行（同一課題・同一アカウント）を返す */
+function findInProgressSubmission_(subSheet, assignmentId, account) {
+  const rows = sheetRowsToObjects_(subSheet);
+  const acct = String(account || '').toLowerCase();
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (String(rows[i].Assignment_ID) === String(assignmentId)
+        && String(rows[i].Account || '').toLowerCase() === acct
+        && String(rows[i].Status || '') === 'in_progress') {
+      return rows[i];
+    }
+  }
+  return null;
+}
+
+/** assignment_submissions への書き込みを直列化（同時提出の競合防止） */
+function withAssignmentSubmissionLock_(fn) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (e) {
+    return { status: 'error', message: '課題サーバーが混み合っています。少し待って再試行してください。' };
+  }
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function evaluateQuizAttemptPass_(asg, correct, total, points, pointsMax, durationSec, timedOut) {
   const score = total > 0
     ? Math.round((correct / total) * 100)
@@ -2685,10 +2714,18 @@ function handleAssignmentApi_(action, requestData) {
     if (action === 'adminListSubmissions') return apiAdminListSubmissions_(requestData);
     if (action === 'listMyAssignments') return apiListMyAssignments_(requestData);
     if (action === 'getAssignment') return apiGetAssignment_(requestData);
-    if (action === 'startAssignmentAttempt') return apiStartAssignmentAttempt_(requestData);
-    if (action === 'submitAssignmentAttempt') return apiSubmitAssignmentAttempt_(requestData);
-    if (action === 'reportQuizAchievement') return apiReportQuizAchievement_(requestData);
-    if (action === 'saveHomeworkProgress') return apiSaveHomeworkProgress_(requestData);
+    if (action === 'startAssignmentAttempt') {
+      return withAssignmentSubmissionLock_(function () { return apiStartAssignmentAttempt_(requestData); });
+    }
+    if (action === 'submitAssignmentAttempt') {
+      return withAssignmentSubmissionLock_(function () { return apiSubmitAssignmentAttempt_(requestData); });
+    }
+    if (action === 'reportQuizAchievement') {
+      return withAssignmentSubmissionLock_(function () { return apiReportQuizAchievement_(requestData); });
+    }
+    if (action === 'saveHomeworkProgress') {
+      return withAssignmentSubmissionLock_(function () { return apiSaveHomeworkProgress_(requestData); });
+    }
     return { status: 'error', message: '未知の課題API: ' + action };
   } catch (e) {
     return { status: 'error', message: e.toString() };
@@ -2953,6 +2990,26 @@ function apiStartAssignmentAttempt_(requestData) {
         localSession: true,
         serverAchieved: !!achieved,
         startedAt: now,
+        timeLimitSec: asg.Time_Limit_Sec
+      }
+    };
+  }
+
+  const existingProgress = findInProgressSubmission_(subSheet, id, account);
+  if (existingProgress) {
+    const progressCol = SUBMISSION_HEADERS.indexOf('Progress_JSON') + 1;
+    if (requestData.progress && progressCol > 0) {
+      subSheet.getRange(existingProgress._row, progressCol)
+        .setValue(JSON.stringify(requestData.progress || {}));
+    }
+    return {
+      status: 'success',
+      data: {
+        submissionId: String(existingProgress.Submission_ID),
+        attemptNo: existingProgress.Attempt_No,
+        assignment: asg,
+        resumed: true,
+        startedAt: serializeCellForClient_(existingProgress.Submitted_At) || now,
         timeLimitSec: asg.Time_Limit_Sec
       }
     };
