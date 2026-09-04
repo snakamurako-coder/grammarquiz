@@ -9084,6 +9084,7 @@ const VocabRegisterModule = (() => {
       if (cols.length < 4) return;
       const row = {};
       if (cols.length >= 22 && !isNaN(parseInt(cols[0], 10))) {
+        row['通し番号'] = String(cols[0] || '').trim();
         VOCAB_REGISTER_FIELDS.forEach(function (field, i) { row[field] = cols[i + 1] || ''; });
       } else if (cols.length >= 21) {
         VOCAB_REGISTER_FIELDS.forEach(function (field, i) { row[field] = cols[i] || ''; });

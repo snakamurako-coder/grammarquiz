@@ -1201,10 +1201,21 @@ const UserDriveModule = (function () {
     if (!hasMeaning) throw new Error('6〜13列目のいずれか1つの意味は必須です: ' + word);
   }
 
+  function serialCell_(value) {
+    const s = String(value == null ? '' : value).trim();
+    if (!s || s === UNREGISTERED) return '';
+    return s;
+  }
+
+  function nextSerial_(prevRaw) {
+    const n = parseInt(String(prevRaw == null ? '' : prevRaw).trim(), 10);
+    return isFinite(n) ? n + 1 : 1;
+  }
+
   function buildVocabRow_(rowObj) {
     validateVocabRow_(rowObj);
     return VOCAB_HEADERS.map(function (h) {
-      if (h === '通し番号') return '';
+      if (h === '通し番号') return serialCell_(rowObj[h]);
       return normField_(rowObj[h]);
     });
   }
@@ -1223,11 +1234,26 @@ const UserDriveModule = (function () {
     }
   }
 
-  async function renumberVocabSheet_(bookId, sheetName) {
-    const values = await sheetsValuesGet_(bookId, sheetName + '!A:A');
+  /** 空の通し番号だけ埋める。既存値は触らない。空欄は直前行＋1（先頭は見出しなので 1）。 */
+  async function fillBlankVocabSerials_(bookId, sheetName) {
+    const values = await sheetsValuesGet_(bookId, sheetName + '!A:E');
     if (values.length <= 1) return;
     const nums = [];
-    for (let i = 1; i < values.length; i++) nums.push([i]);
+    let prev = values[0] && values[0][0];
+    let changed = false;
+    for (let i = 1; i < values.length; i++) {
+      const raw = values[i] && values[i][0];
+      if (serialCell_(raw)) {
+        nums.push([raw]);
+        prev = raw;
+      } else {
+        const next = nextSerial_(prev);
+        nums.push([next]);
+        prev = next;
+        changed = true;
+      }
+    }
+    if (!changed) return;
     await sheetsValuesUpdate_(bookId, sheetName + '!A2:A' + values.length, nums);
   }
 
@@ -1440,7 +1466,7 @@ const UserDriveModule = (function () {
     await ensureVocabSheet_(bookId, sheetName);
     const built = rows.map(buildVocabRow_);
     await sheetsValuesAppend_(bookId, sheetName + '!A:V', built);
-    await renumberVocabSheet_(bookId, sheetName);
+    await fillBlankVocabSerials_(bookId, sheetName);
     const ss = await sheetsGet_(bookId);
     const sheet = (ss.sheets || []).find(function (s) { return s.properties.title === sheetName; });
     return {

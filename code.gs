@@ -2021,12 +2021,23 @@ function validateVocabInputRow_(rowObj) {
   }
 }
 
+function vocabSerialCell_(value) {
+  const s = String(value == null ? '' : value).trim();
+  if (!s || s === UNREGISTERED) return '';
+  return s;
+}
+
+function nextVocabSerial_(prevRaw) {
+  const n = parseInt(String(prevRaw == null ? '' : prevRaw).trim(), 10);
+  return isFinite(n) ? n + 1 : 1;
+}
+
 function buildVocabRowFromInput_(rowObj) {
   validateVocabInputRow_(rowObj);
   const result = [];
-  VOCAB_HEADERS.forEach(function (header, idx) {
+  VOCAB_HEADERS.forEach(function (header) {
     if (header === '通し番号') {
-      result.push('');
+      result.push(vocabSerialCell_(rowObj[header]));
       return;
     }
     result.push(normalizeVocabField_(rowObj[header]));
@@ -2034,16 +2045,28 @@ function buildVocabRowFromInput_(rowObj) {
   return result;
 }
 
-function renumberVocabSheet_(sheet) {
+/** 空の通し番号だけ埋める。既存値は触らない。空欄は直前行＋1（先頭は見出しなので 1）。 */
+function fillBlankVocabSerials_(sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return;
-
-  const count = lastRow - 1;
-  const numbers = [];
-  for (let i = 1; i <= count; i++) {
-    numbers.push([i]);
+  const col = sheet.getRange(1, 1, lastRow, 1).getValues();
+  const nums = [];
+  let prev = col[0][0];
+  let changed = false;
+  for (let i = 1; i < col.length; i++) {
+    const raw = col[i][0];
+    if (vocabSerialCell_(raw)) {
+      nums.push([raw]);
+      prev = raw;
+    } else {
+      const next = nextVocabSerial_(prev);
+      nums.push([next]);
+      prev = next;
+      changed = true;
+    }
   }
-  sheet.getRange(2, 1, count, 1).setValues(numbers);
+  if (!changed) return;
+  sheet.getRange(2, 1, nums.length, 1).setValues(nums);
 }
 
 function fetchVocabCatalogFromDrive_() {
@@ -2155,7 +2178,7 @@ function registerVocabWords_(sheetName, rows, ssOpt) {
 
   const startRow = sheet.getLastRow() + 1;
   sheet.getRange(startRow, 1, builtRows.length, VOCAB_HEADERS.length).setValues(builtRows);
-  renumberVocabSheet_(sheet);
+  fillBlankVocabSerials_(sheet);
 
   const bookUrl = spreadsheetEditUrl_(ss);
   return {
