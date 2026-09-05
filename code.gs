@@ -3362,33 +3362,9 @@ function vocabSheetLabels_(sec) {
   return [];
 }
 
-/** 行5見出し: 単語：コーパス4500・Stage1～14・Stage1 */
+/** 行5見出し: ダッシュボード「⓪ 課題名」（Title） */
 function buildCheckColumnTitle_(asg) {
-  const sections = (asg && asg.Sections) || parseSectionsJson_(asg && asg.Sections_JSON);
-  if (!sections.length) return String((asg && asg.Title) || (asg && asg.Assignment_ID) || '課題');
-  const parts = sections.map(function (sec) {
-    const mode = String(sec.mode || '').toLowerCase();
-    const label = checkModeLabel_(mode);
-    let book = '';
-    let sheetRange = '';
-    let dai = '';
-    if (mode === 'vocab') {
-      book = String(sec.bookName || '').trim();
-      sheetRange = compactRangeLabel_(vocabSheetLabels_(sec));
-      dai = compactRangeLabel_((sec.filters && sec.filters.dai) || []);
-    } else if (mode === 'grammar') {
-      book = String(sec.subject || '').trim();
-      sheetRange = compactRangeLabel_(sec.units || []);
-      dai = compactRangeLabel_((sec.filters && sec.filters.dai) || []);
-    } else {
-      book = String(sec.bookName || sec.subject || (asg && asg.Title) || '').trim();
-      sheetRange = compactRangeLabel_(vocabSheetLabels_(sec).concat(sec.units || []));
-      dai = compactRangeLabel_((sec.filters && sec.filters.dai) || []);
-    }
-    const tail = [book, sheetRange, dai].filter(Boolean).join('・');
-    return tail ? (label + '：' + tail) : label;
-  });
-  return parts.filter(Boolean).join('／') || String((asg && asg.Title) || '');
+  return String((asg && asg.Title) || '').trim() || String((asg && asg.Assignment_ID) || '') || '課題';
 }
 
 function formatCheckDateOnly_(value) {
@@ -3614,7 +3590,7 @@ function applyCheckSheetLayout_(sheet, sheetName, bookType) {
   const headers = [
     ['組', '', '', '', '', '', '通し番号→'],
     ['', '', '', '', '', '', '提出率→'],
-    ['', '', '', '', '', '', '返却可否→'],
+    ['', '', '', '', '', '', '提出物ID→'],
     ['', '', '', '', '', '', '提出日→'],
     ['組', '番号', 'ID', '氏名', '性別', '提出率', '提出数']
   ];
@@ -3740,25 +3716,103 @@ function ensureCheckRosterRows_(sheet, students) {
   return idMap;
 }
 
+function isCheckTaskSerialValue_(value) {
+  if (typeof value === 'number' && isFinite(value)) return true;
+  const s = String(value == null ? '' : value).trim();
+  return /^\d+$/.test(s);
+}
+
+/** 旧仕様（1行目に提出物ID）を 3行目へ移す */
+function migrateCheckTaskIdsFromRow1_(sheet) {
+  const lastCol = sheet.getLastColumn();
+  if (lastCol <= CHECK_ROSTER_COLS) return;
+  const n = lastCol - CHECK_ROSTER_COLS;
+  const row1 = sheet.getRange(1, CHECK_ROSTER_COLS + 1, 1, n).getValues()[0];
+  const row3 = sheet.getRange(3, CHECK_ROSTER_COLS + 1, 1, n).getValues()[0];
+  let changed = false;
+  for (let i = 0; i < n; i++) {
+    const r1 = String(row1[i] == null ? '' : row1[i]).trim();
+    const r3 = String(row3[i] == null ? '' : row3[i]).trim();
+    if (r1 && !r3 && !isCheckTaskSerialValue_(row1[i])) {
+      row3[i] = r1;
+      changed = true;
+    }
+  }
+  if (changed) {
+    sheet.getRange(3, CHECK_ROSTER_COLS + 1, 1, n).setValues([row3]);
+  }
+  sheet.getRange(3, CHECK_ROSTER_COLS).setValue('提出物ID→');
+}
+
+function checkTaskIdRowValues_(sheet) {
+  const lastCol = sheet.getLastColumn();
+  if (lastCol <= CHECK_ROSTER_COLS) return [];
+  return sheet.getRange(3, CHECK_ROSTER_COLS + 1, 1, lastCol - CHECK_ROSTER_COLS).getValues()[0];
+}
+
 function findCheckTaskCol_(sheet, assignmentId) {
+  const want = String(assignmentId || '');
+  if (!want) return 0;
   const lastCol = sheet.getLastColumn();
   if (lastCol <= CHECK_ROSTER_COLS) return 0;
-  const ids = sheet.getRange(1, CHECK_ROSTER_COLS + 1, 1, lastCol - CHECK_ROSTER_COLS).getValues()[0];
-  const want = String(assignmentId || '');
-  for (let i = 0; i < ids.length; i++) {
-    if (String(ids[i] || '') === want) return CHECK_ROSTER_COLS + 1 + i;
+  const n = lastCol - CHECK_ROSTER_COLS;
+  const row3 = sheet.getRange(3, CHECK_ROSTER_COLS + 1, 1, n).getValues()[0];
+  for (let i = 0; i < row3.length; i++) {
+    if (String(row3[i] || '') === want) return CHECK_ROSTER_COLS + 1 + i;
+  }
+  const row1 = sheet.getRange(1, CHECK_ROSTER_COLS + 1, 1, n).getValues()[0];
+  for (let i = 0; i < row1.length; i++) {
+    if (isCheckTaskSerialValue_(row1[i])) continue;
+    if (String(row1[i] || '') === want) return CHECK_ROSTER_COLS + 1 + i;
   }
   return 0;
 }
 
 function nextCheckTaskCol_(sheet) {
-  const lastCol = sheet.getLastColumn();
-  if (lastCol <= CHECK_ROSTER_COLS) return CHECK_ROSTER_COLS + 1;
-  const ids = sheet.getRange(1, CHECK_ROSTER_COLS + 1, 1, lastCol - CHECK_ROSTER_COLS).getValues()[0];
+  const ids = checkTaskIdRowValues_(sheet);
   for (let i = 0; i < ids.length; i++) {
-    if (!ids[i]) return CHECK_ROSTER_COLS + 1 + i;
+    if (!String(ids[i] == null ? '' : ids[i]).trim()) return CHECK_ROSTER_COLS + 1 + i;
   }
-  return lastCol + 1;
+  return CHECK_ROSTER_COLS + 1 + ids.length;
+}
+
+function writeCheckTaskColumnHeader_(sheet, col, asg) {
+  const title = buildCheckColumnTitle_(asg);
+  sheet.getRange(1, col).setValue(col - CHECK_ROSTER_COLS);
+  sheet.getRange(3, col).setValue(asg.Assignment_ID);
+  sheet.getRange(4, col).setValue(checkDueDateLabel_(asg));
+  const titleCell = sheet.getRange(5, col);
+  titleCell.setValue(title);
+  titleCell.setWrap(true);
+  sheet.setColumnWidth(col, 92);
+}
+
+function refreshExistingCheckTaskTitles_(sheet, assignments) {
+  const asgById = {};
+  (assignments || []).forEach(function (a) {
+    if (a && a.Assignment_ID) asgById[String(a.Assignment_ID)] = a;
+  });
+  const ids = checkTaskIdRowValues_(sheet);
+  for (let i = 0; i < ids.length; i++) {
+    const asg = asgById[String(ids[i] || '')];
+    if (asg) writeCheckTaskColumnHeader_(sheet, CHECK_ROSTER_COLS + 1 + i, asg);
+  }
+}
+
+function renumberCheckTaskSerials_(sheet) {
+  const ids = checkTaskIdRowValues_(sheet);
+  if (!ids.length) return;
+  const serials = [];
+  let n = 0;
+  for (let i = 0; i < ids.length; i++) {
+    if (String(ids[i] == null ? '' : ids[i]).trim()) {
+      n++;
+      serials.push(n);
+    } else {
+      serials.push('');
+    }
+  }
+  sheet.getRange(1, CHECK_ROSTER_COLS + 1, 1, ids.length).setValues([serials]);
 }
 
 function ensureCheckTaskColumn_(sheet, asg) {
@@ -3768,13 +3822,8 @@ function ensureCheckTaskColumn_(sheet, asg) {
     if (col > sheet.getMaxColumns()) {
       sheet.insertColumnsAfter(sheet.getMaxColumns(), col - sheet.getMaxColumns());
     }
-    sheet.getRange(1, col).setValue(asg.Assignment_ID);
   }
-  sheet.getRange(4, col).setValue(checkDueDateLabel_(asg));
-  const titleCell = sheet.getRange(5, col);
-  titleCell.setValue(buildCheckColumnTitle_(asg));
-  titleCell.setWrap(true);
-  sheet.setColumnWidth(col, 92);
+  writeCheckTaskColumnHeader_(sheet, col, asg);
   return col;
 }
 
@@ -3835,9 +3884,7 @@ function prepareCheckBooksRuntime_(opts) {
   const includeTaskColumns = !!opts.includeTaskColumns;
   const ssApp = openAppSpreadsheet_();
   const students = listWhitelistStudentsForCheck_();
-  const assignments = includeTaskColumns
-    ? sheetRowsToObjects_(ssApp.getSheetByName('assignments')).map(normalizeAssignmentRow_)
-    : [];
+  const assignments = sheetRowsToObjects_(ssApp.getSheetByName('assignments')).map(normalizeAssignmentRow_);
   const kinds = configuredCheckBookKinds_();
   const books = {};
   const inputSheets = {};
@@ -3850,6 +3897,7 @@ function prepareCheckBooksRuntime_(opts) {
     const sheetName = resolveCheckInputSheetName_(books[kind]);
     const sh = ensureCheckInputSheet_(books[kind], sheetName, kind);
     ensureCheckRosterRows_(sh, students);
+    migrateCheckTaskIdsFromRow1_(sh);
     sheetCache[kind] = sh;
     inputSheets[kind] = sh.getName();
     urls[kind] = books[kind].getUrl();
@@ -3860,15 +3908,19 @@ function prepareCheckBooksRuntime_(opts) {
     sheetFor(kind);
   });
 
-  if (includeTaskColumns) {
-    assignments.forEach(function (asg) {
-      if (!asg.Assignment_ID) return;
-      kindsForAssignment_(asg).forEach(function (kind) {
-        if (kinds.indexOf(kind) < 0) return;
-        ensureCheckTaskColumn_(sheetFor(kind), asg);
+  kinds.forEach(function (kind) {
+    const sh = sheetFor(kind);
+    if (includeTaskColumns) {
+      assignments.forEach(function (asg) {
+        if (!asg.Assignment_ID) return;
+        if (kindsForAssignment_(asg).indexOf(kind) < 0) return;
+        ensureCheckTaskColumn_(sh, asg);
       });
-    });
-  }
+    } else {
+      refreshExistingCheckTaskTitles_(sh, assignments);
+    }
+    renumberCheckTaskSerials_(sh);
+  });
 
   SpreadsheetApp.flush();
   return {
