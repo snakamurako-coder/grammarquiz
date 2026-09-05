@@ -2522,12 +2522,40 @@ function writeObjectRowByHeaders_(sheet, requiredHeaders, rowObj, existingRowNum
   return targetRow;
 }
 
+function findSheetByName_(ss, name) {
+  if (!ss || !name) return null;
+  const want = String(name).trim();
+  let sheet = ss.getSheetByName(want);
+  if (sheet) return sheet;
+  const sheets = ss.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    if (String(sheets[i].getName() || '').trim() === want) return sheets[i];
+  }
+  return null;
+}
+
+function insertSheetSafe_(ss, name) {
+  const existing = findSheetByName_(ss, name);
+  if (existing) return existing;
+  try {
+    const sheet = ss.insertSheet(name);
+    SpreadsheetApp.flush();
+    return sheet;
+  } catch (e) {
+    const again = findSheetByName_(ss, name);
+    if (again) return again;
+    throw e;
+  }
+}
+
 function ensureSheetWithHeaders_(ss, name, headers) {
-  let sheet = ss.getSheetByName(name);
+  let sheet = findSheetByName_(ss, name);
   if (!sheet) {
-    sheet = ss.insertSheet(name);
-    sheet.appendRow(headers);
-    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+    sheet = insertSheetSafe_(ss, name);
+    if (sheet.getLastRow() === 0 || String(sheet.getRange(1, 1).getValue() || '') === '') {
+      sheet.appendRow(headers);
+      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+    }
     return sheet;
   }
   if (sheet.getLastRow() === 0 || String(sheet.getRange(1, 1).getValue() || '') === '') {
@@ -2538,10 +2566,14 @@ function ensureSheetWithHeaders_(ss, name, headers) {
   return sheet;
 }
 
+let APP_SS_CACHE_ = null;
+
 function openAppSpreadsheet_() {
+  if (APP_SS_CACHE_) return APP_SS_CACHE_;
   const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
   if (!spreadId) throw new Error('SPREADSHEET_ID が未設定です');
   const ss = SpreadsheetApp.openById(spreadId);
+  APP_SS_CACHE_ = ss;
   const wl = ss.getSheetByName('whitelist');
   if (wl) ensureWhitelistColumns_(wl);
   ensureAssignmentSheets_(ss);
@@ -3708,7 +3740,9 @@ function seedCheckAggregationsFromLegacy_(ss) {
 function listCheckAggregations_(opts) {
   opts = opts || {};
   const ss = openAppSpreadsheet_();
-  const rows = sheetRowsToObjects_(ss.getSheetByName('check_aggregations')).map(normalizeCheckAggregationRow_);
+  const sheet = findSheetByName_(ss, 'check_aggregations')
+    || ensureSheetWithHeaders_(ss, 'check_aggregations', CHECK_AGGREGATION_HEADERS);
+  const rows = sheetRowsToObjects_(sheet).map(normalizeCheckAggregationRow_);
   if (opts.activeOnly) {
     return rows.filter(function (c) { return c.Active === 1 && c.Config_ID; });
   }
@@ -3717,7 +3751,8 @@ function listCheckAggregations_(opts) {
 
 function persistCheckAggregation_(cfg) {
   const ss = openAppSpreadsheet_();
-  const sheet = ss.getSheetByName('check_aggregations');
+  const sheet = findSheetByName_(ss, 'check_aggregations')
+    || ensureSheetWithHeaders_(ss, 'check_aggregations', CHECK_AGGREGATION_HEADERS);
   const row = normalizeCheckAggregationRow_(cfg);
   if (!row.Config_ID) row.Config_ID = newId_('cag');
   row.Updated_At = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
@@ -3736,7 +3771,8 @@ function persistCheckAggregation_(cfg) {
 
 function saveCheckAggregationsList_(items) {
   const ss = openAppSpreadsheet_();
-  const sheet = ss.getSheetByName('check_aggregations');
+  const sheet = findSheetByName_(ss, 'check_aggregations')
+    || ensureSheetWithHeaders_(ss, 'check_aggregations', CHECK_AGGREGATION_HEADERS);
   const existing = sheetRowsToObjects_(sheet);
   const keep = {};
   const saved = [];
@@ -3899,7 +3935,7 @@ function ensureCheckInputSheet_(ss, sheetName, bookType) {
       const only = ss.getSheets()[0];
       if (only.getLastRow() === 0) reusable = only;
     }
-    sheet = reusable || ss.insertSheet(sheetName);
+    sheet = reusable || insertSheetSafe_(ss, sheetName);
     applyCheckSheetLayout_(sheet, sheetName, bookType);
     return sheet;
   }
