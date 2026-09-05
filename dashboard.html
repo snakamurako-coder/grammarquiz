@@ -122,23 +122,40 @@ th{background:#f5f5f5}
   </div>
 
   <div class="setting-section">
-    <div class="section-title">課題点検票（名簿転記）</div>
-    <p class="hint">スコープに該当するメンバーは、ブックあたり入力シート1枚にまとめます（見出しの下の各行）。学年ごとにシートを分けません。既存の＠入力が1枚だけならそれを使い、無い／複数ある場合は「名簿＠入力」です。課題列は 1行目＝通し番号（1〜）、3行目＝提出物ID、5行目＝課題名（⓪）です。提出結果の追記は時間トリガー（10分ごと）です。</p>
+    <div class="section-title">課題点検票（集約シート）</div>
+    <p class="hint">前提列と値ごとにシートを分けます。例: 前提＝学年・値＝3 → whitelist の grade が 3 の生徒だけがそのシートの名簿です。課題の配布対象（class / attribute）に含まれない生徒の欄は <strong>■</strong>、対象で未提出は空欄、提出済みは <strong>○</strong>（小テスト点数ブックは数値）です。設定は本体スプレッドシートの <code>check_aggregations</code> シートにも保存されます。</p>
     <div class="form-grid">
-      <div class="form-group"><label>年度（ブック名用）</label><input id="check-year" type="text" placeholder="例: 2026"></div>
-      <div class="form-group"><label>対象学年（空＝全員、カンマ可）</label><input id="check-scope-grade" type="text" placeholder="例: 1,2"></div>
-      <div class="form-group"><label>対象組（空＝全員、カンマ可）</label><input id="check-scope-class" type="text" placeholder="例: A,B"></div>
-      <div class="form-group"><label>対象番号（空＝全員、1-20 可）</label><input id="check-scope-number" type="text" placeholder="例: 1-20, 25"></div>
-      <div class="form-group"><label>対象 attribute1（空＝制限なし）</label><input id="check-scope-attr1" type="text" placeholder="例: 上級,中級"></div>
-      <div class="form-group"><label>対象 attribute2</label><input id="check-scope-attr2" type="text"></div>
-      <div class="form-group"><label>対象 attribute3</label><input id="check-scope-attr3" type="text"></div>
-      <div class="form-group"><label>対象 attribute4</label><input id="check-scope-attr4" type="text"></div>
-      <div class="form-group"><label>対象 attribute5</label><input id="check-scope-attr5" type="text"></div>
-      <div class="form-group"><label>提出物 SS ID（空＝自動作成）</label><input id="check-assign-id" type="text" placeholder="スプレッドシートID"></div>
-      <div class="form-group"><label>小テスト合否 SS ID</label><input id="check-quiz-pf-id" type="text"></div>
-      <div class="form-group"><label>小テスト点数 SS ID</label><input id="check-quiz-score-id" type="text"></div>
+      <div class="form-group"><label>年度（ブック自動作成時の名前用）</label><input id="check-year" type="text" placeholder="例: 2026"></div>
     </div>
-    <p class="hint" id="check-trigger-status" style="margin-top:4px;"></p>
+    <div class="form-grid">
+      <div class="form-group"><label>種別</label>
+        <select id="check-agg-kind">
+          <option value="assignment">提出物</option>
+          <option value="quiz_pf">小テスト合否</option>
+          <option value="quiz_score">小テスト点数</option>
+        </select>
+      </div>
+      <div class="form-group"><label>前提列</label>
+        <select id="check-agg-prereq">
+          <option value="grade">学年 (grade)</option>
+          <option value="class">組 (class)</option>
+          <option value="number">番号 (number)</option>
+          <option value="attribute1">attribute1</option>
+          <option value="attribute2">attribute2</option>
+          <option value="attribute3">attribute3</option>
+          <option value="attribute4">attribute4</option>
+          <option value="attribute5">attribute5</option>
+        </select>
+      </div>
+      <div class="form-group"><label>前提の値</label><input id="check-agg-value" type="text" placeholder="例: 3"></div>
+      <div class="form-group"><label>シート名（空＝自動）</label><input id="check-agg-sheet" type="text" placeholder="例: 3年＠入力"></div>
+      <div class="form-group"><label>管理用 SS ID（空＝同種別で共有／自動作成）</label><input id="check-agg-ssid" type="text" placeholder="スプレッドシートID"></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+      <button type="button" id="check-agg-add-btn" class="btn-small">この集約を一覧に追加</button>
+    </div>
+    <div id="check-agg-list-wrap" style="overflow-x:auto;margin-top:12px;">—</div>
+    <p class="hint" id="check-trigger-status" style="margin-top:8px;"></p>
     <div id="check-book-links" class="hint"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
       <button type="button" id="check-save-btn" class="btn-small">設定を保存して名簿を整備</button>
@@ -505,21 +522,89 @@ async function loadWhitelist() {
 
 function fillCheckBookLinks_(data) {
   var el = document.getElementById('check-book-links');
-  if (!el || !data) return;
-  var items = [
-    ['提出物', data.assignment],
-    ['小テスト合否', data.quiz_pf],
-    ['小テスト点数', data.quiz_score]
-  ];
-  var html = items.map(function (pair) {
-    var label = pair[0];
-    var info = pair[1] || {};
-    if (info.url) {
-      return '<a href="' + escapeHtml(info.url) + '" target="_blank" rel="noopener">' + label + '（' + escapeHtml(info.title || '開く') + '）</a>';
+  if (!el) return;
+  var rows = (data && data.aggregations) || (data && data.destinations) || [];
+  if (!rows.length) {
+    el.textContent = '集約シートはまだありません。';
+    return;
+  }
+  el.innerHTML = rows.map(function (cfg) {
+    var label = escapeHtml(cfg.Label || cfg.Sheet_Name || cfg.Kind || '点検票');
+    if (cfg.url) {
+      return '<a href="' + escapeHtml(cfg.url) + '" target="_blank" rel="noopener">' + label + '</a>';
     }
-    return label + '：未作成';
+    return label;
+  }).join(' ／ ');
+}
+
+var checkAggRows_ = [];
+
+function checkAggKindLabel_(kind) {
+  if (kind === 'quiz_pf') return '小テスト合否';
+  if (kind === 'quiz_score') return '小テスト点数';
+  return '提出物';
+}
+
+function checkAggPrereqLabel_(col) {
+  var map = {
+    grade: '学年', class: '組', number: '番号',
+    attribute1: 'attribute1', attribute2: 'attribute2', attribute3: 'attribute3',
+    attribute4: 'attribute4', attribute5: 'attribute5'
+  };
+  return map[col] || (col ? col : '（未指定＝全員）');
+}
+
+function renderCheckAggList_() {
+  var wrap = document.getElementById('check-agg-list-wrap');
+  if (!wrap) return;
+  if (!checkAggRows_.length) {
+    wrap.innerHTML = '<p class="hint">集約がありません。上で前提列と値を入れて「一覧に追加」してください。学年1・2・3なら3行必要です。</p>';
+    return;
+  }
+  var html = '<table><thead><tr><th>種別</th><th>前提列</th><th>値</th><th>シート名</th><th>SS ID</th><th></th></tr></thead><tbody>';
+  checkAggRows_.forEach(function (row, idx) {
+    html += '<tr>';
+    html += '<td>' + escapeHtml(checkAggKindLabel_(row.Kind)) + '</td>';
+    html += '<td>' + escapeHtml(checkAggPrereqLabel_(row.Prerequisite_Column)) + '</td>';
+    html += '<td>' + escapeHtml(row.Prerequisite_Value || '') + '</td>';
+    html += '<td>' + escapeHtml(row.Sheet_Name || '') + '</td>';
+    html += '<td>' + (row.url
+      ? '<a href="' + escapeHtml(row.url) + '" target="_blank" rel="noopener">' + escapeHtml(row.Spreadsheet_ID || '開く') + '</a>'
+      : escapeHtml(row.Spreadsheet_ID || '（自動）')) + '</td>';
+    html += '<td><button type="button" class="btn-small btn-danger" data-check-agg-del="' + idx + '">削除</button></td>';
+    html += '</tr>';
   });
-  el.innerHTML = html.join(' ／ ');
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('[data-check-agg-del]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var i = parseInt(btn.getAttribute('data-check-agg-del'), 10);
+      if (isNaN(i)) return;
+      checkAggRows_.splice(i, 1);
+      renderCheckAggList_();
+    });
+  });
+}
+
+function addCheckAggregationRow_() {
+  var value = document.getElementById('check-agg-value').value.trim();
+  var col = document.getElementById('check-agg-prereq').value;
+  if (!value) {
+    showBanner('前提の値を入力してください（例: 学年なら 3）', false);
+    return;
+  }
+  checkAggRows_.push({
+    Config_ID: '',
+    Kind: document.getElementById('check-agg-kind').value,
+    Prerequisite_Column: col,
+    Prerequisite_Value: value,
+    Sheet_Name: document.getElementById('check-agg-sheet').value.trim(),
+    Spreadsheet_ID: document.getElementById('check-agg-ssid').value.trim(),
+    Active: 1
+  });
+  document.getElementById('check-agg-value').value = '';
+  document.getElementById('check-agg-sheet').value = '';
+  renderCheckAggList_();
 }
 
 async function loadCheckSheetSettings() {
@@ -528,18 +613,9 @@ async function loadCheckSheetSettings() {
     if (result.status !== 'success') throw new Error(result.message);
     var d = result.data || {};
     document.getElementById('check-year').value = d.year || '';
-    document.getElementById('check-scope-grade').value = d.scopeGrade || '';
-    document.getElementById('check-scope-class').value = d.scopeClass || '';
-    document.getElementById('check-scope-number').value = d.scopeNumber || '';
-    document.getElementById('check-scope-attr1').value = d.scopeAttr1 || '';
-    document.getElementById('check-scope-attr2').value = d.scopeAttr2 || '';
-    document.getElementById('check-scope-attr3').value = d.scopeAttr3 || '';
-    document.getElementById('check-scope-attr4').value = d.scopeAttr4 || '';
-    document.getElementById('check-scope-attr5').value = d.scopeAttr5 || '';
-    document.getElementById('check-assign-id').value = (d.assignment && d.assignment.id) || '';
-    document.getElementById('check-quiz-pf-id').value = (d.quiz_pf && d.quiz_pf.id) || '';
-    document.getElementById('check-quiz-score-id').value = (d.quiz_score && d.quiz_score.id) || '';
-    document.getElementById('check-trigger-status').textContent = '提出の転記は時間トリガー（約10分ごと）。この画面ではトリガー状態を確認しません。';
+    checkAggRows_ = Array.isArray(d.aggregations) ? d.aggregations.slice() : [];
+    renderCheckAggList_();
+    document.getElementById('check-trigger-status').textContent = '提出の転記は時間トリガー（約10分ごと）。整備時に ■ / 空欄 / ○ も更新します。';
     fillCheckBookLinks_(d);
   } catch (e) {
     document.getElementById('check-trigger-status').textContent = '点検票設定の読込に失敗: ' + (e.message || e);
@@ -556,23 +632,14 @@ async function saveCheckSheetSettings() {
   try {
     var result = await gasRun('apiAdminSaveCheckSheetSettings', {
       year: document.getElementById('check-year').value.trim(),
-      scopeGrade: document.getElementById('check-scope-grade').value.trim(),
-      scopeClass: document.getElementById('check-scope-class').value.trim(),
-      scopeNumber: document.getElementById('check-scope-number').value.trim(),
-      scopeAttr1: document.getElementById('check-scope-attr1').value.trim(),
-      scopeAttr2: document.getElementById('check-scope-attr2').value.trim(),
-      scopeAttr3: document.getElementById('check-scope-attr3').value.trim(),
-      scopeAttr4: document.getElementById('check-scope-attr4').value.trim(),
-      scopeAttr5: document.getElementById('check-scope-attr5').value.trim(),
-      assignmentId: document.getElementById('check-assign-id').value.trim(),
-      quizPfId: document.getElementById('check-quiz-pf-id').value.trim(),
-      quizScoreId: document.getElementById('check-quiz-score-id').value.trim()
+      aggregations: checkAggRows_
     });
     if (result.status !== 'success') throw new Error(result.message);
     var d = result.data || {};
+    if (Array.isArray(d.aggregations)) checkAggRows_ = d.aggregations.slice();
+    renderCheckAggList_();
     fillCheckBookLinks_(d);
     showBanner(result.message || '点検票の設定を保存しました', true);
-    await loadCheckSheetSettings();
   } catch (e) {
     showBanner(e.message || String(e), false);
   } finally {
@@ -595,13 +662,7 @@ async function syncCheckSheetsNow() {
     if (result.status !== 'success') throw new Error(result.message);
     var d = result.data || {};
     showBanner('転記しました（今回 ' + (d.exported || 0) + ' 件、未処理 ' + (d.pendingLeft || 0) + ' 件）', true);
-    if (d.urls) {
-      fillCheckBookLinks_({
-        assignment: { url: d.urls.assignment, title: '提出物' },
-        quiz_pf: { url: d.urls.quiz_pf, title: '合否' },
-        quiz_score: { url: d.urls.quiz_score, title: '点数' }
-      });
-    }
+    fillCheckBookLinks_({ aggregations: d.destinations || [] });
     await loadCheckSheetSettings();
   } catch (e) {
     showBanner(e.message || String(e), false);
@@ -625,6 +686,7 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('refresh-summaries-btn').addEventListener('click', loadSummaries);
   document.getElementById('check-save-btn').addEventListener('click', saveCheckSheetSettings);
   document.getElementById('check-sync-btn').addEventListener('click', syncCheckSheetsNow);
+  document.getElementById('check-agg-add-btn').addEventListener('click', addCheckAggregationRow_);
 
   AssignmentSectionBuilder.init().catch(function (e) {
     showBanner('教材カタログの読込に失敗: ' + (e.message || e), false);

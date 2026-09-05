@@ -2335,7 +2335,7 @@ function apiSubmitFormSummary_(requestData) {
 
 /** フォーム回答先シートを本体 SS から探す */
 function findFormResponseSheet_(ss) {
-  const skipNames = { whitelist: 1, assignments: 1, assignment_submissions: 1 };
+  const skipNames = { whitelist: 1, assignments: 1, assignment_submissions: 1, check_aggregations: 1 };
   const configured = PropertiesService.getScriptProperties().getProperty(PROP.FORM_RESPONSE_SHEET);
   if (configured) {
     const configuredSheet = ss.getSheetByName(configured);
@@ -2462,12 +2462,29 @@ const CHECK_ROSTER_COLS = 7;
 const CHECK_EXPORT_TRIGGER_FN = 'syncCheckSheetsPending';
 const CHECK_EXPORT_BATCH = 80;
 const CHECK_DEFAULT_INPUT_SHEET = '名簿＠入力';
+const CHECK_AGGREGATION_HEADERS = [
+  'Config_ID', 'Label', 'Kind', 'Spreadsheet_ID',
+  'Prerequisite_Column', 'Prerequisite_Value', 'Sheet_Name', 'Active', 'Updated_At'
+];
+const CHECK_PREREQ_COLUMNS = {
+  grade: '学年',
+  class: '組',
+  number: '番号',
+  attribute1: 'attribute1',
+  attribute2: 'attribute2',
+  attribute3: 'attribute3',
+  attribute4: 'attribute4',
+  attribute5: 'attribute5'
+};
 
 function ensureAssignmentSheets_(ss) {
   ensureSheetWithHeaders_(ss, 'assignments', ASSIGNMENT_HEADERS);
   migrateSheetHeaders_(ss.getSheetByName('assignments'), ASSIGNMENT_HEADERS);
   ensureSheetWithHeaders_(ss, 'assignment_submissions', SUBMISSION_HEADERS);
   migrateSheetHeaders_(ss.getSheetByName('assignment_submissions'), SUBMISSION_HEADERS);
+  ensureSheetWithHeaders_(ss, 'check_aggregations', CHECK_AGGREGATION_HEADERS);
+  migrateSheetHeaders_(ss.getSheetByName('check_aggregations'), CHECK_AGGREGATION_HEADERS);
+  seedCheckAggregationsFromLegacy_(ss);
 }
 
 /** 既存シートの1行目に不足ヘッダ列を追加（データ行は保持） */
@@ -3503,16 +3520,19 @@ function studentMatchesCheckScope_(st, scope) {
 }
 
 function listWhitelistStudentsForCheck_() {
+  return listWhitelistStudentsAll_();
+}
+
+function listWhitelistStudentsAll_() {
   const ss = openAppSpreadsheet_();
   const rows = sheetRowsToObjects_(ss.getSheetByName('whitelist'));
-  const scope = readCheckScope_();
   const out = [];
   rows.forEach(function (r) {
     const account = String(r.account || '').trim().toLowerCase();
     const cls = String(r.class || '').trim();
     if (!account) return;
     if (cls.toLowerCase() === 'admin') return;
-    const st = {
+    out.push({
       account: account,
       name: String(r.name || '').trim(),
       grade: String(r.grade || '').trim(),
@@ -3523,9 +3543,7 @@ function listWhitelistStudentsForCheck_() {
       attribute3: String(r.attribute3 || '').trim(),
       attribute4: String(r.attribute4 || '').trim(),
       attribute5: String(r.attribute5 || '').trim()
-    };
-    if (!studentMatchesCheckScope_(st, scope)) return;
-    out.push(st);
+    });
   });
   out.sort(function (a, b) {
     const g = naturalLabelSort_(a.grade, b.grade);
@@ -3538,6 +3556,240 @@ function listWhitelistStudentsForCheck_() {
     return naturalLabelSort_(a.name || a.account, b.name || b.account);
   });
   return out;
+}
+
+function studentAsAssignmentUser_(st) {
+  return {
+    class: st && st.className,
+    attribute1: st && st.attribute1,
+    attribute2: st && st.attribute2,
+    attribute3: st && st.attribute3,
+    attribute4: st && st.attribute4,
+    attribute5: st && st.attribute5
+  };
+}
+
+function normalizeCheckKind_(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (s === 'quiz_pf' || s === 'quiz-pf' || s.indexOf('合否') >= 0) return 'quiz_pf';
+  if (s === 'quiz_score' || s === 'quiz-score' || s.indexOf('点数') >= 0 || s.indexOf('得点') >= 0) return 'quiz_score';
+  return 'assignment';
+}
+
+function normalizeCheckPrereqColumn_(raw) {
+  const s = String(raw || '').trim().toLowerCase().replace(/\s/g, '');
+  const map = {
+    grade: 'grade', '学年': 'grade',
+    class: 'class', '組': 'class', 'クラス': 'class',
+    number: 'number', '番号': 'number',
+    attribute1: 'attribute1', attr1: 'attribute1',
+    attribute2: 'attribute2', attr2: 'attribute2',
+    attribute3: 'attribute3', attr3: 'attribute3',
+    attribute4: 'attribute4', attr4: 'attribute4',
+    attribute5: 'attribute5', attr5: 'attribute5'
+  };
+  return map[s] || '';
+}
+
+function studentPrerequisiteValue_(st, column) {
+  const col = normalizeCheckPrereqColumn_(column);
+  if (col === 'grade') return st.grade;
+  if (col === 'class') return st.className;
+  if (col === 'number') return st.number;
+  if (col === 'attribute1') return st.attribute1;
+  if (col === 'attribute2') return st.attribute2;
+  if (col === 'attribute3') return st.attribute3;
+  if (col === 'attribute4') return st.attribute4;
+  if (col === 'attribute5') return st.attribute5;
+  return '';
+}
+
+function studentMatchesPrerequisite_(st, column, value) {
+  const col = normalizeCheckPrereqColumn_(column);
+  const want = String(value == null ? '' : value).trim();
+  if (!col && !want) return true;
+  if (!col || !want) return false;
+  const got = studentPrerequisiteValue_(st, col);
+  if (col === 'grade') return normalizeGradeToken_(got) === normalizeGradeToken_(want);
+  if (col === 'class') return normalizeClassToken_(got) === normalizeClassToken_(want);
+  if (col === 'number') {
+    const a = parseInt(got, 10);
+    const b = parseInt(want, 10);
+    return !isNaN(a) && !isNaN(b) && a === b;
+  }
+  return String(got || '').trim().toLowerCase() === want.toLowerCase();
+}
+
+function filterStudentsByPrerequisite_(students, cfg) {
+  return (students || []).filter(function (st) {
+    return studentMatchesPrerequisite_(st, cfg.Prerequisite_Column, cfg.Prerequisite_Value);
+  });
+}
+
+function defaultCheckAggregationSheetName_(column, value) {
+  const v = String(value || '').trim();
+  if (!v) return CHECK_DEFAULT_INPUT_SHEET;
+  if (/＠入力$/.test(v)) return v;
+  const col = normalizeCheckPrereqColumn_(column);
+  if (col === 'grade') {
+    if (/年$/.test(v)) return v + '＠入力';
+    return v + '年＠入力';
+  }
+  return v + '＠入力';
+}
+
+function checkAggregationLabel_(cfg) {
+  const col = normalizeCheckPrereqColumn_(cfg.Prerequisite_Column);
+  const colLabel = CHECK_PREREQ_COLUMNS[col] || cfg.Prerequisite_Column || '全員';
+  const val = String(cfg.Prerequisite_Value || '').trim();
+  const kindLabels = { assignment: '提出物', quiz_pf: '小テスト合否', quiz_score: '小テスト点数' };
+  const kind = kindLabels[cfg.Kind] || cfg.Kind;
+  if (!col || !val) return kind + '（全員）';
+  return kind + ' / ' + colLabel + '=' + val;
+}
+
+function normalizeCheckAggregationRow_(row) {
+  row = row || {};
+  const kind = normalizeCheckKind_(row.Kind);
+  const col = normalizeCheckPrereqColumn_(row.Prerequisite_Column);
+  const value = String(row.Prerequisite_Value == null ? '' : row.Prerequisite_Value).trim();
+  const sheetName = String(row.Sheet_Name || '').trim() || defaultCheckAggregationSheetName_(col, value);
+  const cfg = {
+    Config_ID: String(row.Config_ID || '').trim(),
+    Label: String(row.Label || '').trim(),
+    Kind: kind,
+    Spreadsheet_ID: String(row.Spreadsheet_ID || '').trim(),
+    Prerequisite_Column: col,
+    Prerequisite_Value: value,
+    Sheet_Name: sheetName,
+    Active: String(row.Active == null || row.Active === '' ? '1' : row.Active) === '0' || row.Active === false || row.Active === 0 ? 0 : 1,
+    Updated_At: String(row.Updated_At || ''),
+    _row: row._row || 0
+  };
+  if (!cfg.Label) cfg.Label = checkAggregationLabel_(cfg);
+  return cfg;
+}
+
+function seedCheckAggregationsFromLegacy_(ss) {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('CHECK_AGG_SEEDED') === '1') return;
+  const sheet = ss.getSheetByName('check_aggregations');
+  if (!sheet) return;
+  const existing = sheetRowsToObjects_(sheet).filter(function (r) {
+    return String(r.Config_ID || '').trim();
+  });
+  if (existing.length) {
+    props.setProperty('CHECK_AGG_SEEDED', '1');
+    return;
+  }
+  const seeds = [
+    { kind: 'assignment', id: String(props.getProperty(PROP.CHECK_ASSIGNMENT_SS_ID) || '').trim() },
+    { kind: 'quiz_pf', id: String(props.getProperty(PROP.CHECK_QUIZ_PF_SS_ID) || '').trim() },
+    { kind: 'quiz_score', id: String(props.getProperty(PROP.CHECK_QUIZ_SCORE_SS_ID) || '').trim() }
+  ];
+  const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+  seeds.forEach(function (s) {
+    if (!s.id) return;
+    const cfg = normalizeCheckAggregationRow_({
+      Config_ID: newId_('cag'),
+      Kind: s.kind,
+      Spreadsheet_ID: s.id,
+      Prerequisite_Column: '',
+      Prerequisite_Value: '',
+      Sheet_Name: CHECK_DEFAULT_INPUT_SHEET,
+      Active: 1,
+      Updated_At: now
+    });
+    writeObjectRowByHeaders_(sheet, CHECK_AGGREGATION_HEADERS, cfg, 0);
+  });
+  props.setProperty('CHECK_AGG_SEEDED', '1');
+}
+
+function listCheckAggregations_(opts) {
+  opts = opts || {};
+  const ss = openAppSpreadsheet_();
+  const rows = sheetRowsToObjects_(ss.getSheetByName('check_aggregations')).map(normalizeCheckAggregationRow_);
+  if (opts.activeOnly) {
+    return rows.filter(function (c) { return c.Active === 1 && c.Config_ID; });
+  }
+  return rows.filter(function (c) { return c.Config_ID; });
+}
+
+function persistCheckAggregation_(cfg) {
+  const ss = openAppSpreadsheet_();
+  const sheet = ss.getSheetByName('check_aggregations');
+  const row = normalizeCheckAggregationRow_(cfg);
+  if (!row.Config_ID) row.Config_ID = newId_('cag');
+  row.Updated_At = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+  if (!row.Label) row.Label = checkAggregationLabel_(row);
+  const existing = sheetRowsToObjects_(sheet);
+  let existingRow = 0;
+  for (let i = 0; i < existing.length; i++) {
+    if (String(existing[i].Config_ID || '') === row.Config_ID) {
+      existingRow = existing[i]._row;
+      break;
+    }
+  }
+  writeObjectRowByHeaders_(sheet, CHECK_AGGREGATION_HEADERS, row, existingRow);
+  return row;
+}
+
+function saveCheckAggregationsList_(items) {
+  const ss = openAppSpreadsheet_();
+  const sheet = ss.getSheetByName('check_aggregations');
+  const existing = sheetRowsToObjects_(sheet);
+  const keep = {};
+  const saved = [];
+  (items || []).forEach(function (raw) {
+    const row = persistCheckAggregation_(raw);
+    keep[row.Config_ID] = true;
+    saved.push(row);
+  });
+  const toDelete = [];
+  existing.forEach(function (r) {
+    const id = String(r.Config_ID || '').trim();
+    if (id && !keep[id] && r._row > 1) toDelete.push(r._row);
+  });
+  toDelete.sort(function (a, b) { return b - a; });
+  toDelete.forEach(function (rowNum) { sheet.deleteRow(rowNum); });
+  return saved;
+}
+
+function openCheckBookForConfig_(cfg) {
+  const kind = normalizeCheckKind_(cfg.Kind);
+  let id = String(cfg.Spreadsheet_ID || '').trim();
+  if (id) return SpreadsheetApp.openById(id);
+
+  const siblings = listCheckAggregations_({ activeOnly: false });
+  for (let i = 0; i < siblings.length; i++) {
+    if (siblings[i].Kind === kind && String(siblings[i].Spreadsheet_ID || '').trim()) {
+      id = String(siblings[i].Spreadsheet_ID).trim();
+      break;
+    }
+  }
+  if (!id) {
+    const props = PropertiesService.getScriptProperties();
+    id = String(props.getProperty(checkPropKeyForKind_(kind)) || '').trim();
+  }
+  if (id) {
+    cfg.Spreadsheet_ID = id;
+    persistCheckAggregation_(cfg);
+    try { PropertiesService.getScriptProperties().setProperty(checkPropKeyForKind_(kind), id); } catch (e) { /* ignore */ }
+    return SpreadsheetApp.openById(id);
+  }
+
+  const ss = openOrCreateCheckBook_(kind);
+  id = ss.getId();
+  cfg.Spreadsheet_ID = id;
+  persistCheckAggregation_(cfg);
+  siblings.forEach(function (sib) {
+    if (sib.Kind !== kind) return;
+    if (String(sib.Spreadsheet_ID || '').trim()) return;
+    if (sib.Config_ID === cfg.Config_ID) return;
+    sib.Spreadsheet_ID = id;
+    persistCheckAggregation_(sib);
+  });
+  return ss;
 }
 
 function getOrCreateCheckFolder_() {
@@ -3602,9 +3854,12 @@ function applyCheckSheetLayout_(sheet, sheetName, bookType) {
   }
 
   const range = sheet.getRange('H6:AZ205');
-  const rules = [];
+  const rules = [
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('■').setBackground('#333333').setFontColor('#ffffff').setRanges([range]).build()
+  ];
   if (bookType === 'assignment') {
     rules.push(
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('○').setBackground('#b7e1cd').setFontColor('#0f5132').setRanges([range]).build(),
       SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('提').setBackground('#b7e1cd').setFontColor('#0f5132').setRanges([range]).build(),
       SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('未').setBackground('#f4c7c3').setFontColor('#842029').setRanges([range]).build(),
       SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('再').setBackground('#fce8b2').setFontColor('#664d03').setRanges([range]).build(),
@@ -3654,16 +3909,18 @@ function ensureCheckInputSheet_(ss, sheetName, bookType) {
     applyCheckSheetLayout_(sheet, sheetName, bookType);
   } else if (r5c1 !== '組' && sheet.getLastRow() <= 1) {
     applyCheckSheetLayout_(sheet, sheetName, bookType);
+  } else {
+    try { sheet.getRange(3, CHECK_ROSTER_COLS).setValue('提出物ID→'); } catch (eG3) { /* ignore */ }
   }
   return sheet;
 }
 
 function checkRosterFormulaRate_(rowIndex) {
-  return '=IF(COUNTA($H$5:$AZ$5)=0, 0, G' + rowIndex + '/COUNTA($H$5:$AZ$5))';
+  return '=IF((COUNTA($H$5:$AZ$5)-COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',"■"))<=0, 0, G' + rowIndex + '/(COUNTA($H$5:$AZ$5)-COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',"■")))';
 }
 
 function checkRosterFormulaCount_(rowIndex) {
-  return '=COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',"提")+COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',1)+COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',"○")';
+  return '=COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',"○")+COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',"提")+COUNT(H' + rowIndex + ':AZ' + rowIndex + ')';
 }
 
 function ensureCheckRosterRows_(sheet, students) {
@@ -3833,14 +4090,57 @@ function checkCellIsProtected_(value) {
   return s === '休' || s === '再' || s === '未' || s === '×';
 }
 
+function checkCellLooksSubmitted_(value) {
+  if (typeof value === 'number' && isFinite(value)) return true;
+  const s = String(value == null ? '' : value).trim();
+  return s === '○' || s === '提';
+}
+
 function writeCheckCellIfEmpty_(sheet, row, col, value) {
   if (!row || !col || value === '' || value == null) return false;
   const cell = sheet.getRange(row, col);
   const cur = cell.getValue();
   if (checkCellIsProtected_(cur)) return true;
-  if (String(cur == null ? '' : cur).trim() !== '') return true;
-  cell.setValue(value);
+  const s = String(cur == null ? '' : cur).trim();
+  if (s === '■' || s === '') {
+    cell.setValue(value);
+    return true;
+  }
   return true;
+}
+
+function applyCheckTargetMarks_(sheet, col, asg, students, idMap) {
+  if (!col || !students || !students.length) return;
+  const rows = [];
+  students.forEach(function (st) {
+    const row = idMap[st.account];
+    if (row) rows.push(row);
+  });
+  if (!rows.length) return;
+  const minRow = Math.min.apply(null, rows);
+  const maxRow = Math.max.apply(null, rows);
+  const range = sheet.getRange(minRow, col, maxRow - minRow + 1, 1);
+  const vals = range.getValues();
+  let changed = false;
+  students.forEach(function (st) {
+    const row = idMap[st.account];
+    if (!row) return;
+    const idx = row - minRow;
+    const cur = vals[idx][0];
+    if (checkCellIsProtected_(cur) || checkCellLooksSubmitted_(cur)) return;
+    const curS = String(cur == null ? '' : cur).trim();
+    const targeted = isAssignmentTargetMatch_(asg, studentAsAssignmentUser_(st));
+    if (!targeted) {
+      if (curS !== '■') {
+        vals[idx][0] = '■';
+        changed = true;
+      }
+    } else if (curS === '■') {
+      vals[idx][0] = '';
+      changed = true;
+    }
+  });
+  if (changed) range.setValues(vals);
 }
 
 function checkValueForKind_(kind, row) {
@@ -3848,8 +4148,7 @@ function checkValueForKind_(kind, row) {
     const n = parseFloat(row.Score);
     return isNaN(n) ? '' : n;
   }
-  if (kind === 'quiz_pf') return '○';
-  return '提';
+  return '○';
 }
 
 function kindsForAssignment_(asg) {
@@ -3868,69 +4167,114 @@ function configuredCheckBookKinds_() {
 }
 
 function summarizeCheckPrepare_(runtime) {
+  const destinations = runtime.destinations || [];
   return {
-    studentCount: runtime.students.length,
-    assignmentCount: runtime.assignments.length,
-    kinds: runtime.kinds.slice(),
-    inputSheets: runtime.inputSheets,
-    gradeSheets: runtime.kinds.map(function (k) { return runtime.inputSheets[k]; }),
-    urls: runtime.urls
+    studentCount: destinations.reduce(function (n, d) { return n + (d.studentCount || 0); }, 0),
+    assignmentCount: (runtime.assignments || []).length,
+    destinations: destinations.map(function (d) {
+      return {
+        Config_ID: d.cfg.Config_ID,
+        Label: d.cfg.Label,
+        Kind: d.cfg.Kind,
+        Spreadsheet_ID: d.cfg.Spreadsheet_ID,
+        Prerequisite_Column: d.cfg.Prerequisite_Column,
+        Prerequisite_Value: d.cfg.Prerequisite_Value,
+        Sheet_Name: d.sheetName,
+        studentCount: d.studentCount,
+        url: d.url
+      };
+    }),
+    gradeSheets: destinations.map(function (d) { return d.sheetName; }),
+    urls: destinations.reduce(function (acc, d) {
+      acc[d.cfg.Config_ID] = d.url;
+      if (!acc[d.cfg.Kind]) acc[d.cfg.Kind] = d.url;
+      return acc;
+    }, {})
   };
 }
 
-/** 点検票ブックの見出し・名簿をすぐ整備。ID指定があるブックだけ触る。 */
+/** 集約設定ごとにシートを整備（名簿・課題列・■印） */
 function prepareCheckBooksRuntime_(opts) {
   opts = opts || {};
-  const includeTaskColumns = !!opts.includeTaskColumns;
+  const includeTaskColumns = opts.includeTaskColumns !== false;
   const ssApp = openAppSpreadsheet_();
-  const students = listWhitelistStudentsForCheck_();
+  const allStudents = listWhitelistStudentsAll_();
   const assignments = sheetRowsToObjects_(ssApp.getSheetByName('assignments')).map(normalizeAssignmentRow_);
-  const kinds = configuredCheckBookKinds_();
-  const books = {};
-  const inputSheets = {};
-  const urls = {};
-  const sheetCache = {};
+  const asgById = {};
+  assignments.forEach(function (a) { asgById[a.Assignment_ID] = a; });
+  const configs = listCheckAggregations_({ activeOnly: true });
+  const studentByAccount = {};
+  allStudents.forEach(function (st) { studentByAccount[st.account] = st; });
 
-  function sheetFor(kind) {
-    if (sheetCache[kind]) return sheetCache[kind];
-    books[kind] = openOrCreateCheckBook_(kind);
-    const sheetName = resolveCheckInputSheetName_(books[kind]);
-    const sh = ensureCheckInputSheet_(books[kind], sheetName, kind);
-    ensureCheckRosterRows_(sh, students);
-    migrateCheckTaskIdsFromRow1_(sh);
-    sheetCache[kind] = sh;
-    inputSheets[kind] = sh.getName();
-    urls[kind] = books[kind].getUrl();
-    return sh;
+  let subsByAccount = null;
+  if (includeTaskColumns) {
+    subsByAccount = {};
+    sheetRowsToObjects_(ssApp.getSheetByName('assignment_submissions')).forEach(function (row) {
+      const acc = String(row.Account || '').toLowerCase();
+      if (!acc) return;
+      if (!subsByAccount[acc]) subsByAccount[acc] = [];
+      subsByAccount[acc].push(row);
+    });
   }
 
-  kinds.forEach(function (kind) {
-    sheetFor(kind);
-  });
-
-  kinds.forEach(function (kind) {
-    const sh = sheetFor(kind);
+  const destinations = [];
+  const destByConfigId = {};
+  configs.forEach(function (cfg) {
+    const students = filterStudentsByPrerequisite_(allStudents, cfg);
+    const book = openCheckBookForConfig_(cfg);
+    const sheetName = String(cfg.Sheet_Name || '').trim()
+      || defaultCheckAggregationSheetName_(cfg.Prerequisite_Column, cfg.Prerequisite_Value);
+    const sh = ensureCheckInputSheet_(book, sheetName, cfg.Kind);
+    const idMap = ensureCheckRosterRows_(sh, students);
+    migrateCheckTaskIdsFromRow1_(sh);
+    const asgs = assignments.filter(function (asg) {
+      return !!(asg.Assignment_ID && asg.Active && kindsForAssignment_(asg).indexOf(cfg.Kind) >= 0);
+    });
     if (includeTaskColumns) {
-      assignments.forEach(function (asg) {
-        if (!asg.Assignment_ID) return;
-        if (kindsForAssignment_(asg).indexOf(kind) < 0) return;
-        ensureCheckTaskColumn_(sh, asg);
+      asgs.forEach(function (asg) {
+        const col = ensureCheckTaskColumn_(sh, asg);
+        applyCheckTargetMarks_(sh, col, asg, students, idMap);
+        students.forEach(function (st) {
+          const rows = (subsByAccount && subsByAccount[st.account]) || [];
+          rows.forEach(function (sub) {
+            if (String(sub.Assignment_ID || '') !== String(asg.Assignment_ID)) return;
+            if (!isCheckExportableSubmission_(asg, sub)) return;
+            writeCheckCellIfEmpty_(sh, idMap[st.account], col, checkValueForKind_(cfg.Kind, sub));
+          });
+        });
       });
     } else {
-      refreshExistingCheckTaskTitles_(sh, assignments);
+      refreshExistingCheckTaskTitles_(sh, asgs);
+      const ids = checkTaskIdRowValues_(sh);
+      for (let i = 0; i < ids.length; i++) {
+        const asg = asgById[String(ids[i] || '')];
+        if (asg) applyCheckTargetMarks_(sh, CHECK_ROSTER_COLS + 1 + i, asg, students, idMap);
+      }
     }
     renumberCheckTaskSerials_(sh);
+    const dest = {
+      cfg: cfg,
+      students: students,
+      studentCount: students.length,
+      sheet: sh,
+      sheetName: sh.getName(),
+      idMap: idMap,
+      url: book.getUrl(),
+      book: book
+    };
+    destinations.push(dest);
+    destByConfigId[cfg.Config_ID] = dest;
   });
 
   SpreadsheetApp.flush();
   return {
-    students: students,
+    students: allStudents,
+    studentByAccount: studentByAccount,
     assignments: assignments,
-    kinds: kinds,
-    books: books,
-    sheetFor: sheetFor,
-    inputSheets: inputSheets,
-    urls: urls
+    configs: configs,
+    destinations: destinations,
+    destByConfigId: destByConfigId,
+    kinds: configs.map(function (c) { return c.Kind; })
   };
 }
 
@@ -3971,19 +4315,15 @@ function exportPendingCheckSubmissions_(opts) {
   try {
     try { /* ダッシュボードからはトリガー一覧を触らない（権限待ちで固まる） */ } catch (eTrig) { /* ignore */ }
     const runtime = prepareCheckBooksRuntime_({ includeTaskColumns: true });
-    const students = runtime.students;
     const assignments = runtime.assignments;
     const asgById = {};
     assignments.forEach(function (a) { asgById[a.Assignment_ID] = a; });
-    const sheetFor = runtime.sheetFor;
 
     const ssApp = openAppSpreadsheet_();
     const subSheet = ssApp.getSheetByName('assignment_submissions');
     migrateSheetHeaders_(subSheet, SUBMISSION_HEADERS);
     const exportedCol = SUBMISSION_HEADERS.indexOf('Check_Exported') + 1;
     const subs = sheetRowsToObjects_(subSheet);
-    const studentByAccount = {};
-    students.forEach(function (st) { studentByAccount[st.account] = st; });
 
     let exported = 0;
     let skipped = 0;
@@ -4001,22 +4341,21 @@ function exportPendingCheckSubmissions_(opts) {
         continue;
       }
       const account = String(row.Account || '').toLowerCase();
-      const st = studentByAccount[account];
+      const st = runtime.studentByAccount[account];
       if (!st) continue;
-      const kinds = kindsForAssignment_(asg);
-      let okAll = true;
-      let wroteAny = false;
-      kinds.forEach(function (kind) {
-        if (runtime.kinds.indexOf(kind) < 0) return;
-        wroteAny = true;
-        const sh = sheetFor(kind);
-        const idMap = ensureCheckRosterRows_(sh, students);
-        const studentRow = idMap[account];
-        const col = ensureCheckTaskColumn_(sh, asg);
-        const val = checkValueForKind_(kind, row);
-        if (!writeCheckCellIfEmpty_(sh, studentRow, col, val)) okAll = false;
+      const dests = runtime.destinations.filter(function (d) {
+        return kindsForAssignment_(asg).indexOf(d.cfg.Kind) >= 0
+          && studentMatchesPrerequisite_(st, d.cfg.Prerequisite_Column, d.cfg.Prerequisite_Value);
       });
-      if (!wroteAny) continue;
+      if (!dests.length) continue;
+      let okAll = true;
+      dests.forEach(function (d) {
+        const idMap = ensureCheckRosterRows_(d.sheet, d.students);
+        const studentRow = idMap[account];
+        const col = ensureCheckTaskColumn_(d.sheet, asg);
+        const val = checkValueForKind_(d.cfg.Kind, row);
+        if (!writeCheckCellIfEmpty_(d.sheet, studentRow, col, val)) okAll = false;
+      });
       if (okAll && exportedCol > 0) {
         subSheet.getRange(row._row, exportedCol).setValue(1);
         exported++;
@@ -4034,6 +4373,7 @@ function exportPendingCheckSubmissions_(opts) {
         pendingLeft: pendingLeft,
         gradeSheets: summary.gradeSheets,
         studentCount: summary.studentCount,
+        destinations: summary.destinations,
         urls: summary.urls
       }
     };
@@ -4045,29 +4385,24 @@ function exportPendingCheckSubmissions_(opts) {
 }
 
 function readCheckSheetSettings_() {
-  const props = PropertiesService.getScriptProperties();
-  function bookInfo_(kind) {
-    const id = String(props.getProperty(checkPropKeyForKind_(kind)) || '').trim();
-    if (!id) return { id: '', url: '', title: '' };
+  const aggregations = listCheckAggregations_({ activeOnly: false }).map(function (cfg) {
+    const id = String(cfg.Spreadsheet_ID || '').trim();
     return {
-      id: id,
-      url: 'https://docs.google.com/spreadsheets/d/' + id + '/edit',
-      title: '開く'
+      Config_ID: cfg.Config_ID,
+      Label: cfg.Label,
+      Kind: cfg.Kind,
+      Spreadsheet_ID: id,
+      Prerequisite_Column: cfg.Prerequisite_Column,
+      Prerequisite_Value: cfg.Prerequisite_Value,
+      Sheet_Name: cfg.Sheet_Name,
+      Active: cfg.Active,
+      url: id ? ('https://docs.google.com/spreadsheets/d/' + id + '/edit') : '',
+      title: cfg.Label
     };
-  }
+  });
   return {
     year: getCheckYear_(),
-    assignment: bookInfo_('assignment'),
-    quiz_pf: bookInfo_('quiz_pf'),
-    quiz_score: bookInfo_('quiz_score'),
-    scopeGrade: String(props.getProperty(PROP.CHECK_SCOPE_GRADE) || '').trim(),
-    scopeClass: String(props.getProperty(PROP.CHECK_SCOPE_CLASS) || '').trim(),
-    scopeNumber: String(props.getProperty(PROP.CHECK_SCOPE_NUMBER) || '').trim(),
-    scopeAttr1: String(props.getProperty(PROP.CHECK_SCOPE_ATTR1) || '').trim(),
-    scopeAttr2: String(props.getProperty(PROP.CHECK_SCOPE_ATTR2) || '').trim(),
-    scopeAttr3: String(props.getProperty(PROP.CHECK_SCOPE_ATTR3) || '').trim(),
-    scopeAttr4: String(props.getProperty(PROP.CHECK_SCOPE_ATTR4) || '').trim(),
-    scopeAttr5: String(props.getProperty(PROP.CHECK_SCOPE_ATTR5) || '').trim(),
+    aggregations: aggregations,
     triggerInstalled: null
   };
 }
@@ -4094,53 +4429,12 @@ function apiAdminSaveCheckSheetSettings(settings) {
     const props = PropertiesService.getScriptProperties();
     const year = String(settings.year || '').trim();
     if (year) props.setProperty(PROP.CHECK_YEAR, year);
-    function saveId_(key, raw) {
-      const id = String(raw || '').trim();
-      if (id) props.setProperty(key, id);
-      else props.deleteProperty(key);
-    }
-    if (Object.prototype.hasOwnProperty.call(settings, 'assignmentId')) {
-      saveId_(PROP.CHECK_ASSIGNMENT_SS_ID, settings.assignmentId);
-    }
-    if (Object.prototype.hasOwnProperty.call(settings, 'quizPfId')) {
-      saveId_(PROP.CHECK_QUIZ_PF_SS_ID, settings.quizPfId);
-    }
-    if (Object.prototype.hasOwnProperty.call(settings, 'quizScoreId')) {
-      saveId_(PROP.CHECK_QUIZ_SCORE_SS_ID, settings.quizScoreId);
-    }
-    function saveScope_(key, raw) {
-      const v = String(raw == null ? '' : raw).trim();
-      if (v) props.setProperty(key, v);
-      else props.deleteProperty(key);
-    }
-    if (Object.prototype.hasOwnProperty.call(settings, 'scopeGrade')) {
-      saveScope_(PROP.CHECK_SCOPE_GRADE, settings.scopeGrade);
-    }
-    if (Object.prototype.hasOwnProperty.call(settings, 'scopeClass')) {
-      saveScope_(PROP.CHECK_SCOPE_CLASS, settings.scopeClass);
-    }
-    if (Object.prototype.hasOwnProperty.call(settings, 'scopeNumber')) {
-      saveScope_(PROP.CHECK_SCOPE_NUMBER, settings.scopeNumber);
-    }
-    try { props.deleteProperty('CHECK_GRADE_ID_DIGIT'); } catch (eDel) { /* 廃止済み設定 */ }
-    if (Object.prototype.hasOwnProperty.call(settings, 'scopeAttr1')) {
-      saveScope_(PROP.CHECK_SCOPE_ATTR1, settings.scopeAttr1);
-    }
-    if (Object.prototype.hasOwnProperty.call(settings, 'scopeAttr2')) {
-      saveScope_(PROP.CHECK_SCOPE_ATTR2, settings.scopeAttr2);
-    }
-    if (Object.prototype.hasOwnProperty.call(settings, 'scopeAttr3')) {
-      saveScope_(PROP.CHECK_SCOPE_ATTR3, settings.scopeAttr3);
-    }
-    if (Object.prototype.hasOwnProperty.call(settings, 'scopeAttr4')) {
-      saveScope_(PROP.CHECK_SCOPE_ATTR4, settings.scopeAttr4);
-    }
-    if (Object.prototype.hasOwnProperty.call(settings, 'scopeAttr5')) {
-      saveScope_(PROP.CHECK_SCOPE_ATTR5, settings.scopeAttr5);
+    if (Object.prototype.hasOwnProperty.call(settings, 'aggregations')) {
+      saveCheckAggregationsList_(settings.aggregations);
     }
     let prepared = null;
     try {
-      prepared = prepareCheckBooksStructure_({ includeTaskColumns: false });
+      prepared = prepareCheckBooksStructure_({ includeTaskColumns: true });
     } catch (ePrep) {
       return {
         status: 'error',
@@ -4149,24 +4443,16 @@ function apiAdminSaveCheckSheetSettings(settings) {
     }
     const data = readCheckSheetSettings_();
     data.studentCount = prepared.studentCount;
-    data.gradeSheets = prepared.gradeSheets;
-    data.inputSheets = prepared.inputSheets;
+    data.destinations = prepared.destinations;
     data.assignmentCount = prepared.assignmentCount;
-    if (prepared.urls) {
-      ['assignment', 'quiz_pf', 'quiz_score'].forEach(function (k) {
-        if (prepared.urls[k] && data[k]) data[k].url = prepared.urls[k];
-      });
-    }
-    const labels = { assignment: '提出物', quiz_pf: '小テスト合否', quiz_score: '小テスト点数' };
-    const sheetBits = (prepared.kinds || []).map(function (k) {
-      return (labels[k] || k) + '「' + (prepared.inputSheets[k] || CHECK_DEFAULT_INPUT_SHEET) + '」';
+    const bits = (prepared.destinations || []).map(function (d) {
+      return '「' + (d.Sheet_Name || '') + '」' + (d.studentCount != null ? d.studentCount + '人' : '');
     });
-    let message = '設定を保存し、' + (sheetBits.join('・') || '点検票') +
-      ' に対象 ' + prepared.studentCount + ' 人の名簿を整備しました。';
-    if (!prepared.studentCount) {
-      message += ' 0人です。学年・組・番号・attribute が whitelist と一致しているか確認してください。';
+    let message = '';
+    if (!(prepared.destinations || []).length) {
+      message = '設定を保存しました。集約シートがまだありません。前提列と値を追加してから、もう一度整備してください。';
     } else {
-      message += ' 課題列と提出結果は「今すぐ転記」または時間トリガーで追記します。';
+      message = '設定を保存し、' + bits.join('・') + ' を整備しました（空欄＝対象・未提出、○＝提出、■＝非対象）。';
     }
     return {
       status: 'success',
