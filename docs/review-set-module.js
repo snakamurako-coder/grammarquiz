@@ -36,11 +36,12 @@ const ReviewSetModule = (() => {
 
   function classifyBucket(state, nowSec) {
     nowSec = nowSec || Math.floor(Date.now() / 1000);
-    if (!state) return 'first';
+    if (!state) return null;
     if (isReviewCleared_(state)) return null;
     const attempts = parseInt(state.Total_Attempts, 10) || 0;
     const firstSeen = parseInt(state.First_Seen, 10) || 0;
-    if (attempts === 0 || !firstSeen) return 'first';
+    // 復習は「一度学習した語」だけ。未学習（未受験・First_Seenなし）はどのセットにも入れない。
+    if (attempts === 0 || !firstSeen) return null;
 
     const ageDays = ageDaysSinceFirstSeen_(state, nowSec);
     if (ageDays == null || ageDays < 1) return null;

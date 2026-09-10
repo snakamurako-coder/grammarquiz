@@ -94,6 +94,7 @@ button:active { opacity: 0.9; }
 }
 .vocab-card-target-panel { margin-bottom: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px; }
 .vocab-card-target-btn { width: 100%; min-height: 52px; padding: 16px 12px; font-size: 1.05em; font-weight: bold; margin-bottom: 10px; }
+.btn-primary.vocab-card-target-btn { font-size: 1.05em; }
 .vocab-target-source-tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .vocab-target-source-tabs label { flex: 1; min-width: 140px; }
 .vocab-target-source-switch { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; flex-wrap: wrap; }
@@ -1753,7 +1754,7 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
 
       <div class="setting-section" id="vocab-review-section" data-vocab-mode-panel="review" style="display:none;">
         <div class="section-title">復習単語セット</div>
-        <p class="filter-axis-hint" style="margin:0 0 10px;">初回学習からの経過日数で分類します。今日学習した語は翌日以降に表示されます。3回連続正解した語は復習セットから除外されます（通常の単語クイズ・SRSには影響しません）。<strong>出題形式・解答方法は「単語クイズ」タブの設定に準じます。</strong></p>
+        <p class="filter-axis-hint" style="margin:0 0 10px;">一度でも学習した語だけを、初回学習からの経過日数で分類します。未学習の語は含まれません。今日学習した語は翌日以降に表示されます。3回連続正解した語は復習セットから除外されます（通常の単語クイズ・SRSには影響しません）。<strong>出題形式・解答方法は「単語クイズ」タブの設定に準じます。</strong></p>
         <div id="vocab-review-set-list" class="review-set-list" aria-live="polite"></div>
       </div>
     </div>
@@ -7668,6 +7669,7 @@ const VocabSettingsModule = (() => {
     }
     let html = '';
     ReviewSetModule.BUCKETS.forEach(function (bucket) {
+      if (bucket.isFirst) return;
       const n = counts && counts[bucket.id] != null ? counts[bucket.id] : 0;
       const disabled = n === 0;
       html += '<div class="review-set-row">';
