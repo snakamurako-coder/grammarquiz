@@ -401,6 +401,12 @@ const VocabCardModule = (() => {
     keyHandler = function (e) {
       if (!document.body.classList.contains('vocab-card-active')) return;
       if (el_('vc-completion-screen').style.display === 'flex') return;
+      const modal = el_('vc-settings-modal');
+      if (modal && modal.style.display === 'flex') return;
+      if (e.repeat || e.isComposing || e.keyCode === 229) return;
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const tag = (e.target && e.target.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
       if (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'Space') {
         e.preventDefault();
         flipCard_();
@@ -410,6 +416,12 @@ const VocabCardModule = (() => {
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
         nextCard_();
+      } else if (e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z') {
+        e.preventDefault();
+        markCard_(true);
+      } else if (e.code === 'KeyX' || e.key === 'x' || e.key === 'X') {
+        e.preventDefault();
+        markCard_(false);
       }
     };
     document.addEventListener('keydown', keyHandler);

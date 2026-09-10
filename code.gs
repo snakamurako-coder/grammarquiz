@@ -1171,7 +1171,6 @@ function ensureEnvironment() {
     ensureVocabularyResources_();
     syncWhitelistCacheIfStale_();
     syncSampleQuestionBooksIfNeeded_();
-    try { ensureCheckExportTrigger_(); } catch (e) { /* トリガー権限が無い実行文脈では無視 */ }
     return props.getProperties();
   }
   return setupEnvironmentWithLock_(false);
@@ -1267,7 +1266,6 @@ function setupEnvironment_(force) {
     props.setProperty(PROP.PAGES_URL, DEFAULT_PAGES_URL);
     created.push('PAGES_URL');
   }
-  try { ensureCheckExportTrigger_(); } catch (e) { /* セットアップ時点でトリガー不可でも続行 */ }
 
   const result = {
     parentFolderId: parentFolder.getId(),
@@ -2459,7 +2457,6 @@ const SUBMISSION_HEADERS = [
 const CHECK_FOLDER_NAME = 'DigitalDrill_点検票';
 const CHECK_HEADER_ROWS = 5;
 const CHECK_ROSTER_COLS = 7;
-const CHECK_EXPORT_TRIGGER_FN = 'syncCheckSheetsPending';
 const CHECK_EXPORT_BATCH = 80;
 const CHECK_DEFAULT_INPUT_SHEET = '名簿＠入力';
 const CHECK_AGGREGATION_HEADERS = [
@@ -3447,13 +3444,11 @@ function getCheckYear_() {
 
 function checkBookFileName_(kind, year) {
   if (kind === 'quiz_pf') return '【' + year + '】デジドリ小テスト点検票(合否)';
-  if (kind === 'quiz_score') return '【' + year + '】デジドリ小テスト点検票(点数)';
   return '【' + year + '】デジドリ課題点検票';
 }
 
 function checkPropKeyForKind_(kind) {
   if (kind === 'quiz_pf') return PROP.CHECK_QUIZ_PF_SS_ID;
-  if (kind === 'quiz_score') return PROP.CHECK_QUIZ_SCORE_SS_ID;
   return PROP.CHECK_ASSIGNMENT_SS_ID;
 }
 
@@ -3674,7 +3669,7 @@ function checkAggregationLabel_(cfg) {
   const col = normalizeCheckPrereqColumn_(cfg.Prerequisite_Column);
   const colLabel = CHECK_PREREQ_COLUMNS[col] || cfg.Prerequisite_Column || '全員';
   const val = String(cfg.Prerequisite_Value || '').trim();
-  const kindLabels = { assignment: '提出物', quiz_pf: '小テスト合否', quiz_score: '小テスト点数' };
+  const kindLabels = { assignment: '提出物', quiz_pf: '小テスト合否' };
   const kind = kindLabels[cfg.Kind] || cfg.Kind;
   if (!col || !val) return kind + '（全員）';
   return kind + ' / ' + colLabel + '=' + val;
@@ -3716,8 +3711,7 @@ function seedCheckAggregationsFromLegacy_(ss) {
   }
   const seeds = [
     { kind: 'assignment', id: String(props.getProperty(PROP.CHECK_ASSIGNMENT_SS_ID) || '').trim() },
-    { kind: 'quiz_pf', id: String(props.getProperty(PROP.CHECK_QUIZ_PF_SS_ID) || '').trim() },
-    { kind: 'quiz_score', id: String(props.getProperty(PROP.CHECK_QUIZ_SCORE_SS_ID) || '').trim() }
+    { kind: 'quiz_pf', id: String(props.getProperty(PROP.CHECK_QUIZ_PF_SS_ID) || '').trim() }
   ];
   const now = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
   seeds.forEach(function (s) {
@@ -3744,7 +3738,7 @@ function listCheckAggregations_(opts) {
     || ensureSheetWithHeaders_(ss, 'check_aggregations', CHECK_AGGREGATION_HEADERS);
   const rows = sheetRowsToObjects_(sheet).map(normalizeCheckAggregationRow_);
   if (opts.activeOnly) {
-    return rows.filter(function (c) { return c.Active === 1 && c.Config_ID; });
+    return rows.filter(function (c) { return c.Active === 1 && c.Config_ID && c.Kind !== 'quiz_score'; });
   }
   return rows.filter(function (c) { return c.Config_ID; });
 }
@@ -3873,7 +3867,6 @@ function applyCheckSheetLayout_(sheet, sheetName, bookType) {
 
   let a1Val = '提出物';
   if (bookType === 'quiz_pf') a1Val = '小テスト(合否)';
-  if (bookType === 'quiz_score') a1Val = '小テスト(点数)';
 
   const headers = [
     ['組', '', '', '', '', '', '通し番号→'],
@@ -3884,24 +3877,14 @@ function applyCheckSheetLayout_(sheet, sheetName, bookType) {
   ];
   sheet.getRange(1, 1, CHECK_HEADER_ROWS, CHECK_ROSTER_COLS).setValues(headers);
   sheet.getRange('A1').setValue(a1Val);
-  if (bookType === 'quiz_pf' || bookType === 'quiz_score') {
-    sheet.getRange('B1').setValue(80);
-    sheet.getRange('C1').setValue('点合格');
-  }
+  sheet.getRange('B1').clearContent();
+  sheet.getRange('C1').clearContent();
 
   const range = sheet.getRange('H6:AZ205');
   const rules = [
     SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('■').setBackground('#333333').setFontColor('#ffffff').setRanges([range]).build()
   ];
-  if (bookType === 'assignment') {
-    rules.push(
-      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('○').setBackground('#b7e1cd').setFontColor('#0f5132').setRanges([range]).build(),
-      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('提').setBackground('#b7e1cd').setFontColor('#0f5132').setRanges([range]).build(),
-      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('未').setBackground('#f4c7c3').setFontColor('#842029').setRanges([range]).build(),
-      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('再').setBackground('#fce8b2').setFontColor('#664d03').setRanges([range]).build(),
-      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('休').setBackground('#d9d2e9').setFontColor('#351c75').setRanges([range]).build()
-    );
-  } else if (bookType === 'quiz_pf') {
+  if (bookType === 'quiz_pf') {
     rules.push(
       SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('○').setBackground('#d1e7dd').setFontColor('#0f5132').setRanges([range]).build(),
       SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('×').setBackground('#f8d7da').setFontColor('#842029').setRanges([range]).build(),
@@ -3909,9 +3892,11 @@ function applyCheckSheetLayout_(sheet, sheetName, bookType) {
     );
   } else {
     rules.push(
-      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('休').setBackground('#d9d2e9').setFontColor('#351c75').setRanges([range]).build(),
-      SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=AND(ISNUMBER(H6), H6>=$B$1)').setBackground('#d1e7dd').setFontColor('#0f5132').setRanges([range]).build(),
-      SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=AND(ISNUMBER(H6), H6<$B$1)').setBackground('#f8d7da').setFontColor('#842029').setRanges([range]).build()
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('○').setBackground('#b7e1cd').setFontColor('#0f5132').setRanges([range]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('提').setBackground('#b7e1cd').setFontColor('#0f5132').setRanges([range]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('未').setBackground('#f4c7c3').setFontColor('#842029').setRanges([range]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('再').setBackground('#fce8b2').setFontColor('#664d03').setRanges([range]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('休').setBackground('#d9d2e9').setFontColor('#351c75').setRanges([range]).build()
     );
   }
   sheet.setConditionalFormatRules(rules);
@@ -3947,6 +3932,12 @@ function ensureCheckInputSheet_(ss, sheetName, bookType) {
     applyCheckSheetLayout_(sheet, sheetName, bookType);
   } else {
     try { sheet.getRange(3, CHECK_ROSTER_COLS).setValue('提出物ID→'); } catch (eG3) { /* ignore */ }
+    try {
+      if (String(sheet.getRange('C1').getValue() || '').trim() === '点合格') {
+        sheet.getRange('B1').clearContent();
+        sheet.getRange('C1').clearContent();
+      }
+    } catch (eBC) { /* ignore */ }
   }
   return sheet;
 }
@@ -3956,7 +3947,7 @@ function checkRosterFormulaRate_(rowIndex) {
 }
 
 function checkRosterFormulaCount_(rowIndex) {
-  return '=COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',"○")+COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',"提")+COUNT(H' + rowIndex + ':AZ' + rowIndex + ')';
+  return '=COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',"○")+COUNTIF(H' + rowIndex + ':AZ' + rowIndex + ',"提")';
 }
 
 function ensureCheckRosterRows_(sheet, students) {
@@ -4180,15 +4171,11 @@ function applyCheckTargetMarks_(sheet, col, asg, students, idMap) {
 }
 
 function checkValueForKind_(kind, row) {
-  if (kind === 'quiz_score') {
-    const n = parseFloat(row.Score);
-    return isNaN(n) ? '' : n;
-  }
   return '○';
 }
 
 function kindsForAssignment_(asg) {
-  if (asg && asg.Kind === 'quiz') return ['quiz_pf', 'quiz_score'];
+  if (asg && asg.Kind === 'quiz') return ['quiz_pf'];
   return ['assignment'];
 }
 
@@ -4197,7 +4184,6 @@ function configuredCheckBookKinds_() {
   const kinds = [];
   if (String(props.getProperty(PROP.CHECK_ASSIGNMENT_SS_ID) || '').trim()) kinds.push('assignment');
   if (String(props.getProperty(PROP.CHECK_QUIZ_PF_SS_ID) || '').trim()) kinds.push('quiz_pf');
-  if (String(props.getProperty(PROP.CHECK_QUIZ_SCORE_SS_ID) || '').trim()) kinds.push('quiz_score');
   if (!kinds.length) kinds.push('assignment');
   return kinds;
 }
@@ -4318,25 +4304,7 @@ function prepareCheckBooksStructure_(opts) {
   return summarizeCheckPrepare_(prepareCheckBooksRuntime_(opts));
 }
 
-function ensureCheckExportTrigger_() {
-  const cache = CacheService.getScriptCache();
-  if (cache.get('check_export_trigger_ok')) return { installed: true, cached: true };
-  const triggers = ScriptApp.getProjectTriggers();
-  let found = false;
-  for (let i = 0; i < triggers.length; i++) {
-    if (triggers[i].getHandlerFunction() === CHECK_EXPORT_TRIGGER_FN) {
-      found = true;
-      break;
-    }
-  }
-  if (!found) {
-    ScriptApp.newTrigger(CHECK_EXPORT_TRIGGER_FN).timeBased().everyMinutes(10).create();
-  }
-  cache.put('check_export_trigger_ok', '1', 21600);
-  return { installed: true, created: !found };
-}
-
-/** 時間トリガー入口：正本の未転記提出だけ点検票へ追記 */
+/** 時間トリガー入口：正本の未転記提出だけ点検票へ追記（トリガーは手動で定時設定） */
 function syncCheckSheetsPending() {
   return exportPendingCheckSubmissions_({ source: 'trigger' });
 }

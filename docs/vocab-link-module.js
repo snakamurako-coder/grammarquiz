@@ -488,8 +488,8 @@ const VocabLinkModule = (function () {
         + '<div class="vl-word-stats">' + wrongBadge + ' | 思考: ' + stat.thinkTime.toFixed(2) + 's</div>'
         + '</div>'
         + '<div class="vl-rating-btns">'
-        + '<button type="button" class="vl-btn-rate' + (stat.rating === 'good' ? ' active' : '') + '" data-rate-id="' + escapeHtml_(item.id) + '" data-rate-type="good">👍</button>'
-        + '<button type="button" class="vl-btn-rate' + (stat.rating === 'bad' ? ' active' : '') + '" data-rate-id="' + escapeHtml_(item.id) + '" data-rate-type="bad">😱</button>'
+        + '<button type="button" class="vl-btn-rate' + (stat.rating === 'good' ? ' active' : '') + '" data-rate-id="' + escapeHtml_(item.id) + '" data-rate-type="good" title="覚えている（Z）">👍<span class="mark-shortcut-hint">Zキー⌨</span></button>'
+        + '<button type="button" class="vl-btn-rate' + (stat.rating === 'bad' ? ' active' : '') + '" data-rate-id="' + escapeHtml_(item.id) + '" data-rate-type="bad" title="まだ覚えていない（X）">😱<span class="mark-shortcut-hint">Xキー⌨</span></button>'
         + '</div>';
 
       row.querySelectorAll('.vl-btn-rate').forEach(function (btn) {
@@ -630,6 +630,28 @@ const VocabLinkModule = (function () {
 
     const resultTopBtn = el_('vl-result-top-btn');
     if (resultTopBtn) resultTopBtn.addEventListener('click', showStartScreen_);
+
+    document.addEventListener('keydown', function (e) {
+      if (e.repeat || e.isComposing || e.keyCode === 229) return;
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const result = el_('vl-result-screen');
+      if (!result || result.style.display !== 'flex') return;
+      const tag = (e.target && e.target.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
+      const isKnown = (e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z');
+      const isUnknown = (e.code === 'KeyX' || e.key === 'x' || e.key === 'X');
+      if (!isKnown && !isUnknown) return;
+      const list = el_('vl-result-list');
+      if (!list) return;
+      const focusedRow = e.target && e.target.closest ? e.target.closest('.vl-result-item') : null;
+      const hoveredRow = list.querySelector('.vl-result-item:hover');
+      const row = focusedRow || hoveredRow;
+      if (!row) return;
+      const btn = row.querySelector(isKnown ? '.vl-btn-rate[data-rate-type="good"]' : '.vl-btn-rate[data-rate-type="bad"]');
+      if (!btn) return;
+      e.preventDefault();
+      toggleRating_(btn.getAttribute('data-rate-id'), btn.getAttribute('data-rate-type'), btn);
+    });
   }
 
   function getLinkQuestionCount_() {

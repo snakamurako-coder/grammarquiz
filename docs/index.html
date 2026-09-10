@@ -195,12 +195,28 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .result-review-explanation { background: #fff8e1; border-left: 3px solid #ffb300; padding: 10px 12px; border-radius: 8px; margin-top: 8px; font-size: 0.88em; line-height: 1.55; color: var(--c-text); }
 .result-review-explanation .result-review-grammar-area { font-weight: bold; display: block; margin-bottom: 4px; color: var(--c-text-sub); font-size: 0.92em; }
 .result-vocab-mark {
-  width: 36px; height: 36px; font-size: 18px; border-radius: 8px; border: 2px solid #e2e8f0;
-  background: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
+  position: relative;
+  min-width: 44px; height: 46px; font-size: 18px; border-radius: 8px; border: 2px solid #e2e8f0;
+  background: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  padding: 0 2px 12px; line-height: 1;
 }
 .result-vocab-mark.known.active { background: #f0fff4; border-color: #9ae6b4; }
 .result-vocab-mark.unknown.active { background: #fff5f5; border-color: #feb2b2; }
 .result-vocab-mark:active { transform: scale(0.95); }
+.mark-shortcut-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 3px;
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1;
+  color: rgba(45, 55, 72, 0.42);
+  pointer-events: none;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  text-align: center;
+}
 
 .btn-primary:active { background-color: var(--c-primary-dark); transform: scale(0.98); }
 .btn-primary:disabled { background-color: #b0bec5; }
@@ -626,9 +642,12 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
 .vocab-card-nav-btn:disabled { opacity: 0.3; }
 .vocab-card-action-btns { display: flex; gap: 12px; width: 100%; }
 .vocab-card-action-btn {
-  flex: 1; height: 60px; border: none; border-radius: 14px; font-size: 28px; cursor: pointer;
-  display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+  position: relative;
+  flex: 1; height: 64px; border: none; border-radius: 14px; font-size: 28px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.05); padding: 0 0 14px;
 }
+.vocab-card-action-btn .mark-shortcut-hint { font-size: 10px; color: rgba(45, 55, 72, 0.4); bottom: 5px; }
 .vocab-card-action-btn:active { transform: scale(0.95); }
 .vocab-card-action-btn.unknown { background: #fff5f5; border: 2px solid #feb2b2; }
 .vocab-card-action-btn.known { background: #f0fff4; border: 2px solid #9ae6b4; }
@@ -784,10 +803,12 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
 .vl-badge-wrong { color: #ef4444; font-weight: bold; }
 .vl-rating-btns { display: flex; gap: 8px; flex-shrink: 0; }
 .vl-btn-rate {
+  position: relative;
   background: #334155; border: 1px solid #475569; border-radius: 8px;
-  padding: 6px 12px; font-size: 1.2rem; cursor: pointer; opacity: 0.4;
-  min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center;
+  padding: 0 6px 12px; font-size: 1.2rem; cursor: pointer; opacity: 0.4;
+  min-width: 48px; min-height: 50px; display: flex; align-items: center; justify-content: center;
 }
+.vl-btn-rate .mark-shortcut-hint { color: rgba(248, 250, 252, 0.45); font-size: 8px; bottom: 4px; }
 .vl-btn-rate.active { opacity: 1; background: #475569; border-color: #38bdf8; transform: scale(1.05); }
 .vl-action-row {
   flex-shrink: 0; display: flex; gap: 8px; align-items: center; justify-content: center;
@@ -1543,7 +1564,7 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
       <div class="setting-section" id="vocab-card-section" data-vocab-mode-panel="card">
         <button type="button" id="vocab-card-start-all-btn" class="btn-primary vocab-card-target-btn">モードA：全単語に取り組む（上記の範囲）</button>
         <button type="button" id="vocab-card-start-targeted-btn" class="btn-secondary vocab-card-target-btn">モードB：特定語に取り組む（下記の設定）</button>
-        <p class="filter-axis-hint" style="margin:12px 0;">フラッシュカードで語・句・例文をめくり、👍/😫 で仕分けます。一巡後に学習状態をまとめて登録します。</p>
+        <p class="filter-axis-hint" style="margin:12px 0;">フラッシュカードで語・句・例文をめくり、👍/😫 で仕分けます（キーボード: Z＝👍、X＝😫）。一巡後に学習状態をまとめて登録します。</p>
         <div class="vocab-card-target-panel" id="vocab-card-target-panel">
           <div class="form-group" style="margin-bottom:10px;">
             <label>特定語の選び方</label>
@@ -2175,8 +2196,8 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
         <button type="button" class="vocab-card-nav-btn" id="vc-next-btn">次の単語 →</button>
       </div>
       <div class="vocab-card-action-btns" id="vc-action-btns">
-        <button type="button" class="vocab-card-action-btn unknown" id="vc-mark-unknown" title="まだ覚えていない">😫</button>
-        <button type="button" class="vocab-card-action-btn known" id="vc-mark-known" title="覚えている">👍</button>
+        <button type="button" class="vocab-card-action-btn unknown" id="vc-mark-unknown" title="まだ覚えていない（X）">😫<span class="mark-shortcut-hint">Xキー⌨</span></button>
+        <button type="button" class="vocab-card-action-btn known" id="vc-mark-known" title="覚えている（Z）">👍<span class="mark-shortcut-hint">Zキー⌨</span></button>
       </div>
       <div class="vocab-card-completion" id="vc-completion-screen">
         <h2 style="font-size:22px;color:#2d3748;">🎉 一巡完了！</h2>
@@ -11113,8 +11134,8 @@ function buildVocabResultMarkButtons_(wordId) {
   const mark = vocabResultMarks_[wordId];
   const safeId = escapeHtml_(wordId);
   let html = '<div class="result-review-mark-actions">';
-  html += '<button type="button" class="result-vocab-mark unknown' + (mark === 'unknown' ? ' active' : '') + '" data-word-id="' + safeId + '" data-mark="unknown" title="まだ覚えていない">😫</button>';
-  html += '<button type="button" class="result-vocab-mark known' + (mark === 'known' ? ' active' : '') + '" data-word-id="' + safeId + '" data-mark="known" title="覚えている">👍</button>';
+  html += '<button type="button" class="result-vocab-mark unknown' + (mark === 'unknown' ? ' active' : '') + '" data-word-id="' + safeId + '" data-mark="unknown" title="まだ覚えていない（X）">😫<span class="mark-shortcut-hint">Xキー⌨</span></button>';
+  html += '<button type="button" class="result-vocab-mark known' + (mark === 'known' ? ' active' : '') + '" data-word-id="' + safeId + '" data-mark="known" title="覚えている（Z）">👍<span class="mark-shortcut-hint">Zキー⌨</span></button>';
   html += '</div>';
   return html;
 }
@@ -11146,7 +11167,7 @@ function renderResultReviewList_() {
   }
   let html = '<div class="section-title">出題と回答</div>';
   if (currentAppMode === 'vocab') {
-    html += '<p class="filter-axis-hint" style="margin-top:0;">各語の 👍 / 😫 で学習状態を登録できます。</p>';
+    html += '<p class="filter-axis-hint" style="margin-top:0;">各語の 👍 / 😫 で学習状態を登録できます（キーボード: Z＝👍、X＝😫。行にフォーカスまたはポインタを合わせてください）。</p>';
   }
   sessionAnswerLog.forEach(function (item, i) {
     const statusClass = item.isCorrect
@@ -11604,6 +11625,28 @@ function showResultScreen() {
     const mark = btn.getAttribute('data-mark');
     if (!wordId || !mark) return;
     applyVocabResultMark_(wordId, mark === 'known');
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.repeat || e.isComposing || e.keyCode === 229) return;
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const result = document.getElementById('result-screen');
+    if (!result || result.style.display === 'none') return;
+    if (document.body.classList.contains('vocab-card-active')) return;
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
+    const isKnown = (e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z');
+    const isUnknown = (e.code === 'KeyX' || e.key === 'x' || e.key === 'X');
+    if (!isKnown && !isUnknown) return;
+    const focusedRow = e.target && e.target.closest ? e.target.closest('.result-review-item') : null;
+    const hoveredRow = container.querySelector('.result-review-item:hover');
+    const row = focusedRow || hoveredRow;
+    if (!row) return;
+    const btn = row.querySelector(isKnown ? '.result-vocab-mark.known' : '.result-vocab-mark.unknown');
+    if (!btn) return;
+    e.preventDefault();
+    const wordId = btn.getAttribute('data-word-id');
+    if (!wordId) return;
+    applyVocabResultMark_(wordId, isKnown);
   });
 })();
 
