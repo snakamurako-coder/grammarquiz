@@ -50,20 +50,75 @@ th{background:#f5f5f5}
 .sub-panel{margin-top:8px;padding-top:8px;border-top:1px dashed #ddd}
 .points-row{display:flex;gap:10px;flex-wrap:wrap}
 .points-row .form-group{flex:1;min-width:120px;margin-bottom:0}
+.live-dash-section { padding: 12px; --live-list-pt: 18; }
+.live-dash-title { font-size: 1.05rem; font-weight: bold; margin: 0; color: #f8fafc; }
 .live-dash-pin {
-  font-size: clamp(2.4rem, 10vw, 4.2rem);
+  font-size: clamp(1.5rem, 5vw, 2.4rem);
   font-weight: bold;
-  letter-spacing: 0.22em;
-  color: #1565c0;
-  text-align: center;
-  padding: 12px 8px;
-  background: #e3f2fd;
-  border-radius: 12px;
-  margin: 8px 0;
+  letter-spacing: 0.18em;
+  color: #38bdf8;
+  line-height: 1;
+  margin: 0;
+  padding: 0;
+  background: transparent;
 }
-.live-dash-board { display: none; margin-top: 12px; }
+.live-dash-board { display: none; }
 .live-dash-board.is-open { display: block; }
-.live-dash-meta { color: #546e7a; font-size: .92em; text-align: center; }
+.live-dash-setup.is-hidden { display: none; }
+.live-dash-meta { color: #94a3b8; font-size: .85em; }
+.live-dash-timer { font-size: .95rem; font-weight: bold; color: #d97706; }
+body.live-board-open { max-width: none; }
+body.live-board-open > .header-title,
+body.live-board-open > p { display: none; }
+body.live-board-open > .setting-section:not(.live-dash-section) { display: none; }
+body.live-board-open .live-dash-section {
+  background: #0f172a; color: #f8fafc; padding: 0; overflow: hidden;
+  min-height: calc(100vh - 16px);
+}
+.live-dash-header-band {
+  background: #111827;
+  border-bottom: 1px solid #334155;
+  padding: 8px 12px 6px;
+}
+.live-dash-header-row {
+  display: flex;
+  align-items: center;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+}
+.live-dash-settings {
+  color: #cbd5e1; font-size: 0.8rem; line-height: 1.35; white-space: pre-wrap; padding: 4px 0 0;
+}
+.live-dash-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.live-dash-actions .btn-small { min-height: 34px; }
+.live-dash-body { padding: 8px 12px 12px; overflow: auto; }
+.live-board-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 0; }
+.live-board-tab {
+  border: 1px solid #475569; background: #1e293b; color: #e2e8f0; border-radius: 8px;
+  padding: 4px 12px; font-weight: 600; cursor: pointer; font-size: 0.88rem;
+}
+.live-board-tab.active { background: #38bdf8; color: #0f172a; border-color: #38bdf8; }
+.live-board-table {
+  width: 100%; border-collapse: collapse;
+  font-size: calc(var(--live-list-pt, 18) * 1pt);
+}
+.live-board-table th, .live-board-table td {
+  border-bottom: 1px solid #334155; padding: 0.28em 0.45em; text-align: left;
+  font-size: inherit; line-height: 1.25; color: #f8fafc; background: transparent;
+}
+.live-board-table th { color: #94a3b8; font-weight: 600; font-size: 0.72em; background: transparent; }
+.live-board-font-ctrl {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.82rem; color: #cbd5e1;
+}
+.live-board-font-ctrl input[type="number"] {
+  width: 3.6em; min-height: 32px; text-align: center;
+  border: 1px solid #475569; border-radius: 6px; background: #1e293b; color: #f8fafc;
+}
+.live-board-font-ctrl button {
+  min-width: 32px; min-height: 32px; border: 1px solid #475569; border-radius: 6px;
+  background: #1e293b; color: #e2e8f0; cursor: pointer; font-size: 1rem;
+}
 @media (max-width:640px){.form-grid{grid-template-columns:1fr}}
   </style>
 </head>
@@ -75,9 +130,10 @@ th{background:#f5f5f5}
   <p style="text-align:center;font-size:.8em;color:#666;margin:-4px 0 16px;">管理操作は whitelist の <code>class</code> 列が <strong>admin</strong> のアカウントのみ可能です。</p>
   <div id="status-banner" style="display:none;" class="alert-box"></div>
 
-  <div class="setting-section">
+  <div class="setting-section live-dash-section" id="live-dash-section">
+    <div id="live-dash-setup" class="live-dash-setup">
     <div class="section-title">授業ライブ</div>
-    <p class="hint">教室のスクリーン向けです。部屋を開くと4桁コードが大きく出ます。生徒は学習画面で同じコードを入れて参加します。記録はシートに残しません。</p>
+    <p class="hint">教室のスクリーン向けです。部屋を閉じると「DigitalDrill_点検票 / livemode」に結果ブック（順位順・名簿順）を保存します。</p>
     <div class="form-grid">
       <div class="form-group"><label>種別</label>
         <select id="live-mode">
@@ -90,15 +146,50 @@ th{background:#f5f5f5}
       <div class="form-group"><label>教材（シート）</label><select id="live-sheet"></select></div>
       <div class="form-group"><label>対象クラス（空＝制限なし）</label><input id="live-target-class" type="text" placeholder="例: A（PIN を知っていれば誰でも参加可）"></div>
       <div class="form-group"><label>表示名（空＝教材名）</label><input id="live-title" type="text"></div>
+      <div class="form-group" id="live-link-mode-wrap" style="display:none;"><label>Word Link 形式（表示用）</label>
+        <select id="live-link-mode">
+          <option value="">START直前に選択</option>
+          <option value="wl-eija">Word Link 英和</option>
+          <option value="wl-jaei">Word Link 和英</option>
+          <option value="awl-eija">Audio WL 英和</option>
+          <option value="awl-jaei">Audio WL 和英</option>
+        </select>
+      </div>
     </div>
     <button type="button" id="live-open-btn" class="btn-primary">この設定で授業ライブを開く</button>
+    </div>
     <div id="live-dash-board" class="live-dash-board">
-      <div class="live-dash-pin" id="live-dash-pin">----</div>
-      <div class="live-dash-meta" id="live-dash-meta"></div>
-      <div class="live-dash-meta" id="live-dash-counts" style="margin-top:6px;"></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-        <button type="button" id="live-refresh-btn" class="btn-small">ボード更新</button>
-        <button type="button" id="live-close-btn" class="btn-small btn-danger">部屋を閉じる</button>
+      <div class="live-dash-header-band">
+        <div class="live-dash-header-row">
+          <h2 class="live-dash-title" id="live-dash-title">授業ライブ</h2>
+          <div class="live-dash-pin" id="live-dash-pin">----</div>
+          <div class="live-dash-timer" id="live-dash-timer"></div>
+          <div class="live-dash-meta" id="live-dash-meta"></div>
+          <div class="live-dash-meta" id="live-dash-counts"></div>
+          <label class="live-board-font-ctrl">
+            文字
+            <button type="button" id="live-dash-font-minus" aria-label="文字サイズを小さく">−</button>
+            <input type="number" id="live-dash-font-input" min="1" max="50" step="1" value="18" aria-label="リスト文字サイズ（pt）">
+            <button type="button" id="live-dash-font-plus" aria-label="文字サイズを大きく">+</button>
+            pt
+          </label>
+          <div class="live-dash-actions">
+            <button type="button" id="live-refresh-btn" class="btn-small">更新</button>
+            <button type="button" id="live-export-btn" class="btn-small">結果を保存</button>
+            <button type="button" id="live-close-btn" class="btn-small btn-danger">部屋を閉じる</button>
+          </div>
+        </div>
+        <div class="live-dash-settings" id="live-dash-settings"></div>
+        <div class="live-board-tabs">
+          <button type="button" class="live-board-tab" data-live-tab="achievement">達成</button>
+          <button type="button" class="live-board-tab" data-live-tab="score">正解率</button>
+          <button type="button" class="live-board-tab" data-live-tab="speed">速さ</button>
+        </div>
+      </div>
+      <div class="live-dash-body">
+        <div class="live-board-panel" data-live-panel="achievement" id="live-dash-list-achievement"></div>
+        <div class="live-board-panel" data-live-panel="score" id="live-dash-list-score" style="display:none;"></div>
+        <div class="live-board-panel" data-live-panel="speed" id="live-dash-list-speed" style="display:none;"></div>
       </div>
     </div>
   </div>
@@ -720,6 +811,18 @@ async function syncCheckSheetsNow() {
 var liveCatalog_ = { presets: [] };
 var livePin_ = '';
 var livePollId_ = null;
+var liveBoardMode_ = '';
+var liveBoardDefaultedPin_ = '';
+var LIVE_FONT_KEY = 'dd_live_board_font_pt';
+var LIVE_FONT_MIN = 1;
+var LIVE_FONT_MAX = 50;
+var LIVE_FONT_DEFAULT = 18;
+var LIVE_WL_LABELS = {
+  'wl-eija': 'Word Link 英和',
+  'wl-jaei': 'Word Link 和英',
+  'awl-eija': 'Audio WL 英和',
+  'awl-jaei': 'Audio WL 和英'
+};
 
 function liveBooks_() {
   return liveCatalog_.presets || [];
@@ -774,6 +877,8 @@ function buildLiveLaunchOptions_(mode) {
   if (mode === 'word-link') {
     opts.linkQuestionCount = 25;
     opts.vocabSubMode = 'link';
+    var linkMode = (document.getElementById('live-link-mode') || {}).value || '';
+    if (linkMode) opts.linkMode = linkMode;
     return opts;
   }
   opts.axes = {
@@ -792,22 +897,180 @@ function buildLiveLaunchOptions_(mode) {
   return opts;
 }
 
+function parseLiveDurationSec_(v) {
+  var n = parseFloat(v);
+  if (isNaN(n) || n < 0) return 0;
+  return Math.round(n * 100) / 100;
+}
+
+function wordLinkModeLabel_(key) {
+  return LIVE_WL_LABELS[key] || key || '';
+}
+
+function formatLiveDuration_(sec, precise) {
+  var n = parseLiveDurationSec_(sec);
+  if (precise) {
+    var m = Math.floor(n / 60);
+    var r = n - m * 60;
+    return m > 0 ? (m + '分' + r.toFixed(2) + '秒') : (r.toFixed(2) + '秒');
+  }
+  var s = Math.floor(n);
+  var mm = Math.floor(s / 60);
+  var rr = s % 60;
+  return mm > 0 ? (mm + '分' + rr + '秒') : (rr + '秒');
+}
+
+function formatLiveLimit_(sec) {
+  var s = Math.max(0, parseInt(sec, 10) || 0);
+  var m = Math.floor(s / 60);
+  var r = s % 60;
+  if (m > 0) return m + ':' + String(r).padStart(2, '0');
+  return String(r) + '秒';
+}
+
+function loadLiveFontPt_() {
+  try {
+    var n = parseInt(localStorage.getItem(LIVE_FONT_KEY), 10);
+    if (isNaN(n)) return LIVE_FONT_DEFAULT;
+    return Math.min(LIVE_FONT_MAX, Math.max(LIVE_FONT_MIN, n));
+  } catch (e) {
+    return LIVE_FONT_DEFAULT;
+  }
+}
+
+function applyLiveFontPt_(pt, persist) {
+  pt = Math.min(LIVE_FONT_MAX, Math.max(LIVE_FONT_MIN, parseInt(pt, 10) || LIVE_FONT_DEFAULT));
+  var section = document.getElementById('live-dash-section');
+  if (section) section.style.setProperty('--live-list-pt', String(pt));
+  var input = document.getElementById('live-dash-font-input');
+  if (input && String(input.value) !== String(pt)) input.value = String(pt);
+  if (persist !== false) {
+    try { localStorage.setItem(LIVE_FONT_KEY, String(pt)); } catch (e) {}
+  }
+  return pt;
+}
+
+function formatLiveLaunchSummary_(mode, opts, timeLimitSec) {
+  opts = opts || {};
+  var lines = [];
+  lines.push('種別: ' + (mode === 'word-link' ? 'Word Link' : '単語クイズ'));
+  if (opts.bookName || opts.sheetName) {
+    lines.push('教材: ' + (opts.bookName || '—') + ' / ' + (opts.sheetName || '—'));
+  }
+  if (mode === 'word-link') {
+    if (opts.linkMode) lines.push('形式: ' + wordLinkModeLabel_(opts.linkMode));
+    else lines.push('形式: START直前に選択');
+    lines.push('出題数: ' + (opts.linkQuestionCount || 25) + '語');
+  }
+  if (timeLimitSec > 0) lines.push('制限時間: ' + formatLiveLimit_(timeLimitSec));
+  else lines.push('制限時間: なし');
+  return lines.join('\n');
+}
+
+function setLiveBoardOpen_(open) {
+  var board = document.getElementById('live-dash-board');
+  var setup = document.getElementById('live-dash-setup');
+  if (board) board.classList.toggle('is-open', !!open);
+  if (setup) setup.classList.toggle('is-hidden', !!open);
+  document.body.classList.toggle('live-board-open', !!open);
+}
+
+function switchLiveDashTab_(tabId) {
+  document.querySelectorAll('#live-dash-board .live-board-tab').forEach(function (btn) {
+    btn.classList.toggle('active', btn.getAttribute('data-live-tab') === tabId);
+  });
+  document.querySelectorAll('#live-dash-board .live-board-panel').forEach(function (panel) {
+    panel.style.display = panel.getAttribute('data-live-panel') === tabId ? 'block' : 'none';
+  });
+}
+
+function updateLiveDashTabLabels_(mode) {
+  document.querySelectorAll('#live-dash-board .live-board-tab').forEach(function (btn) {
+    var tab = btn.getAttribute('data-live-tab');
+    if (tab === 'score') btn.textContent = mode === 'word-link' ? 'ミス順' : '正解率';
+    if (tab === 'speed') btn.textContent = mode === 'word-link' ? 'タイム' : '速さ';
+  });
+}
+
+function renderLiveDashList_(containerId, rows, mode, kind) {
+  var el = document.getElementById(containerId);
+  if (!el) return;
+  rows = rows || [];
+  if (!rows.length) {
+    el.innerHTML = '<p class="hint" style="margin:0;color:#94a3b8;">まだ達成者がいません</p>';
+    return;
+  }
+  var isWl = mode === 'word-link';
+  var html = '<table class="live-board-table"><thead><tr><th>#</th><th>番号</th><th>氏名</th>';
+  if (isWl) html += '<th>形式</th>';
+  if (kind === 'achievement') html += '<th>達成時刻</th>';
+  else if (isWl) html += '<th>ミス</th><th>タイム</th>';
+  else if (kind === 'speed') html += '<th>タイム</th>';
+  else html += '<th>正解率</th>';
+  html += '</tr></thead><tbody>';
+  rows.forEach(function (row, idx) {
+    var best = row.best || {};
+    html += '<tr><td>' + (idx + 1) + '</td><td>' + escapeHtml(row.number || '—') + '</td><td>'
+      + escapeHtml(row.name || '—') + '</td>';
+    if (isWl) html += '<td>' + escapeHtml(wordLinkModeLabel_(best.linkMode) || '—') + '</td>';
+    if (kind === 'achievement') {
+      var d = best.finishedAt ? new Date(best.finishedAt) : null;
+      var value = d ? (d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0')) : '—';
+      html += '<td>' + escapeHtml(value) + '</td>';
+    } else if (isWl) {
+      html += '<td>' + escapeHtml(String(best.wrongCount || 0)) + '</td>';
+      html += '<td>' + escapeHtml(formatLiveDuration_(best.durationSec, true)) + '</td>';
+    } else if (kind === 'speed') {
+      html += '<td>' + escapeHtml(formatLiveDuration_(best.durationSec)) + '</td>';
+    } else {
+      var score = (best.scoreRate != null ? best.scoreRate : '—') + '%';
+      if (best.durationSec) score += ' / ' + formatLiveDuration_(best.durationSec);
+      html += '<td>' + escapeHtml(score) + '</td>';
+    }
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
 function paintLiveDash_(data) {
   data = data || {};
   livePin_ = data.pin || livePin_;
-  var board = document.getElementById('live-dash-board');
+  liveBoardMode_ = data.mode || liveBoardMode_;
+  setLiveBoardOpen_(true);
+  applyLiveFontPt_(loadLiveFontPt_(), false);
   var pinEl = document.getElementById('live-dash-pin');
+  var titleEl = document.getElementById('live-dash-title');
   var metaEl = document.getElementById('live-dash-meta');
   var countsEl = document.getElementById('live-dash-counts');
-  if (board) board.classList.add('is-open');
+  var timerEl = document.getElementById('live-dash-timer');
+  var settingsEl = document.getElementById('live-dash-settings');
   if (pinEl) pinEl.textContent = livePin_ || '----';
-  if (metaEl) {
-    metaEl.textContent = (data.title || '') + (data.pin ? '　コード ' + data.pin : '');
-  }
+  if (titleEl) titleEl.textContent = data.title || '授業ライブ';
+  if (metaEl) metaEl.textContent = data.pin ? 'コード ' + data.pin : '';
   if (countsEl) {
     countsEl.textContent = '達成 ' + (data.finishedCount || 0)
       + ' / 参加 ' + (data.joinedCount || 0)
       + ' / 名簿 ' + (data.rosterCount || 0);
+  }
+  if (timerEl) {
+    if (data.closesAt) {
+      var left = Math.max(0, Math.ceil((data.closesAt - Date.now()) / 1000));
+      timerEl.textContent = left > 0 ? ('残り ' + formatLiveLimit_(left)) : '終了';
+    } else {
+      timerEl.textContent = data.timeLimitSec > 0 ? formatLiveLimit_(data.timeLimitSec) : '制限なし';
+    }
+  }
+  if (settingsEl) {
+    settingsEl.textContent = formatLiveLaunchSummary_(data.mode, data.launchOptions, data.timeLimitSec);
+  }
+  updateLiveDashTabLabels_(data.mode);
+  renderLiveDashList_('live-dash-list-achievement', data.lists && data.lists.achievement, data.mode, 'achievement');
+  renderLiveDashList_('live-dash-list-score', data.lists && data.lists.scoreRate, data.mode, 'score');
+  renderLiveDashList_('live-dash-list-speed', data.lists && data.lists.speed, data.mode, 'speed');
+  if (liveBoardDefaultedPin_ !== (data.pin || livePin_ || '')) {
+    liveBoardDefaultedPin_ = data.pin || livePin_ || '';
+    switchLiveDashTab_('score');
   }
 }
 
@@ -822,6 +1085,21 @@ function stopLivePoll_() {
   if (livePollId_) {
     clearInterval(livePollId_);
     livePollId_ = null;
+  }
+}
+
+function syncLiveModeFields_() {
+  var mode = (document.getElementById('live-mode') || {}).value || 'vocab';
+  var wrap = document.getElementById('live-link-mode-wrap');
+  if (wrap) wrap.style.display = mode === 'word-link' ? '' : 'none';
+}
+
+function offerSpreadsheet_(data) {
+  data = data || {};
+  if (!data.spreadsheetUrl) return;
+  var name = data.spreadsheetName || '結果ブック';
+  if (window.confirm('結果を保存しました: ' + name + '\nスプレッドシートを開きますか？')) {
+    window.open(data.spreadsheetUrl, '_blank');
   }
 }
 
@@ -851,6 +1129,7 @@ async function openLiveRoom_() {
     if (result.status !== 'success') throw new Error(result.message || '部屋を開けませんでした');
     var data = result.data || {};
     if (!data.pin) throw new Error('参加コードを発行できませんでした');
+    liveBoardDefaultedPin_ = '';
     paintLiveDash_(data);
     showBanner('授業ライブを開きました。コード ' + data.pin, true);
     startLivePoll_();
@@ -872,16 +1151,41 @@ async function refreshLiveBoard_() {
   paintLiveDash_(result.data || {});
 }
 
+async function exportLiveRoom_() {
+  if (!livePin_) return;
+  var result = await gasRun('apiAdminLiveExport', livePin_);
+  if (result.status !== 'success') throw new Error(result.message || '保存に失敗しました');
+  offerSpreadsheet_(result.data || {});
+  showBanner('結果を保存しました', true);
+}
+
 async function closeLiveRoom_() {
   if (!livePin_) return;
-  if (!window.confirm('授業ライブを終了しますか？')) return;
+  if (!window.confirm('授業ライブを終了し、結果をスプレッドシートに保存しますか？')) return;
   var result = await gasRun('apiAdminLiveClose', livePin_);
   if (result.status !== 'success') throw new Error(result.message || '終了に失敗しました');
   stopLivePoll_();
   livePin_ = '';
-  var board = document.getElementById('live-dash-board');
-  if (board) board.classList.remove('is-open');
+  liveBoardDefaultedPin_ = '';
+  setLiveBoardOpen_(false);
+  offerSpreadsheet_(result.data || {});
   showBanner('授業ライブを終了しました', true);
+}
+
+function bindLiveFontControls_() {
+  applyLiveFontPt_(loadLiveFontPt_(), false);
+  var minus = document.getElementById('live-dash-font-minus');
+  var plus = document.getElementById('live-dash-font-plus');
+  var input = document.getElementById('live-dash-font-input');
+  if (minus) minus.addEventListener('click', function () { applyLiveFontPt_(loadLiveFontPt_() - 1, true); });
+  if (plus) plus.addEventListener('click', function () { applyLiveFontPt_(loadLiveFontPt_() + 1, true); });
+  if (input) {
+    input.addEventListener('change', function () { applyLiveFontPt_(input.value, true); });
+    input.addEventListener('input', function () {
+      var n = parseInt(input.value, 10);
+      if (!isNaN(n)) applyLiveFontPt_(n, true);
+    });
+  }
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -898,9 +1202,24 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('check-sync-btn').addEventListener('click', syncCheckSheetsNow);
   document.getElementById('check-agg-add-btn').addEventListener('click', addCheckAggregationRow_);
   document.getElementById('live-open-btn').addEventListener('click', openLiveRoom_);
-  document.getElementById('live-refresh-btn').addEventListener('click', refreshLiveBoard_);
-  document.getElementById('live-close-btn').addEventListener('click', closeLiveRoom_);
+  document.getElementById('live-refresh-btn').addEventListener('click', function () {
+    refreshLiveBoard_().catch(function (e) { showBanner(e.message || String(e), false); });
+  });
+  document.getElementById('live-export-btn').addEventListener('click', function () {
+    exportLiveRoom_().catch(function (e) { showBanner(e.message || String(e), false); });
+  });
+  document.getElementById('live-close-btn').addEventListener('click', function () {
+    closeLiveRoom_().catch(function (e) { showBanner(e.message || String(e), false); });
+  });
   document.getElementById('live-book').addEventListener('change', fillLiveSheets_);
+  document.getElementById('live-mode').addEventListener('change', syncLiveModeFields_);
+  document.querySelectorAll('#live-dash-board .live-board-tab').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      switchLiveDashTab_(btn.getAttribute('data-live-tab'));
+    });
+  });
+  bindLiveFontControls_();
+  syncLiveModeFields_();
 
   AssignmentSectionBuilder.init().catch(function (e) {
     showBanner('教材カタログの読込に失敗: ' + (e.message || e), false);

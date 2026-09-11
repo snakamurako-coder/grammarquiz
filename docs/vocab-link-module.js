@@ -716,11 +716,16 @@ const VocabLinkModule = (function () {
     };
   }
 
+  function modeLabel(key) {
+    return MODE_LABELS[key] || key || '';
+  }
+
   return {
     loadAndStart: loadAndStart,
     backToSettings: backToSettings_,
     syncHomeworkUi_: syncHomeworkUi_,
-    getSessionDisplaySettings: getSessionDisplaySettings_
+    getSessionDisplaySettings: getSessionDisplaySettings_,
+    modeLabel: modeLabel
   };
 })();
 

@@ -528,7 +528,7 @@ function doPost(e) {
 
     // 授業ライブは Cache + 認証のみ。毎回の Drive 初期化を挟むと作成・ボードがタイムアウトする
     if (action === 'liveCreate' || action === 'liveJoin' || action === 'liveSubmit'
-        || action === 'liveBoard' || action === 'liveClose') {
+        || action === 'liveBoard' || action === 'liveClose' || action === 'liveExport') {
       return sendResponse(handleLiveApi_(action, requestData));
     }
 
@@ -2461,6 +2461,13 @@ const SUBMISSION_HEADERS = [
 ];
 
 const CHECK_FOLDER_NAME = 'DigitalDrill_点検票';
+const LIVE_MODE_FOLDER_NAME = 'livemode';
+const LIVE_WORD_LINK_MODE_LABELS = {
+  'wl-eija': 'Word Link 英和',
+  'wl-jaei': 'Word Link 和英',
+  'awl-eija': 'Audio WL 英和',
+  'awl-jaei': 'Audio WL 和英'
+};
 const CHECK_HEADER_ROWS = 5;
 const CHECK_ROSTER_COLS = 7;
 const CHECK_EXPORT_BATCH = 80;
@@ -4548,6 +4555,13 @@ function apiAdminLiveClose(pin) {
     return { status: 'error', message: e.toString() };
   }
 }
+function apiAdminLiveExport(pin) {
+  try {
+    return apiLiveExport_({ pin: pin || '' });
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
 
 /** dashboard: 単語プリセットカタログ */
 function apiAdminGetVocabCatalog() {
@@ -4789,17 +4803,39 @@ function isLiveRoomOpen_(meta) {
   return !closesAt || Date.now() <= closesAt;
 }
 
+function parseLiveDurationSec_(v) {
+  const n = parseFloat(v);
+  if (isNaN(n) || n < 0) return 0;
+  return Math.round(n * 100) / 100;
+}
+
+function wordLinkModeLabel_(key) {
+  return LIVE_WORD_LINK_MODE_LABELS[key] || String(key || '');
+}
+
+function compareWordLinkBest_(aBest, bBest) {
+  aBest = aBest || {};
+  bBest = bBest || {};
+  const aw = parseInt(aBest.wrongCount, 10) || 0;
+  const bw = parseInt(bBest.wrongCount, 10) || 0;
+  if (aw !== bw) return aw - bw;
+  const ad = parseLiveDurationSec_(aBest.durationSec);
+  const bd = parseLiveDurationSec_(bBest.durationSec);
+  if (ad !== bd) return ad - bd;
+  return 0;
+}
+
 function normalizeLiveAttempt_(mode, attempt) {
   attempt = attempt || {};
   const correct = parseInt(attempt.correct, 10) || 0;
   const total = parseInt(attempt.total, 10) || 0;
-  const durationSec = Math.max(0, parseInt(attempt.durationSec, 10) || 0);
+  const durationSec = parseLiveDurationSec_(attempt.durationSec);
   const wrongCount = Math.max(0, parseInt(attempt.wrongCount, 10) || 0);
   let scoreRate = parseInt(attempt.scoreRate, 10);
   if (isNaN(scoreRate)) {
     scoreRate = total > 0 ? Math.round((correct / total) * 100) : 0;
   }
-  return {
+  const out = {
     correct: correct,
     total: total,
     scoreRate: scoreRate,
@@ -4808,6 +4844,10 @@ function normalizeLiveAttempt_(mode, attempt) {
     timedOut: !!attempt.timedOut,
     finishedAt: attempt.finishedAt || new Date().toISOString()
   };
+  if (mode === 'word-link') {
+    out.linkMode = String(attempt.linkMode || '').trim();
+  }
+  return out;
 }
 
 function isLiveBetterAttempt_(mode, nextAttempt, prevBest) {
@@ -4815,10 +4855,7 @@ function isLiveBetterAttempt_(mode, nextAttempt, prevBest) {
   if (!prevBest) return true;
   prevBest = normalizeLiveAttempt_(mode, prevBest);
   if (mode === 'word-link') {
-    if (nextAttempt.durationSec < prevBest.durationSec) return true;
-    if (nextAttempt.durationSec > prevBest.durationSec) return false;
-    if (nextAttempt.wrongCount < prevBest.wrongCount) return true;
-    return false;
+    return compareWordLinkBest_(nextAttempt, prevBest) < 0;
   }
   if (nextAttempt.scoreRate > prevBest.scoreRate) return true;
   if (nextAttempt.scoreRate < prevBest.scoreRate) return false;
@@ -4881,6 +4918,7 @@ function buildLiveBoardEntry_(entry) {
     account: entry.account,
     name: entry.name || '',
     number: entry.number || '',
+    class: entry.class || '',
     attempts: parseInt(entry.attempts, 10) || 0,
     status: entry.status || 'joined',
     best: best
@@ -4895,16 +4933,15 @@ function sortLiveBoardLists_(mode, entries) {
     return fb - fa;
   });
   const byScore = finished.slice().sort(function (a, b) {
-    if (mode === 'word-link') {
-      if (a.best.durationSec !== b.best.durationSec) return a.best.durationSec - b.best.durationSec;
-      return (a.best.wrongCount || 0) - (b.best.wrongCount || 0);
-    }
+    if (mode === 'word-link') return compareWordLinkBest_(a.best, b.best);
     if (a.best.scoreRate !== b.best.scoreRate) return b.best.scoreRate - a.best.scoreRate;
-    return a.best.durationSec - b.best.durationSec;
+    return parseLiveDurationSec_(a.best.durationSec) - parseLiveDurationSec_(b.best.durationSec);
   });
   const bySpeed = finished.slice().sort(function (a, b) {
-    if (a.best.durationSec !== b.best.durationSec) return a.best.durationSec - b.best.durationSec;
-    if (mode === 'word-link') return (a.best.wrongCount || 0) - (b.best.wrongCount || 0);
+    const ad = parseLiveDurationSec_(a.best.durationSec);
+    const bd = parseLiveDurationSec_(b.best.durationSec);
+    if (ad !== bd) return ad - bd;
+    if (mode === 'word-link') return (parseInt(a.best.wrongCount, 10) || 0) - (parseInt(b.best.wrongCount, 10) || 0);
     return b.best.scoreRate - a.best.scoreRate;
   });
   return {
@@ -4914,12 +4951,225 @@ function sortLiveBoardLists_(mode, entries) {
   };
 }
 
+function formatLiveYmd_() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = ('0' + (d.getMonth() + 1)).slice(-2);
+  const day = ('0' + d.getDate()).slice(-2);
+  return String(y) + m + day;
+}
+
+function sanitizeLiveExportNamePart_(s) {
+  return String(s || '')
+    .replace(/[\\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60);
+}
+
+function buildLiveExportFileName_(meta) {
+  const parts = [formatLiveYmd_()];
+  const title = sanitizeLiveExportNamePart_(meta && meta.title);
+  if (title) parts.push(title);
+  const cls = sanitizeLiveExportNamePart_(meta && meta.targetClass);
+  if (cls) parts.push(cls);
+  return parts.join('_') || formatLiveYmd_();
+}
+
+function getOrCreateLiveModeFolder_() {
+  const parent = getOrCreateCheckFolder_();
+  let folder = findChildFolderByName_(parent, LIVE_MODE_FOLDER_NAME);
+  if (!folder) folder = parent.createFolder(LIVE_MODE_FOLDER_NAME);
+  return folder;
+}
+
+function uniqueSpreadsheetName_(folder, baseName) {
+  let name = baseName;
+  let n = 2;
+  while (findChildSpreadsheetByName_(folder, name)) {
+    name = baseName + '_' + n;
+    n += 1;
+    if (n > 50) {
+      name = baseName + '_' + Date.now();
+      break;
+    }
+  }
+  return name;
+}
+
+function formatLiveFinishedAt_(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  const pad = function (x) { return ('0' + x).slice(-2); };
+  return d.getFullYear() + '/' + pad(d.getMonth() + 1) + '/' + pad(d.getDate())
+    + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
+function compareLiveRoster_(a, b) {
+  const ca = String((a && a.class) || '');
+  const cb = String((b && b.class) || '');
+  if (ca !== cb) return ca.localeCompare(cb, 'ja');
+  const na = parseInt(a && a.number, 10);
+  const nb = parseInt(b && b.number, 10);
+  if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb;
+  const ns = String((a && a.number) || '').localeCompare(String((b && b.number) || ''), 'ja', { numeric: true });
+  if (ns) return ns;
+  return String((a && a.name) || '').localeCompare(String((b && b.name) || ''), 'ja');
+}
+
+function mergeLiveRosterAndEntries_(meta, entries) {
+  const byAcct = {};
+  (entries || []).forEach(function (e) {
+    const k = String((e && e.account) || '').trim().toLowerCase();
+    if (k) byAcct[k] = e;
+  });
+  const rows = [];
+  const seen = {};
+  ((meta && meta.roster) || []).forEach(function (r) {
+    const k = String((r && r.account) || '').trim().toLowerCase();
+    if (k) seen[k] = true;
+    const e = (k && byAcct[k]) || {};
+    rows.push({
+      account: k || (r && r.account) || '',
+      name: e.name || (r && r.name) || '',
+      number: e.number || (r && r.number) || '',
+      class: e.class || (r && r.class) || '',
+      attempts: e.attempts || 0,
+      best: e.best || null,
+      status: e.status || 'absent'
+    });
+  });
+  (entries || []).forEach(function (e) {
+    const k = String((e && e.account) || '').trim().toLowerCase();
+    if (k && seen[k]) return;
+    if (k) seen[k] = true;
+    rows.push(e);
+  });
+  return rows;
+}
+
+function liveExportHeaders_(mode) {
+  if (mode === 'word-link') {
+    return ['順位', '組', '番号', '氏名', '形式', 'タイム(秒)', 'ミス', '達成時刻', '挑戦回数', '状態'];
+  }
+  return ['順位', '組', '番号', '氏名', '正解率(%)', 'タイム(秒)', '正解', '出題', '達成時刻', '挑戦回数', '状態'];
+}
+
+function liveExportRow_(mode, row, rank) {
+  const best = (row && row.best) || {};
+  const finished = !!(row && row.best);
+  const rankVal = finished ? rank : '';
+  const status = finished ? '達成' : ((row && (row.status === 'joined' || row.attempts)) ? '参加' : '未参加');
+  if (mode === 'word-link') {
+    return [
+      rankVal,
+      (row && row.class) || '',
+      (row && row.number) || '',
+      (row && row.name) || '',
+      wordLinkModeLabel_(best.linkMode),
+      finished ? parseLiveDurationSec_(best.durationSec) : '',
+      finished ? (parseInt(best.wrongCount, 10) || 0) : '',
+      formatLiveFinishedAt_(best.finishedAt),
+      parseInt(row && row.attempts, 10) || 0,
+      status
+    ];
+  }
+  return [
+    rankVal,
+    (row && row.class) || '',
+    (row && row.number) || '',
+    (row && row.name) || '',
+    finished ? (best.scoreRate != null ? best.scoreRate : '') : '',
+    finished ? parseLiveDurationSec_(best.durationSec) : '',
+    finished ? (best.correct || 0) : '',
+    finished ? (best.total || 0) : '',
+    formatLiveFinishedAt_(best.finishedAt),
+    parseInt(row && row.attempts, 10) || 0,
+    status
+  ];
+}
+
+function writeLiveExportSheet_(sheet, title, meta, headers, rows) {
+  const opts = (meta && meta.launchOptions) || {};
+  const summary = [
+    [title],
+    ['名称', (meta && meta.title) || '', 'PIN', (meta && meta.pin) || '', '種別', (meta && meta.mode) === 'word-link' ? 'Word Link' : '単語クイズ'],
+    ['教材', String(opts.bookName || '') + ' / ' + String(opts.sheetName || '')],
+    headers
+  ];
+  const values = summary.concat(rows || []);
+  const colCount = headers.length;
+  const normalized = values.map(function (row) {
+    const out = (row || []).slice();
+    while (out.length < colCount) out.push('');
+    return out.slice(0, colCount);
+  });
+  sheet.clear();
+  sheet.getRange(1, 1, normalized.length, colCount).setValues(normalized);
+  sheet.setFrozenRows(4);
+  try { sheet.autoResizeColumns(1, colCount); } catch (e) { /* ignore */ }
+}
+
+function readLiveEntriesForPin_(meta, pin) {
+  const keys = collectLiveEntryKeys_(meta, pin);
+  const cache = liveCache_();
+  const rawMap = keys.length ? cache.getAll(keys) : {};
+  const entries = [];
+  Object.keys(rawMap).forEach(function (key) {
+    try {
+      entries.push(buildLiveBoardEntry_(JSON.parse(rawMap[key])));
+    } catch (e) { /* ignore */ }
+  });
+  return entries;
+}
+
+function exportLiveResultsBook_(pin, meta) {
+  const entries = readLiveEntriesForPin_(meta, pin);
+  const merged = mergeLiveRosterAndEntries_(meta, entries);
+  const finished = merged.filter(function (r) { return r.best; }).slice().sort(function (a, b) {
+    if (meta.mode === 'word-link') return compareWordLinkBest_(a.best, b.best);
+    if (a.best.scoreRate !== b.best.scoreRate) return b.best.scoreRate - a.best.scoreRate;
+    return parseLiveDurationSec_(a.best.durationSec) - parseLiveDurationSec_(b.best.durationSec);
+  });
+  const rankByAcct = {};
+  finished.forEach(function (r, i) {
+    rankByAcct[String(r.account || '').trim().toLowerCase()] = i + 1;
+  });
+  const unfinished = merged.filter(function (r) { return !r.best; }).slice().sort(compareLiveRoster_);
+  const rankedRows = finished.concat(unfinished);
+  const rosterRows = merged.slice().sort(compareLiveRoster_);
+  const headers = liveExportHeaders_(meta.mode);
+  const rankedValues = rankedRows.map(function (r) {
+    return liveExportRow_(meta.mode, r, rankByAcct[String(r.account || '').trim().toLowerCase()] || '');
+  });
+  const rosterValues = rosterRows.map(function (r) {
+    return liveExportRow_(meta.mode, r, rankByAcct[String(r.account || '').trim().toLowerCase()] || '');
+  });
+
+  const folder = getOrCreateLiveModeFolder_();
+  const fileName = uniqueSpreadsheetName_(folder, buildLiveExportFileName_(meta));
+  const ss = createSpreadsheetInFolder_(fileName, folder);
+  const s1 = ss.getSheets()[0];
+  s1.setName('順位順');
+  writeLiveExportSheet_(s1, '順位順', meta, headers, rankedValues);
+  const s2 = ss.insertSheet('名簿順');
+  writeLiveExportSheet_(s2, '名簿順', meta, headers, rosterValues);
+  return {
+    spreadsheetId: ss.getId(),
+    spreadsheetUrl: ss.getUrl(),
+    spreadsheetName: fileName
+  };
+}
+
 function handleLiveApi_(action, requestData) {
   try {
     if (action === 'liveCreate') return apiLiveCreate_(requestData);
     if (action === 'liveJoin') return apiLiveJoin_(requestData);
     if (action === 'liveSubmit') return apiLiveSubmit_(requestData);
     if (action === 'liveBoard') return apiLiveBoard_(requestData);
+    if (action === 'liveExport') return apiLiveExport_(requestData);
     if (action === 'liveClose') return apiLiveClose_(requestData);
     return { status: 'error', message: '未知のライブAPI: ' + action };
   } catch (e) {
@@ -5071,15 +5321,7 @@ function apiLiveBoard_(requestData) {
   if (!meta) return { status: 'error', message: '部屋が見つかりません' };
   const ttlSec = computeLiveRoomTtlSec_(meta.timeLimitSec);
   putLiveMeta_(pin, meta, ttlSec);
-  const keys = collectLiveEntryKeys_(meta, pin);
-  const cache = liveCache_();
-  const rawMap = keys.length ? cache.getAll(keys) : {};
-  const entries = [];
-  Object.keys(rawMap).forEach(function (key) {
-    try {
-      entries.push(buildLiveBoardEntry_(JSON.parse(rawMap[key])));
-    } catch (e) { /* ignore */ }
-  });
+  const entries = readLiveEntriesForPin_(meta, pin);
   const lists = sortLiveBoardLists_(meta.mode, entries);
   const rosterCount = (meta.roster && meta.roster.length) ? meta.roster.length : readLiveIndexAccounts_(pin).length;
   const finishedCount = entries.filter(function (e) { return !!e.best; }).length;
@@ -5101,16 +5343,43 @@ function apiLiveBoard_(requestData) {
   };
 }
 
+function apiLiveExport_(requestData) {
+  const admin = requireAssignmentAdminFromRequest_(requestData || {});
+  if (!admin.ok) return { status: 'error', message: admin.error };
+  const pin = String(requestData.pin || '').trim();
+  const meta = getLiveMeta_(pin);
+  if (!meta) return { status: 'error', message: '部屋が見つかりません' };
+  const exported = exportLiveResultsBook_(pin, meta);
+  return { status: 'success', data: exported };
+}
+
 function apiLiveClose_(requestData) {
   const admin = requireAssignmentAdminFromRequest_(requestData || {});
   if (!admin.ok) return { status: 'error', message: admin.error };
   const pin = String(requestData.pin || '').trim();
   const meta = getLiveMeta_(pin);
   if (!meta) return { status: 'success', data: { closed: true } };
+  let exported = null;
+  try {
+    exported = exportLiveResultsBook_(pin, meta);
+  } catch (e) {
+    return {
+      status: 'error',
+      message: '結果の保存に失敗したため部屋を閉じていません: ' + e.toString()
+    };
+  }
   const cache = liveCache_();
   const keys = collectLiveEntryKeys_(meta, pin);
   keys.push(liveMetaKey_(pin));
   keys.push(liveIndexKey_(pin));
   cache.removeAll(keys);
-  return { status: 'success', data: { closed: true } };
+  return {
+    status: 'success',
+    data: {
+      closed: true,
+      spreadsheetId: exported.spreadsheetId,
+      spreadsheetUrl: exported.spreadsheetUrl,
+      spreadsheetName: exported.spreadsheetName
+    }
+  };
 }

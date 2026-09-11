@@ -3,7 +3,12 @@
  */
 const LiveRoomModule = (function () {
   const STORAGE_KEY = 'dd_live_room';
+  const FONT_KEY = 'dd_live_board_font_pt';
+  const FONT_MIN = 1;
+  const FONT_MAX = 50;
+  const FONT_DEFAULT = 18;
   const POST_TIMEOUT_MS = 45000;
+  const EXPORT_TIMEOUT_MS = 60000;
   const BOARD_POLL_MS = 4000;
 
   let activeRoom_ = null;
@@ -11,6 +16,7 @@ const LiveRoomModule = (function () {
   let boardPollId_ = null;
   let roomTimerId_ = null;
   let timeoutFired_ = false;
+  let boardDefaultedPin_ = '';
 
   function apiUrl_() {
     return (window.DIGITALDRILL_CONFIG && window.DIGITALDRILL_CONFIG.API_URL) || window.API_URL || '';
@@ -40,8 +46,9 @@ const LiveRoomModule = (function () {
     return false;
   }
 
-  async function post_(payload, retries) {
+  async function post_(payload, retries, timeoutMs) {
     retries = retries == null ? 2 : retries;
+    const waitMs = timeoutMs || POST_TIMEOUT_MS;
     const url = apiUrl_();
     if (!url) throw new Error('API_URL が未設定です');
     if (!window.AuthGateService || !AuthGateService.isValid()) throw new Error('ログインが必要です');
@@ -49,7 +56,7 @@ const LiveRoomModule = (function () {
     let lastErr = null;
     for (let i = 0; i <= retries; i++) {
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const timer = controller ? setTimeout(function () { controller.abort(); }, POST_TIMEOUT_MS) : null;
+      const timer = controller ? setTimeout(function () { controller.abort(); }, waitMs) : null;
       try {
         const res = await fetch(url, {
           method: 'POST',
@@ -78,17 +85,48 @@ const LiveRoomModule = (function () {
     throw lastErr || new Error('通信に失敗しました');
   }
 
+  function parseDurationSec_(v) {
+    const n = parseFloat(v);
+    if (isNaN(n) || n < 0) return 0;
+    return Math.round(n * 100) / 100;
+  }
+
+  function wordLinkModeLabel_(key) {
+    if (window.VocabLinkModule && typeof VocabLinkModule.modeLabel === 'function') {
+      return VocabLinkModule.modeLabel(key);
+    }
+    const map = {
+      'wl-eija': 'Word Link 英和',
+      'wl-jaei': 'Word Link 和英',
+      'awl-eija': 'Audio WL 英和',
+      'awl-jaei': 'Audio WL 和英'
+    };
+    return map[key] || key || '';
+  }
+
+  function compareWordLinkBest_(aBest, bBest) {
+    aBest = aBest || {};
+    bBest = bBest || {};
+    const aw = parseInt(aBest.wrongCount, 10) || 0;
+    const bw = parseInt(bBest.wrongCount, 10) || 0;
+    if (aw !== bw) return aw - bw;
+    const ad = parseDurationSec_(aBest.durationSec);
+    const bd = parseDurationSec_(bBest.durationSec);
+    if (ad !== bd) return ad - bd;
+    return 0;
+  }
+
   function normalizeAttempt_(mode, attempt) {
     attempt = attempt || {};
     const correct = parseInt(attempt.correct, 10) || 0;
     const total = parseInt(attempt.total, 10) || 0;
-    const durationSec = Math.max(0, parseInt(attempt.durationSec, 10) || 0);
+    const durationSec = parseDurationSec_(attempt.durationSec);
     const wrongCount = Math.max(0, parseInt(attempt.wrongCount, 10) || 0);
     let scoreRate = parseInt(attempt.scoreRate, 10);
     if (isNaN(scoreRate)) {
       scoreRate = total > 0 ? Math.round((correct / total) * 100) : 0;
     }
-    return {
+    const out = {
       correct: correct,
       total: total,
       scoreRate: scoreRate,
@@ -97,6 +135,10 @@ const LiveRoomModule = (function () {
       timedOut: !!attempt.timedOut,
       finishedAt: attempt.finishedAt || new Date().toISOString()
     };
+    if (mode === 'word-link') {
+      out.linkMode = String(attempt.linkMode || '').trim();
+    }
+    return out;
   }
 
   function isBetterAttempt_(mode, nextAttempt, prevBest) {
@@ -104,10 +146,7 @@ const LiveRoomModule = (function () {
     if (!prevBest) return true;
     prevBest = normalizeAttempt_(mode, prevBest);
     if (mode === 'word-link') {
-      if (nextAttempt.durationSec < prevBest.durationSec) return true;
-      if (nextAttempt.durationSec > prevBest.durationSec) return false;
-      if (nextAttempt.wrongCount < prevBest.wrongCount) return true;
-      return false;
+      return compareWordLinkBest_(nextAttempt, prevBest) < 0;
     }
     if (nextAttempt.scoreRate > prevBest.scoreRate) return true;
     if (nextAttempt.scoreRate < prevBest.scoreRate) return false;
@@ -126,11 +165,55 @@ const LiveRoomModule = (function () {
     return document.getElementById(id);
   }
 
-  function formatDuration_(sec) {
-    const s = Math.max(0, parseInt(sec, 10) || 0);
+  function formatDuration_(sec, precise) {
+    const n = parseDurationSec_(sec);
+    if (precise) {
+      const m = Math.floor(n / 60);
+      const r = n - m * 60;
+      return m > 0 ? (m + '分' + r.toFixed(2) + '秒') : (r.toFixed(2) + '秒');
+    }
+    const s = Math.floor(n);
     const m = Math.floor(s / 60);
     const r = s % 60;
     return m > 0 ? (m + '分' + r + '秒') : (r + '秒');
+  }
+
+  function loadFontPt_() {
+    try {
+      const n = parseInt(localStorage.getItem(FONT_KEY), 10);
+      if (isNaN(n)) return FONT_DEFAULT;
+      return Math.min(FONT_MAX, Math.max(FONT_MIN, n));
+    } catch (e) {
+      return FONT_DEFAULT;
+    }
+  }
+
+  function applyFontPt_(pt, persist) {
+    pt = Math.min(FONT_MAX, Math.max(FONT_MIN, parseInt(pt, 10) || FONT_DEFAULT));
+    const screen = el_('live-room-board-screen');
+    if (screen) screen.style.setProperty('--live-list-pt', String(pt));
+    const input = el_('live-board-font-input');
+    if (input && String(input.value) !== String(pt)) input.value = String(pt);
+    if (persist !== false) {
+      try { localStorage.setItem(FONT_KEY, String(pt)); } catch (e) { /* ignore */ }
+    }
+    return pt;
+  }
+
+  function relocateLiveEntry_() {
+    const block = el_('live-room-entry-block');
+    if (!block) return;
+    const quiz = document.getElementById('vocab-quiz-section');
+    const link = document.getElementById('vocab-link-section');
+    const quizOn = quiz && quiz.style.display !== 'none';
+    const linkOn = link && link.style.display !== 'none';
+    const target = linkOn ? link : (quizOn ? quiz : null);
+    if (target) {
+      if (block.parentNode !== target) target.appendChild(block);
+      block.style.display = '';
+    } else {
+      block.style.display = 'none';
+    }
   }
 
   function formatLimit_(sec) {
@@ -166,6 +249,9 @@ const LiveRoomModule = (function () {
     if (filters.sho && filters.sho.length) divParts.push('小:' + filters.sho.join(','));
     lines.push('区分: ' + (divParts.length ? divParts.join(' / ') : '指定なし（シート全体）'));
     if (mode === 'word-link') {
+      const linkMode = opts.linkMode || (opts.wordLink && opts.wordLink.linkMode);
+      if (linkMode) lines.push('形式: ' + wordLinkModeLabel_(linkMode));
+      else lines.push('形式: START直前に選択');
       lines.push('出題数: ' + (opts.linkQuestionCount || 25) + '語');
     } else {
       const axes = opts.axes || {};
@@ -354,6 +440,7 @@ const LiveRoomModule = (function () {
       const pinInput = el_('live-room-pin-input');
       if (pinInput) pinInput.value = activeRoom_.pin;
     }
+    relocateLiveEntry_();
   }
 
   function showCreateDialog_(mode) {
@@ -408,6 +495,7 @@ const LiveRoomModule = (function () {
       launchOptions: data.launchOptions || launchOptions
     };
     timeoutFired_ = false;
+    boardDefaultedPin_ = '';
     setActiveRoom_(room);
     showBoardScreen_();
     startBoardPoll_();
@@ -493,8 +581,29 @@ const LiveRoomModule = (function () {
       return;
     }
     activeRoom_ = room;
-    await post_({ action: 'liveClose', pin: room.pin });
+    const res = await post_({ action: 'liveClose', pin: room.pin }, 1, EXPORT_TIMEOUT_MS);
     await leaveRoom();
+    const data = (res && res.data) || {};
+    if (data.spreadsheetUrl) {
+      const name = data.spreadsheetName || '結果ブック';
+      if (window.confirm('結果を保存しました: ' + name + '\nスプレッドシートを開きますか？')) {
+        window.open(data.spreadsheetUrl, '_blank');
+      }
+    }
+  }
+
+  async function exportResults() {
+    const room = (activeRoom_ && activeRoom_.isTeacher) ? activeRoom_ : loadStoredRoom_();
+    if (!room || !room.isTeacher) throw new Error('開催中の部屋がありません');
+    const res = await post_({ action: 'liveExport', pin: room.pin }, 1, EXPORT_TIMEOUT_MS);
+    const data = (res && res.data) || {};
+    if (data.spreadsheetUrl) {
+      const name = data.spreadsheetName || '結果ブック';
+      if (window.confirm('結果を保存しました: ' + name + '\nスプレッドシートを開きますか？')) {
+        window.open(data.spreadsheetUrl, '_blank');
+      }
+    }
+    return data;
   }
 
   function dismissBoardToSettings_() {
@@ -557,6 +666,8 @@ const LiveRoomModule = (function () {
         total: extra.wordCount || summary.Total || 0,
         durationSec: extra.elapsedSec != null ? extra.elapsedSec : summary.Duration_Sec,
         wrongCount: extra.totalWrong || 0,
+        linkMode: extra.linkMode || ((window.VocabLinkModule && VocabLinkModule.getSessionDisplaySettings)
+          ? VocabLinkModule.getSessionDisplaySettings().linkMode : ''),
         timedOut: !!extra.timedOut,
         finishedAt: summary.Ended_At || new Date().toISOString()
       });
@@ -625,11 +736,13 @@ const LiveRoomModule = (function () {
     }
     document.body.classList.add('live-room-board-active');
     paintBoardHeaderFromRoom_(activeRoom_);
+    applyFontPt_(loadFontPt_(), false);
     const settingsEl = el_('live-board-settings');
     if (settingsEl && activeRoom_) {
       settingsEl.textContent = formatLaunchSummary_(
         activeRoom_.mode, activeRoom_.launchOptions, activeRoom_.timeLimitSec);
     }
+    updateBoardTabLabels_(activeRoom_ && activeRoom_.mode);
   }
 
   function hideBoardScreen_() {
@@ -672,11 +785,22 @@ const LiveRoomModule = (function () {
         data.timeLimitSec != null ? data.timeLimitSec : (activeRoom_ && activeRoom_.timeLimitSec)
       );
     }
+    updateBoardTabLabels_(data.mode || (activeRoom_ && activeRoom_.mode));
     renderBoardList_('live-board-list-achievement', data.lists && data.lists.achievement, data.mode, 'achievement');
     renderBoardList_('live-board-list-score', data.lists && data.lists.scoreRate, data.mode, 'score');
     renderBoardList_('live-board-list-speed', data.lists && data.lists.speed, data.mode, 'speed');
-    const defaultTab = data.mode === 'word-link' ? 'speed' : 'score';
-    switchBoardTab_(defaultTab);
+    if (boardDefaultedPin_ !== (data.pin || (activeRoom_ && activeRoom_.pin) || '')) {
+      boardDefaultedPin_ = data.pin || (activeRoom_ && activeRoom_.pin) || '';
+      switchBoardTab_(data.mode === 'word-link' ? 'score' : 'score');
+    }
+  }
+
+  function updateBoardTabLabels_(mode) {
+    document.querySelectorAll('.live-board-tab').forEach(function (btn) {
+      const tab = btn.getAttribute('data-live-tab');
+      if (tab === 'score') btn.textContent = mode === 'word-link' ? 'ミス順' : '正解率';
+      if (tab === 'speed') btn.textContent = mode === 'word-link' ? 'タイム' : '速さ';
+    });
   }
 
   function renderBoardList_(containerId, rows, mode, kind) {
@@ -687,26 +811,34 @@ const LiveRoomModule = (function () {
       el.innerHTML = '<p class="filter-axis-hint" style="margin:0;">まだ達成者がいません</p>';
       return;
     }
-    let html = '<table class="live-board-table"><thead><tr><th>#</th><th>番号</th><th>氏名</th><th>';
-    if (kind === 'achievement') html += '達成時刻';
-    else if (mode === 'word-link' || kind === 'speed') html += 'タイム';
-    else html += '正解率';
-    html += '</th></tr></thead><tbody>';
+    const isWl = mode === 'word-link';
+    let html = '<table class="live-board-table"><thead><tr><th>#</th><th>番号</th><th>氏名</th>';
+    if (isWl) html += '<th>形式</th>';
+    if (kind === 'achievement') html += '<th>達成時刻</th>';
+    else if (isWl) html += '<th>ミス</th><th>タイム</th>';
+    else if (kind === 'speed') html += '<th>タイム</th>';
+    else html += '<th>正解率</th>';
+    html += '</tr></thead><tbody>';
     rows.forEach(function (row, idx) {
       const best = row.best || {};
-      let value = '';
+      html += '<tr><td>' + (idx + 1) + '</td><td>' + escapeHtml_(row.number || '—') + '</td><td>'
+        + escapeHtml_(row.name || '—') + '</td>';
+      if (isWl) html += '<td>' + escapeHtml_(wordLinkModeLabel_(best.linkMode) || '—') + '</td>';
       if (kind === 'achievement') {
         const d = best.finishedAt ? new Date(best.finishedAt) : null;
-        value = d ? (d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0')) : '—';
-      } else if (mode === 'word-link' || kind === 'speed') {
-        value = formatDuration_(best.durationSec);
-        if (best.wrongCount > 0) value += ' (ミス' + best.wrongCount + ')';
+        const value = d ? (d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0')) : '—';
+        html += '<td>' + escapeHtml_(value) + '</td>';
+      } else if (isWl) {
+        html += '<td>' + escapeHtml_(String(best.wrongCount || 0)) + '</td>';
+        html += '<td>' + escapeHtml_(formatDuration_(best.durationSec, true)) + '</td>';
+      } else if (kind === 'speed') {
+        html += '<td>' + escapeHtml_(formatDuration_(best.durationSec)) + '</td>';
       } else {
-        value = (best.scoreRate != null ? best.scoreRate : '—') + '%';
+        let value = (best.scoreRate != null ? best.scoreRate : '—') + '%';
         if (best.durationSec) value += ' / ' + formatDuration_(best.durationSec);
+        html += '<td>' + escapeHtml_(value) + '</td>';
       }
-      html += '<tr><td>' + (idx + 1) + '</td><td>' + escapeHtml_(row.number || '—') + '</td><td>'
-        + escapeHtml_(row.name || '—') + '</td><td>' + escapeHtml_(value) + '</td></tr>';
+      html += '</tr>';
     });
     html += '</tbody></table>';
     el.innerHTML = html;
@@ -803,10 +935,20 @@ const LiveRoomModule = (function () {
     const closeBtn = el_('live-board-close-btn');
     if (closeBtn) {
       closeBtn.addEventListener('click', function () {
-        if (!window.confirm('授業ライブを終了しますか？')) return;
+        if (!window.confirm('授業ライブを終了し、結果をスプレッドシートに保存しますか？')) return;
         BusyButton.run(closeBtn, function () {
           return closeRoom();
-        }, '終了中…').catch(function (e) {
+        }, '保存して終了中…').catch(function (e) {
+          alert(e.message || e);
+        });
+      });
+    }
+    const exportBtn = el_('live-board-export-btn');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', function () {
+        BusyButton.run(exportBtn, function () {
+          return exportResults();
+        }, '保存中…').catch(function (e) {
           alert(e.message || e);
         });
       });
@@ -822,6 +964,29 @@ const LiveRoomModule = (function () {
         switchBoardTab_(btn.getAttribute('data-live-tab'));
       });
     });
+    const fontInput = el_('live-board-font-input');
+    const fontMinus = el_('live-board-font-minus');
+    const fontPlus = el_('live-board-font-plus');
+    applyFontPt_(loadFontPt_(), false);
+    if (fontMinus) {
+      fontMinus.addEventListener('click', function () {
+        applyFontPt_(loadFontPt_() - 1, true);
+      });
+    }
+    if (fontPlus) {
+      fontPlus.addEventListener('click', function () {
+        applyFontPt_(loadFontPt_() + 1, true);
+      });
+    }
+    if (fontInput) {
+      fontInput.addEventListener('change', function () {
+        applyFontPt_(fontInput.value, true);
+      });
+      fontInput.addEventListener('input', function () {
+        const n = parseInt(fontInput.value, 10);
+        if (!isNaN(n)) applyFontPt_(n, true);
+      });
+    }
   }
 
   function init() {
@@ -849,6 +1014,7 @@ const LiveRoomModule = (function () {
     trySubmitFromSession: trySubmitFromSession,
     tryResumeAfterAuth_: tryResumeAfterAuth_,
     formatLiveResultMessage_: formatLiveResultMessage_,
+    exportResults: exportResults,
     getActiveRoom: getActiveRoom,
     isActive: isActive,
     isTeacherRoom: isTeacherRoom,

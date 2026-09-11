@@ -1092,13 +1092,14 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
 #live-room-start-attempt-btn { width: auto; min-width: 140px; min-height: 40px; font-size: 0.95em; margin: 0; }
 .live-room-settings-text { font-size: 0.82em; font-weight: normal; color: #1565c0; margin-top: 6px; line-height: 1.45; white-space: pre-wrap; }
 .live-board-settings {
-  background: #1e293b; border: 1px solid #334155; border-radius: 10px;
-  padding: 10px 12px; margin-bottom: 10px; color: #e2e8f0; font-size: 0.88rem; line-height: 1.5; white-space: pre-wrap;
+  background: transparent; border: none; border-radius: 0;
+  padding: 4px 0 0; margin: 0; color: #cbd5e1; font-size: 0.8rem; line-height: 1.35; white-space: pre-wrap;
 }
 #live-room-join-panel {
-  margin: 0 0 12px; padding: 12px; background: #f8f9fa; border-radius: 8px;
+  margin: 16px 0 0; padding: 12px; background: #f8f9fa; border-radius: 8px;
   border: 1px solid #eceff1;
 }
+#live-room-entry-block { margin-top: 16px; }
 .live-room-join-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 #live-room-pin-input {
   width: 5.5em; min-height: 44px; font-size: 1.2em; text-align: center; letter-spacing: 0.15em;
@@ -1117,27 +1118,62 @@ body.live-room-board-active #vocab-link-screen,
 body.live-room-board-active #reading-screen,
 body.live-room-board-active #login-screen { display: none !important; }
 #live-room-board-screen {
+  --live-list-pt: 18;
   display: none; position: fixed; inset: 0; z-index: 12000; background: #0f172a; color: #f8fafc;
-  flex-direction: column; padding: 16px; overflow: hidden;
+  flex-direction: column; padding: 0; overflow: hidden;
   width: 100vw; height: 100dvh; max-width: none; box-sizing: border-box;
 }
-.live-board-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-.live-board-title { font-size: clamp(1.2rem, 4vw, 1.8rem); font-weight: bold; margin: 0; }
-.live-board-pin { font-size: clamp(2rem, 8vw, 3.2rem); font-weight: bold; color: #38bdf8; letter-spacing: 0.2em; }
-.live-board-meta { font-size: 0.95rem; color: #94a3b8; }
-.live-board-timer { font-size: 1.1rem; font-weight: bold; color: #fbbf24; }
-.live-board-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.live-board-header-band {
+  flex-shrink: 0;
+  background: #111827;
+  border-bottom: 1px solid #334155;
+  padding: 8px 12px 6px;
+}
+.live-board-header-row {
+  display: flex;
+  align-items: center;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+}
+.live-board-title { font-size: clamp(1rem, 2.4vw, 1.35rem); font-weight: bold; margin: 0; line-height: 1.2; }
+.live-board-pin {
+  font-size: clamp(1.4rem, 4vw, 2.2rem); font-weight: bold; color: #38bdf8; letter-spacing: 0.18em;
+  line-height: 1;
+}
+.live-board-meta { font-size: 0.85rem; color: #94a3b8; }
+.live-board-timer { font-size: 0.95rem; font-weight: bold; color: #fbbf24; }
+.live-board-font-ctrl {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.82rem; color: #cbd5e1; margin-left: auto;
+}
+.live-board-font-ctrl input[type="number"] {
+  width: 3.6em; min-height: 32px; text-align: center;
+  border: 1px solid #475569; border-radius: 6px; background: #1e293b; color: #f8fafc;
+}
+.live-board-font-ctrl button {
+  min-width: 32px; min-height: 32px; border: 1px solid #475569; border-radius: 6px;
+  background: #1e293b; color: #e2e8f0; cursor: pointer; font-size: 1rem;
+}
+.live-board-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 0; }
 .live-board-tab {
   border: 1px solid #475569; background: #1e293b; color: #e2e8f0; border-radius: 8px;
-  padding: 8px 14px; font-weight: 600; cursor: pointer;
+  padding: 4px 12px; font-weight: 600; cursor: pointer; font-size: 0.88rem;
 }
 .live-board-tab.active { background: #38bdf8; color: #0f172a; border-color: #38bdf8; }
-.live-board-body { flex: 1; overflow: auto; background: #1e293b; border-radius: 12px; padding: 12px; border: 1px solid #334155; }
-.live-board-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
-.live-board-table th, .live-board-table td { border-bottom: 1px solid #334155; padding: 8px 10px; text-align: left; }
-.live-board-table th { color: #94a3b8; font-weight: 600; }
-.live-board-actions { display: flex; gap: 8px; margin-top: 12px; flex-shrink: 0; }
-.live-board-actions .btn-primary, .live-board-actions .btn-secondary { width: auto; min-width: 120px; }
+.live-board-body { flex: 1; overflow: auto; background: #0f172a; padding: 8px 12px 12px; }
+.live-board-table {
+  width: 100%; border-collapse: collapse;
+  font-size: calc(var(--live-list-pt, 18) * 1pt);
+}
+.live-board-table th, .live-board-table td {
+  border-bottom: 1px solid #334155; padding: 0.28em 0.45em; text-align: left;
+  font-size: inherit; line-height: 1.25;
+}
+.live-board-table th { color: #94a3b8; font-weight: 600; font-size: 0.72em; }
+.live-board-actions { display: flex; gap: 6px; flex-shrink: 0; margin: 0; }
+.live-board-actions .btn-primary, .live-board-actions .btn-secondary {
+  width: auto; min-width: 0; min-height: 34px; padding: 6px 10px; font-size: 0.82rem; margin: 0;
+}
 #live-room-timer[hidden] { display: none !important; }
 .asg-list-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .asg-refresh-warn {
@@ -1659,6 +1695,7 @@ body.live-room-board-active #login-screen { display: none !important; }
           </div>
         </div>
       </div>
+      <div id="live-room-entry-block">
       <div id="live-room-teacher-banner" role="status" style="display:none;"></div>
       <div id="live-room-student-banner" role="status">
         <div class="live-room-student-row">
@@ -1676,6 +1713,7 @@ body.live-room-board-active #login-screen { display: none !important; }
           <button type="button" class="btn-primary" id="live-room-join-btn" style="width:auto;min-width:100px;">参加</button>
           <button type="button" class="btn-secondary" id="live-room-leave-btn" style="width:auto;min-width:100px;">退出</button>
         </div>
+      </div>
       </div>
       <div class="setting-section" id="vocab-quiz-section" data-vocab-mode-panel="quiz" style="display:none;">
         <p class="filter-axis-hint" style="margin:0 0 12px;">クイズ形式の単語学習です。下の出題形式・出題設定が反映されます。</p>
@@ -2352,30 +2390,36 @@ body.live-room-board-active #login-screen { display: none !important; }
   </div>
 
   <div id="live-room-board-screen" aria-hidden="true">
-    <div class="live-board-header">
-      <div>
+    <div class="live-board-header-band">
+      <div class="live-board-header-row">
         <h2 class="live-board-title" id="live-board-title">授業ライブ</h2>
-        <div class="live-board-meta" id="live-board-meta"></div>
-      </div>
-      <div style="text-align:right;">
         <div class="live-board-pin" id="live-board-pin"></div>
         <div class="live-board-timer" id="live-board-timer"></div>
+        <div class="live-board-meta" id="live-board-meta"></div>
+        <label class="live-board-font-ctrl">
+          文字
+          <button type="button" id="live-board-font-minus" aria-label="文字サイズを小さく">−</button>
+          <input type="number" id="live-board-font-input" min="1" max="50" step="1" value="18" aria-label="リスト文字サイズ（pt）">
+          <button type="button" id="live-board-font-plus" aria-label="文字サイズを大きく">+</button>
+          pt
+        </label>
+        <div class="live-board-actions">
+          <button type="button" class="btn-secondary" id="live-board-export-btn">結果を保存</button>
+          <button type="button" class="btn-secondary" id="live-board-back-btn">学習画面</button>
+          <button type="button" class="btn-secondary" id="live-board-close-btn">部屋を閉じる</button>
+        </div>
       </div>
-    </div>
-    <div class="live-board-settings" id="live-board-settings"></div>
-    <div class="live-board-tabs">
-      <button type="button" class="live-board-tab" data-live-tab="achievement">達成</button>
-      <button type="button" class="live-board-tab" data-live-tab="score">正解率</button>
-      <button type="button" class="live-board-tab" data-live-tab="speed">速さ</button>
+      <div class="live-board-settings" id="live-board-settings"></div>
+      <div class="live-board-tabs">
+        <button type="button" class="live-board-tab" data-live-tab="achievement">達成</button>
+        <button type="button" class="live-board-tab" data-live-tab="score">正解率</button>
+        <button type="button" class="live-board-tab" data-live-tab="speed">速さ</button>
+      </div>
     </div>
     <div class="live-board-body">
       <div class="live-board-panel" data-live-panel="achievement" id="live-board-list-achievement"></div>
       <div class="live-board-panel" data-live-panel="score" id="live-board-list-score" style="display:none;"></div>
       <div class="live-board-panel" data-live-panel="speed" id="live-board-list-speed" style="display:none;"></div>
-    </div>
-    <div class="live-board-actions">
-      <button type="button" class="btn-secondary" id="live-board-back-btn">学習画面に戻る</button>
-      <button type="button" class="btn-secondary" id="live-board-close-btn">部屋を閉じる</button>
     </div>
   </div>
 
@@ -10922,7 +10966,8 @@ window.saveVocabLinkSessionLog_ = async function (stats) {
     wordCount: stats.wordCount,
     elapsedSec: stats.elapsedSec,
     totalWrong: stats.totalWrong,
-    completed: !!stats.completed
+    completed: !!stats.completed,
+    linkMode: stats.linkMode
   });
 };
 
