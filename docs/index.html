@@ -1088,7 +1088,13 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
   display: none; margin: 0 0 10px; padding: 10px 12px; background: #e3f2fd;
   border: 1px solid #90caf9; border-radius: 8px; color: #1565c0; font-size: 0.9em; font-weight: 600;
 }
-#live-room-teacher-banner { display: none; }
+.live-room-student-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+#live-room-start-attempt-btn { width: auto; min-width: 140px; min-height: 40px; font-size: 0.95em; margin: 0; }
+.live-room-settings-text { font-size: 0.82em; font-weight: normal; color: #1565c0; margin-top: 6px; line-height: 1.45; white-space: pre-wrap; }
+.live-board-settings {
+  background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 10px; color: #e2e8f0; font-size: 0.88rem; line-height: 1.5; white-space: pre-wrap;
+}
 #live-room-join-panel {
   margin: 0 0 12px; padding: 12px; background: #f8f9fa; border-radius: 8px;
   border: 1px solid #eceff1;
@@ -1644,7 +1650,14 @@ body.live-room-board-active #result-screen { display: none !important; }
         </div>
       </div>
       <div id="live-room-teacher-banner" role="status" style="display:none;"></div>
-      <div id="live-room-student-banner" role="status"></div>
+      <div id="live-room-student-banner" role="status">
+        <div class="live-room-student-row">
+          <span id="live-room-student-status"></span>
+          <span id="live-room-timer" hidden></span>
+          <button type="button" class="btn-primary" id="live-room-start-attempt-btn">参加する（取り組む）</button>
+        </div>
+        <div id="live-room-student-settings" class="live-room-settings-text"></div>
+      </div>
       <div id="live-room-join-panel">
         <div class="subsection-title" style="margin-bottom:8px;">授業ライブに参加</div>
         <p class="filter-axis-hint" style="margin:0 0 8px;">教員から伝えられた4桁コードを入力してください。時間内なら何度でも挑戦でき、ベストスコアだけが記録されます。</p>
@@ -1785,7 +1798,7 @@ body.live-room-board-active #result-screen { display: none !important; }
         </div>
       <div class="paper-quiz-start-row">
         <button id="vocab-start-btn" class="btn-primary">▶ 単語クイズを開始する</button>
-        <button type="button" class="btn-secondary live-room-open-btn" data-live-mode="vocab" style="display:none;">授業ライブを開く（単語クイズ）</button>
+        <button type="button" class="btn-secondary live-room-open-btn" data-live-mode="vocab" style="display:none;">この設定で授業ライブを開く</button>
         <button type="button" id="vocab-paper-print-btn" class="btn-secondary">問題用紙を印刷</button>
       </div>
       </div>
@@ -1803,7 +1816,7 @@ body.live-room-board-active #result-screen { display: none !important; }
           </select>
         </div>
         <button type="button" id="vocab-link-start-btn" class="btn-primary">Word Link を開始する</button>
-        <button type="button" class="btn-secondary live-room-open-btn" data-live-mode="word-link" style="display:none;">授業ライブを開く（Word Link）</button>
+        <button type="button" class="btn-secondary live-room-open-btn" data-live-mode="word-link" style="display:none;">この設定で授業ライブを開く</button>
       </div>
 
       <div class="setting-section" id="vocab-review-section" data-vocab-mode-panel="review" style="display:none;">
@@ -2339,6 +2352,7 @@ body.live-room-board-active #result-screen { display: none !important; }
         <div class="live-board-timer" id="live-board-timer"></div>
       </div>
     </div>
+    <div class="live-board-settings" id="live-board-settings"></div>
     <div class="live-board-tabs">
       <button type="button" class="live-board-tab" data-live-tab="achievement">達成</button>
       <button type="button" class="live-board-tab" data-live-tab="score">正解率</button>
@@ -7933,7 +7947,10 @@ const VocabSettingsModule = (() => {
       dummyMethod: dummyMethod,
       affixType: affixTypeEl ? affixTypeEl.value : 'prefix',
       affixLen: parseInt(document.getElementById('vocab-affix-len').value, 10),
-      cardTarget: getCardTargetSettings_()
+      cardTarget: getCardTargetSettings_(),
+      bookType: (document.getElementById('vocab-book-type') || {}).value || 'preset',
+      linkQuestionCount: parseInt((document.getElementById('vocab-link-count') || {}).value, 10) || 25,
+      vocabSubMode: vocabSubMode_
     };
   }
 
@@ -10642,6 +10659,7 @@ window.startVocabReviewSetQuiz_ = async function (reviewSetId) {
 };
 
 async function runVocabQuizSession_(options, btn, reviewSetId) {
+  currentAppMode = 'vocab';
   if (!options.bookName || !options.sheetName) {
     alert('ブックと教材（シート）を選択してください。');
     return;
@@ -10737,6 +10755,7 @@ async function runVocabQuizSession_(options, btn, reviewSetId) {
     }
   }, runLabel);
 }
+window.runVocabQuizSession_ = runVocabQuizSession_;
 
 const vocabCardStartTargetedBtn = document.getElementById('vocab-card-start-targeted-btn');
 const vocabCardStartAllBtn = document.getElementById('vocab-card-start-all-btn');

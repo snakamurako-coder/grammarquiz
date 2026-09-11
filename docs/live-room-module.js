@@ -150,16 +150,38 @@ const LiveRoomModule = (function () {
       el.textContent = text;
       el.classList.toggle('urgent', !!urgent);
     });
-    const banner = el_('live-room-student-banner');
-    if (banner && activeRoom_ && !activeRoom_.isTeacher) {
-      if (hide || !text) {
-        banner.textContent = '授業ライブ参加中: ' + (activeRoom_.title || activeRoom_.pin)
-          + '（コード ' + activeRoom_.pin + '）';
-      } else {
-        banner.textContent = '授業ライブ参加中: ' + (activeRoom_.title || activeRoom_.pin)
-          + '（コード ' + activeRoom_.pin + '） ' + text;
-      }
+  }
+
+  function formatLaunchSummary_(mode, opts, timeLimitSec) {
+    opts = opts || {};
+    const lines = [];
+    lines.push('種別: ' + (mode === 'word-link' ? 'Word Link' : '単語クイズ'));
+    if (opts.bookName || opts.sheetName) {
+      lines.push('教材: ' + (opts.bookName || '—') + ' / ' + (opts.sheetName || '—'));
     }
+    const filters = opts.filters || {};
+    const divParts = [];
+    if (filters.dai && filters.dai.length) divParts.push('大:' + filters.dai.join(','));
+    if (filters.chu && filters.chu.length) divParts.push('中:' + filters.chu.join(','));
+    if (filters.sho && filters.sho.length) divParts.push('小:' + filters.sho.join(','));
+    lines.push('区分: ' + (divParts.length ? divParts.join(' / ') : '指定なし（シート全体）'));
+    if (mode === 'word-link') {
+      lines.push('出題数: ' + (opts.linkQuestionCount || 25) + '語');
+    } else {
+      const axes = opts.axes || {};
+      const dirMap = { jaen: '和英', enja: '英和' };
+      const grainMap = { WD: '語', PH: '句', EX: '例文' };
+      const dirs = (axes.directions || []).map(function (d) { return dirMap[d] || d; });
+      const grains = (axes.grains || []).map(function (g) { return grainMap[g] || g; });
+      lines.push('方向: ' + (dirs.length ? dirs.join('・') : '—'));
+      lines.push('単位: ' + (grains.length ? grains.join('・') : '—'));
+      const respMap = { choice: '選択', typing: '入力', speech: '音声' };
+      lines.push('解答: ' + (respMap[axes.response] || axes.response || '—'));
+      if (opts.questionCount) lines.push('出題数: ' + (opts.questionCount === 'all' ? 'すべて' : opts.questionCount + '問'));
+    }
+    if (timeLimitSec > 0) lines.push('制限時間: ' + formatLimit_(timeLimitSec));
+    else lines.push('制限時間: なし');
+    return lines.join('\n');
   }
 
   function clearRoomTimer_() {
@@ -292,8 +314,15 @@ const LiveRoomModule = (function () {
     if (banner) {
       if (activeRoom_ && !activeRoom_.isTeacher && isLoggedIn_()) {
         banner.style.display = 'block';
-        banner.textContent = '授業ライブ参加中: ' + (activeRoom_.title || activeRoom_.pin)
-          + '（コード ' + activeRoom_.pin + '）';
+        const statusEl = el_('live-room-student-status');
+        if (statusEl) {
+          statusEl.textContent = '授業ライブ参加中: ' + (activeRoom_.title || activeRoom_.pin)
+            + '（コード ' + activeRoom_.pin + '）';
+        }
+        const settingsEl = el_('live-room-student-settings');
+        if (settingsEl) {
+          settingsEl.textContent = formatLaunchSummary_(activeRoom_.mode, activeRoom_.launchOptions, activeRoom_.timeLimitSec);
+        }
       } else {
         banner.style.display = 'none';
       }
@@ -366,7 +395,8 @@ const LiveRoomModule = (function () {
       closesAt: data.closesAt || 0,
       timeLimitSec: data.timeLimitSec || 0,
       autoSubmitOnTimeout: data.autoSubmitOnTimeout !== false,
-      rosterCount: data.rosterCount || 0
+      rosterCount: data.rosterCount || 0,
+      launchOptions: data.launchOptions || launchOptions
     };
     timeoutFired_ = false;
     setActiveRoom_(room);
@@ -397,7 +427,43 @@ const LiveRoomModule = (function () {
     timeoutFired_ = false;
     localBest_ = room.localBest;
     setActiveRoom_(room);
+    applyLaunchOptionsToUi_(room.launchOptions, room.mode);
     return room;
+  }
+
+  function applyLaunchOptionsToUi_(opts, mode) {
+    if (!opts || !window.VocabSettingsModule || typeof VocabSettingsModule.applySettings !== 'function') return;
+    try {
+      VocabSettingsModule.applySettings(opts);
+      if (typeof VocabSettingsModule.applyVocabModeTab === 'function') {
+        VocabSettingsModule.applyVocabModeTab(mode === 'word-link' ? 'link' : 'quiz', false);
+      }
+    } catch (e) {
+      console.warn('授業ライブ設定の反映:', e.message || e);
+    }
+  }
+
+  async function startAssignedSession_() {
+    if (!activeRoom_ || activeRoom_.isTeacher) throw new Error('授業ライブに参加してから取り組んでください');
+    const opts = Object.assign({}, activeRoom_.launchOptions || {});
+    opts.homeworkMode = false;
+    if (!opts.bookName || !opts.sheetName) throw new Error('出題設定がありません。もう一度参加し直してください。');
+    applyLaunchOptionsToUi_(opts, activeRoom_.mode);
+    const startBtn = el_('live-room-start-attempt-btn');
+    if (activeRoom_.mode === 'word-link') {
+      if (!window.VocabLinkModule) throw new Error('Word Link モジュールの読み込みに失敗しました');
+      if (window.TtsModule && typeof window.TtsModule.prime === 'function') window.TtsModule.prime();
+      await BusyButton.run(startBtn, async function () {
+        await VocabLinkModule.loadAndStart(opts);
+        if (window.BackendSyncStatus) BackendSyncStatus.refresh();
+      }, '開始中…');
+      return;
+    }
+    if (typeof window.runVocabQuizSession_ !== 'function') {
+      throw new Error('単語クイズを開始できません');
+    }
+    window.currentAppMode = 'vocab';
+    await window.runVocabQuizSession_(opts, startBtn, null);
   }
 
   async function leaveRoom() {
@@ -525,6 +591,11 @@ const LiveRoomModule = (function () {
       screen.setAttribute('aria-hidden', 'false');
     }
     document.body.classList.add('live-room-board-active');
+    const settingsEl = el_('live-board-settings');
+    if (settingsEl && activeRoom_) {
+      settingsEl.textContent = formatLaunchSummary_(
+        activeRoom_.mode, activeRoom_.launchOptions, activeRoom_.timeLimitSec);
+    }
   }
 
   function hideBoardScreen_() {
@@ -554,6 +625,18 @@ const LiveRoomModule = (function () {
       } else {
         timerEl.textContent = '制限なし';
       }
+    }
+    if (data.launchOptions && activeRoom_) {
+      activeRoom_.launchOptions = data.launchOptions;
+      saveStoredRoom_(activeRoom_);
+    }
+    const settingsEl = el_('live-board-settings');
+    if (settingsEl) {
+      settingsEl.textContent = formatLaunchSummary_(
+        data.mode || (activeRoom_ && activeRoom_.mode),
+        data.launchOptions || (activeRoom_ && activeRoom_.launchOptions),
+        data.timeLimitSec != null ? data.timeLimitSec : (activeRoom_ && activeRoom_.timeLimitSec)
+      );
     }
     renderBoardList_('live-board-list-achievement', data.lists && data.lists.achievement, data.mode, 'achievement');
     renderBoardList_('live-board-list-score', data.lists && data.lists.scoreRate, data.mode, 'score');
@@ -651,8 +734,16 @@ const LiveRoomModule = (function () {
         BusyButton.run(joinBtn, function () {
           return joinRoom(pin);
         }, '参加中…').then(function () {
-          if (typeof showToast_ === 'function') showToast_('授業ライブに参加しました');
+          if (typeof showToast_ === 'function') showToast_('授業ライブに参加しました。「参加する（取り組む）」で開始できます');
         }).catch(function (e) {
+          alert(e.message || e);
+        });
+      });
+    }
+    const startAttemptBtn = el_('live-room-start-attempt-btn');
+    if (startAttemptBtn) {
+      startAttemptBtn.addEventListener('click', function () {
+        startAssignedSession_().catch(function (e) {
           alert(e.message || e);
         });
       });

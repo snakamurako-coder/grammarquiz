@@ -676,7 +676,9 @@ const VocabLinkModule = (function () {
     const pairs = buildPairsFromWords_(words);
     if (!pairs.length) throw new Error('語（WD）の英語と語義が揃った単語がありません。');
 
-    const want = getLinkQuestionCount_();
+    const want = (options && options.linkQuestionCount)
+      ? (parseInt(options.linkQuestionCount, 10) || getLinkQuestionCount_())
+      : getLinkQuestionCount_();
     masterPairs = shuffle_(pairs).slice(0, Math.min(want, pairs.length));
     initStats_(masterPairs);
 

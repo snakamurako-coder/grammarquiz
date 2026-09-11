@@ -4942,7 +4942,8 @@ function apiLiveCreate_(requestData) {
       autoSubmitOnTimeout: meta.autoSubmitOnTimeout,
       closesAt: meta.closesAt,
       rosterCount: roster.length,
-      ttlSec: ttlSec
+      ttlSec: ttlSec,
+      launchOptions: launchOptions
     }
   };
 }
@@ -5065,7 +5066,8 @@ function apiLiveBoard_(requestData) {
       finishedCount: finishedCount,
       joinedCount: entries.length,
       lists: lists,
-      entries: entries
+      entries: entries,
+      launchOptions: meta.launchOptions || null
     }
   };
 }
