@@ -4835,11 +4835,11 @@ function collectLiveEntryKeys_(meta, pin) {
       const acct = String(r.account || '').trim().toLowerCase();
       if (acct) accounts[acct] = true;
     });
-  } else {
-    readLiveIndexAccounts_(pin).forEach(function (acct) {
-      accounts[String(acct || '').trim().toLowerCase()] = true;
-    });
   }
+  readLiveIndexAccounts_(pin).forEach(function (acct) {
+    const normalized = String(acct || '').trim().toLowerCase();
+    if (normalized) accounts[normalized] = true;
+  });
   Object.keys(accounts).forEach(function (acct) {
     keys.push(liveEntryKey_(pin, acct));
   });
@@ -4958,12 +4958,6 @@ function apiLiveJoin_(requestData) {
   const user = resolveAuthUserFromRequest_(authReq);
   const account = String(user.account || authReq.auth.email || '').trim().toLowerCase();
   if (!account) return { status: 'error', message: 'アカウント情報を取得できません' };
-  if (String(user.class || '').trim().toLowerCase() === 'admin') {
-    return { status: 'error', message: '管理者アカウントは参加できません' };
-  }
-  if (meta.targetClass && !isTargetFieldMatch_(meta.targetClass, user.class)) {
-    return { status: 'error', message: 'この部屋の対象クラスではありません' };
-  }
   const ttlSec = computeLiveRoomTtlSec_(meta.timeLimitSec);
   let entry = getLiveEntry_(pin, account);
   if (!entry) {
@@ -4978,9 +4972,7 @@ function apiLiveJoin_(requestData) {
     };
     putLiveEntry_(pin, account, entry, ttlSec);
   }
-  if (!meta.roster || !meta.roster.length) {
-    appendLiveIndexAccount_(pin, account, ttlSec);
-  }
+  appendLiveIndexAccount_(pin, account, ttlSec);
   return {
     status: 'success',
     data: {
@@ -5006,9 +4998,6 @@ function apiLiveSubmit_(requestData) {
   const user = resolveAuthUserFromRequest_(authReq);
   const account = String(user.account || authReq.auth.email || '').trim().toLowerCase();
   if (!account) return { status: 'error', message: 'アカウント情報を取得できません' };
-  if (meta.targetClass && !isTargetFieldMatch_(meta.targetClass, user.class)) {
-    return { status: 'error', message: 'この部屋の対象クラスではありません' };
-  }
   const ttlSec = computeLiveRoomTtlSec_(meta.timeLimitSec);
   const attempt = normalizeLiveAttempt_(meta.mode, requestData.attempt || requestData);
   if (meta.mode === 'word-link' && attempt.total <= 0) {
@@ -5034,9 +5023,7 @@ function apiLiveSubmit_(requestData) {
   }
   entry.status = entry.best ? 'finished' : entry.status;
   putLiveEntry_(pin, account, entry, ttlSec);
-  if (!meta.roster || !meta.roster.length) {
-    appendLiveIndexAccount_(pin, account, ttlSec);
-  }
+  appendLiveIndexAccount_(pin, account, ttlSec);
   return {
     status: 'success',
     data: {

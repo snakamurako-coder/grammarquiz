@@ -270,7 +270,7 @@ const LiveRoomModule = (function () {
   }
 
   function showCreateDialog_(mode) {
-    const targetClass = window.prompt('対象クラス（空欄＝PIN のみ。例: A）', '') || '';
+    const targetClass = window.prompt('名簿に出すクラス（空欄可。PIN を知っている人は誰でも参加できます）', '') || '';
     const limitRaw = window.prompt('制限時間（分・空欄＝なし）', '8');
     let timeLimitSec = 0;
     if (String(limitRaw || '').trim()) {
