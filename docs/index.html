@@ -1082,6 +1082,45 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
 .asg-list-heading .assignment-print-btn { flex-shrink: 0; }
 .paper-quiz-start-row { display: flex; flex-direction: column; gap: 8px; }
 .paper-quiz-start-row .btn-secondary { width: 100%; }
+.live-room-open-btn { width: 100%; min-height: 44px; font-size: 0.92em; font-weight: bold; }
+#live-room-student-banner {
+  display: none; margin: 0 0 10px; padding: 10px 12px; background: #e3f2fd;
+  border: 1px solid #90caf9; border-radius: 8px; color: #1565c0; font-size: 0.9em; font-weight: 600;
+}
+#live-room-join-panel {
+  margin: 0 0 12px; padding: 12px; background: #f8f9fa; border-radius: 8px;
+  border: 1px solid #eceff1;
+}
+.live-room-join-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+#live-room-pin-input {
+  width: 5.5em; min-height: 44px; font-size: 1.2em; text-align: center; letter-spacing: 0.15em;
+  border: 1px solid #ccc; border-radius: 8px;
+}
+body.live-room-board-active #settings-screen,
+body.live-room-board-active #game-screen,
+body.live-room-board-active #result-screen { display: none !important; }
+#live-room-board-screen {
+  display: none; position: fixed; inset: 0; z-index: 12000; background: #0f172a; color: #f8fafc;
+  flex-direction: column; padding: 16px; overflow: hidden;
+}
+.live-board-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.live-board-title { font-size: clamp(1.2rem, 4vw, 1.8rem); font-weight: bold; margin: 0; }
+.live-board-pin { font-size: clamp(2rem, 8vw, 3.2rem); font-weight: bold; color: #38bdf8; letter-spacing: 0.2em; }
+.live-board-meta { font-size: 0.95rem; color: #94a3b8; }
+.live-board-timer { font-size: 1.1rem; font-weight: bold; color: #fbbf24; }
+.live-board-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.live-board-tab {
+  border: 1px solid #475569; background: #1e293b; color: #e2e8f0; border-radius: 8px;
+  padding: 8px 14px; font-weight: 600; cursor: pointer;
+}
+.live-board-tab.active { background: #38bdf8; color: #0f172a; border-color: #38bdf8; }
+.live-board-body { flex: 1; overflow: auto; background: #1e293b; border-radius: 12px; padding: 12px; border: 1px solid #334155; }
+.live-board-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.live-board-table th, .live-board-table td { border-bottom: 1px solid #334155; padding: 8px 10px; text-align: left; }
+.live-board-table th { color: #94a3b8; font-weight: 600; }
+.live-board-actions { display: flex; gap: 8px; margin-top: 12px; flex-shrink: 0; }
+.live-board-actions .btn-primary, .live-board-actions .btn-secondary { width: auto; min-width: 120px; }
+#live-room-timer[hidden] { display: none !important; }
 .asg-list-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .asg-refresh-warn {
   font-size: 0.85em;
@@ -1602,6 +1641,16 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
           </div>
         </div>
       </div>
+      <div id="live-room-student-banner" role="status"></div>
+      <div id="live-room-join-panel">
+        <div class="subsection-title" style="margin-bottom:8px;">授業ライブに参加</div>
+        <p class="filter-axis-hint" style="margin:0 0 8px;">教員から伝えられた4桁コードを入力してください。時間内なら何度でも挑戦でき、ベストスコアだけが記録されます。</p>
+        <div class="live-room-join-row">
+          <input type="text" id="live-room-pin-input" inputmode="numeric" maxlength="4" pattern="[0-9]*" placeholder="0000" aria-label="参加コード">
+          <button type="button" class="btn-primary" id="live-room-join-btn" style="width:auto;min-width:100px;">参加</button>
+          <button type="button" class="btn-secondary" id="live-room-leave-btn" style="width:auto;min-width:100px;">退出</button>
+        </div>
+      </div>
       <div class="setting-section" id="vocab-quiz-section" data-vocab-mode-panel="quiz" style="display:none;">
         <p class="filter-axis-hint" style="margin:0 0 12px;">クイズ形式の単語学習です。下の出題形式・出題設定が反映されます。</p>
         <div id="session-resume-banner" class="vocab-session-resume-banner" style="display:none;" role="status">
@@ -1733,6 +1782,7 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
         </div>
       <div class="paper-quiz-start-row">
         <button id="vocab-start-btn" class="btn-primary">▶ 単語クイズを開始する</button>
+        <button type="button" class="btn-secondary live-room-open-btn" data-live-mode="vocab" style="display:none;">授業ライブを開く（単語クイズ）</button>
         <button type="button" id="vocab-paper-print-btn" class="btn-secondary">問題用紙を印刷</button>
       </div>
       </div>
@@ -1750,6 +1800,7 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
           </select>
         </div>
         <button type="button" id="vocab-link-start-btn" class="btn-primary">Word Link を開始する</button>
+        <button type="button" class="btn-secondary live-room-open-btn" data-live-mode="word-link" style="display:none;">授業ライブを開く（Word Link）</button>
       </div>
 
       <div class="setting-section" id="vocab-review-section" data-vocab-mode-panel="review" style="display:none;">
@@ -2274,6 +2325,32 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
     </div>
   </div>
 
+  <div id="live-room-board-screen" aria-hidden="true">
+    <div class="live-board-header">
+      <div>
+        <h2 class="live-board-title" id="live-board-title">授業ライブ</h2>
+        <div class="live-board-meta" id="live-board-meta"></div>
+      </div>
+      <div style="text-align:right;">
+        <div class="live-board-pin" id="live-board-pin"></div>
+        <div class="live-board-timer" id="live-board-timer"></div>
+      </div>
+    </div>
+    <div class="live-board-tabs">
+      <button type="button" class="live-board-tab" data-live-tab="achievement">達成</button>
+      <button type="button" class="live-board-tab" data-live-tab="score">正解率</button>
+      <button type="button" class="live-board-tab" data-live-tab="speed">速さ</button>
+    </div>
+    <div class="live-board-body">
+      <div class="live-board-panel" data-live-panel="achievement" id="live-board-list-achievement"></div>
+      <div class="live-board-panel" data-live-panel="score" id="live-board-list-score" style="display:none;"></div>
+      <div class="live-board-panel" data-live-panel="speed" id="live-board-list-speed" style="display:none;"></div>
+    </div>
+    <div class="live-board-actions">
+      <button type="button" class="btn-secondary" id="live-board-close-btn">部屋を閉じる</button>
+    </div>
+  </div>
+
   <div id="vocab-link-screen" style="display: none;" aria-hidden="true">
     <button type="button" class="vl-top-back" id="vl-back-btn" title="学習設定に戻る">✕ 戻る</button>
 
@@ -2379,6 +2456,7 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
 <script src="vocab-session-draft.js"></script>
 <script src="vocab-card-module.js"></script>
 <script src="vocab-link-module.js"></script>
+<script src="live-room-module.js"></script>
 <script>
 /** true: GAS① 認証ゲート必須（短命 auth トークン） */
 const AUTH_ENABLED = true;
@@ -7610,6 +7688,7 @@ const VocabSettingsModule = (() => {
     });
     syncVocabDivisionCountVisibility_();
     if (mode === 'review') scheduleReviewSetCount_();
+    if (window.LiveRoomModule) LiveRoomModule.refreshUi_();
     if (persist && !restoring_) persistSettings_();
   }
 
@@ -10804,7 +10883,13 @@ window.saveVocabLinkSessionLog_ = async function (stats) {
   };
   totalQuestionsCount = stats.wordCount || 0;
   currentScore = stats.wordCount || 0;
-  await saveSessionResultsUnified('word-link', stats.setName);
+  if (!stats.completed) return;
+  await saveSessionResultsUnified('word-link', stats.setName, {
+    wordCount: stats.wordCount,
+    elapsedSec: stats.elapsedSec,
+    totalWrong: stats.totalWrong,
+    completed: !!stats.completed
+  });
 };
 
 function applyVocabCardSessionScore_(known, total) {
@@ -11427,10 +11512,24 @@ async function buildSessionSummary_(modeOverride, setNameOverride) {
   };
 }
 
-async function saveSessionResultsUnified(modeOverride, setNameOverride) {
+async function saveSessionResultsUnified(modeOverride, setNameOverride, liveExtra) {
   if (!AuthGateService.isValid()) return { skipped: true, reason: 'not_authenticated' };
 
   const summary = await buildSessionSummary_(modeOverride, setNameOverride);
+  let liveResult = null;
+  if (window.LiveRoomModule && LiveRoomModule.isActive() && !LiveRoomModule.isTeacherRoom()) {
+    const room = LiveRoomModule.getActiveRoom() || {};
+    const mode = room.mode;
+    const modeOk = (mode === 'vocab' && (modeOverride === 'vocab' || !modeOverride))
+      || (mode === 'word-link' && modeOverride === 'word-link');
+    if (modeOk) {
+      liveExtra = liveExtra || {};
+      if (window._liveTimedOutSubmit) liveExtra.timedOut = true;
+      liveResult = await LiveRoomModule.trySubmitFromSession(summary, liveExtra);
+      window._liveTimedOutSubmit = false;
+    }
+  }
+  window._lastLiveSubmitResult = liveResult;
   submitSessionSummary_(summary).catch(function (e) { console.warn('[Form]', e); });
 
   const logRes = await UserBridge.call('saveSessionLog', {
@@ -11455,11 +11554,11 @@ async function saveSessionResultsUnified(modeOverride, setNameOverride) {
   if (!ok) {
     flushSendOutbox_().catch(function (e) { console.warn('未送信データの再送に失敗:', e); });
   }
-  return { status: ok ? 'success' : 'error', drive: logRes, itemState: stateRes };
+  return { status: ok ? 'success' : 'error', drive: logRes, itemState: stateRes, liveResult: liveResult };
 }
 
 async function saveVocabSessionResults() {
-  await saveSessionResultsUnified('vocab');
+  return saveSessionResultsUnified('vocab');
 }
 
 async function saveGrammarSessionResults() {
@@ -11560,7 +11659,13 @@ function getResultSavedMessage_(saveResult) {
       : '演習が終了しました。（ログインするとクラウドに同期されます）';
   }
   if (!saveResult || saveResult.skipped || saveResult.status === 'success') {
-    return 'マイドライブ（DigitalDrill学習記録）に保存しました。';
+    let msg = 'マイドライブ（DigitalDrill学習記録）に保存しました。';
+    const liveMsg = (saveResult && saveResult.liveResult && window.LiveRoomModule)
+      ? LiveRoomModule.formatLiveResultMessage_(saveResult.liveResult)
+      : (window._lastLiveSubmitResult && window.LiveRoomModule
+        ? LiveRoomModule.formatLiveResultMessage_(window._lastLiveSubmitResult) : '');
+    if (liveMsg) msg += ' ' + liveMsg;
+    return msg;
   }
   const errMsg = (saveResult.drive && saveResult.drive.message)
     || (saveResult.itemState && saveResult.itemState.message);
@@ -11989,6 +12094,7 @@ window.onLoginSuccess = function(user) {
   try { sessionStorage.removeItem('dd_my_vocab_book_url'); } catch (e) {}
   initVocabModules();
   if (window.VocabSessionDraftModule) VocabSessionDraftModule.init();
+  if (window.LiveRoomModule) LiveRoomModule.refreshUi_();
   if (window.UserDriveModule && UserDriveModule.isEnabled()) {
     prepareDriveAfterLogin_();
   } else {
@@ -13168,7 +13274,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   BackendSyncStatus.refresh();
   if (window.VocabSessionDraftModule) VocabSessionDraftModule.init();
+  if (window.LiveRoomModule) LiveRoomModule.init();
 });
+
+window.forceLiveRoomTimeoutSubmit_ = async function () {
+  window._liveTimedOutSubmit = true;
+  const game = document.getElementById('game-screen');
+  if (game && game.style.display !== 'none' && currentAppMode === 'vocab') {
+    if (window.GameSessionPlay && GameSessionPlay.isActive()) {
+      while (GameSessionPlay.advanceLinear()) { /* skip to end */ }
+    }
+    currentQuestionIndex = Math.max(0, (currentQuestionDataList || []).length - 1);
+    showResultScreen();
+    return;
+  }
+};
 </script>
 <script src="paper-quiz-module.js"></script>
 </body>

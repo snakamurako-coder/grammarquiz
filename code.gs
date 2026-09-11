@@ -542,6 +542,10 @@ function doPost(e) {
         || action === 'adminListSubmissions') {
       syncWhitelistCacheIfStale_();
       return sendResponse(handleAssignmentApi_(action, requestData));
+    } else if (action === 'liveCreate' || action === 'liveJoin' || action === 'liveSubmit'
+        || action === 'liveBoard' || action === 'liveClose') {
+      syncWhitelistCacheIfStale_();
+      return sendResponse(handleLiveApi_(action, requestData));
     } else {
       return sendResponse({ status: "error", message: "無効なactionです: " + action });
     }
@@ -4636,4 +4640,459 @@ function exportStaticPresetData_() {
     questions: questions,
     vocabWords: vocabWords
   };
+}
+
+// =========================================================
+// 授業ライブ（Cache のみ・シート非保存・ベストスコア採用）
+// =========================================================
+
+const LIVE_META_PREFIX = 'live_meta_';
+const LIVE_ENTRY_PREFIX = 'live_entry_';
+const LIVE_INDEX_PREFIX = 'live_index_';
+const LIVE_PIN_MIN = 1000;
+const LIVE_PIN_MAX = 9999;
+
+function liveCache_() {
+  return CacheService.getScriptCache();
+}
+
+function liveEntryKey_(pin, account) {
+  return LIVE_ENTRY_PREFIX + String(pin) + '_' + String(account || '').trim().toLowerCase();
+}
+
+function liveIndexKey_(pin) {
+  return LIVE_INDEX_PREFIX + String(pin);
+}
+
+function liveMetaKey_(pin) {
+  return LIVE_META_PREFIX + String(pin);
+}
+
+function computeLiveRoomTtlSec_(timeLimitSec) {
+  const limit = Math.max(parseInt(timeLimitSec, 10) || 0, 1800);
+  return Math.min(limit + 3600, 21600);
+}
+
+function readWhitelistUsersForLive_() {
+  const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
+  if (!spreadId) return [];
+  try {
+    const sheet = SpreadsheetApp.openById(spreadId).getSheetByName('whitelist');
+    if (!sheet) return [];
+    const data = sheet.getDataRange().getValues();
+    if (!data.length) return [];
+    const headers = data[0].map(function (h) { return String(h || '').trim(); });
+    const accountIdx = headers.indexOf('account');
+    if (accountIdx === -1) return [];
+    const users = [];
+    for (let i = 1; i < data.length; i++) {
+      const user = {};
+      for (let j = 0; j < headers.length; j++) {
+        if (headers[j]) user[headers[j]] = data[i][j];
+      }
+      const account = String(user.account || '').trim().toLowerCase();
+      if (!account) continue;
+      user.account = account;
+      if (String(user.class || '').trim().toLowerCase() === 'admin') continue;
+      users.push(user);
+    }
+    return users;
+  } catch (e) {
+    return [];
+  }
+}
+
+function buildLiveRoster_(targetClass) {
+  const users = readWhitelistUsersForLive_();
+  if (!String(targetClass || '').trim()) return [];
+  return users.filter(function (u) {
+    return isTargetFieldMatch_(targetClass, u.class);
+  }).map(function (u) {
+    return {
+      account: u.account,
+      name: String(u.name || '').trim(),
+      number: String(u.number != null ? u.number : '').trim(),
+      class: String(u.class || '').trim()
+    };
+  });
+}
+
+function generateLivePin_() {
+  const cache = liveCache_();
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const pin = String(Math.floor(Math.random() * (LIVE_PIN_MAX - LIVE_PIN_MIN + 1)) + LIVE_PIN_MIN);
+    if (!cache.get(liveMetaKey_(pin))) return pin;
+  }
+  throw new Error('参加コードを発行できませんでした。しばらく待って再試行してください。');
+}
+
+function getLiveMeta_(pin) {
+  const raw = liveCache_().get(liveMetaKey_(pin));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function putLiveMeta_(pin, meta, ttlSec) {
+  liveCache_().put(liveMetaKey_(pin), JSON.stringify(meta), ttlSec);
+}
+
+function getLiveEntry_(pin, account) {
+  const raw = liveCache_().get(liveEntryKey_(pin, account));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function putLiveEntry_(pin, account, entry, ttlSec) {
+  liveCache_().put(liveEntryKey_(pin, account), JSON.stringify(entry), ttlSec);
+}
+
+function isLiveRoomOpen_(meta) {
+  if (!meta) return false;
+  const closesAt = parseInt(meta.closesAt, 10) || 0;
+  return !closesAt || Date.now() <= closesAt;
+}
+
+function normalizeLiveAttempt_(mode, attempt) {
+  attempt = attempt || {};
+  const correct = parseInt(attempt.correct, 10) || 0;
+  const total = parseInt(attempt.total, 10) || 0;
+  const durationSec = Math.max(0, parseInt(attempt.durationSec, 10) || 0);
+  const wrongCount = Math.max(0, parseInt(attempt.wrongCount, 10) || 0);
+  let scoreRate = parseInt(attempt.scoreRate, 10);
+  if (isNaN(scoreRate)) {
+    scoreRate = total > 0 ? Math.round((correct / total) * 100) : 0;
+  }
+  return {
+    correct: correct,
+    total: total,
+    scoreRate: scoreRate,
+    durationSec: durationSec,
+    wrongCount: wrongCount,
+    timedOut: !!attempt.timedOut,
+    finishedAt: attempt.finishedAt || new Date().toISOString()
+  };
+}
+
+function isLiveBetterAttempt_(mode, nextAttempt, prevBest) {
+  nextAttempt = normalizeLiveAttempt_(mode, nextAttempt);
+  if (!prevBest) return true;
+  prevBest = normalizeLiveAttempt_(mode, prevBest);
+  if (mode === 'word-link') {
+    if (nextAttempt.durationSec < prevBest.durationSec) return true;
+    if (nextAttempt.durationSec > prevBest.durationSec) return false;
+    if (nextAttempt.wrongCount < prevBest.wrongCount) return true;
+    return false;
+  }
+  if (nextAttempt.scoreRate > prevBest.scoreRate) return true;
+  if (nextAttempt.scoreRate < prevBest.scoreRate) return false;
+  if (nextAttempt.durationSec < prevBest.durationSec) return true;
+  return false;
+}
+
+function readLiveIndexAccounts_(pin) {
+  const raw = liveCache_().get(liveIndexKey_(pin));
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function appendLiveIndexAccount_(pin, account, ttlSec) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(5000);
+  } catch (e) {
+    return;
+  }
+  try {
+    const list = readLiveIndexAccounts_(pin);
+    const normalized = String(account || '').trim().toLowerCase();
+    if (!normalized) return;
+    if (list.indexOf(normalized) >= 0) return;
+    list.push(normalized);
+    liveCache_().put(liveIndexKey_(pin), JSON.stringify(list), ttlSec);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function collectLiveEntryKeys_(meta, pin) {
+  const keys = [];
+  const accounts = {};
+  if (meta.roster && meta.roster.length) {
+    meta.roster.forEach(function (r) {
+      const acct = String(r.account || '').trim().toLowerCase();
+      if (acct) accounts[acct] = true;
+    });
+  } else {
+    readLiveIndexAccounts_(pin).forEach(function (acct) {
+      accounts[String(acct || '').trim().toLowerCase()] = true;
+    });
+  }
+  Object.keys(accounts).forEach(function (acct) {
+    keys.push(liveEntryKey_(pin, acct));
+  });
+  return keys;
+}
+
+function buildLiveBoardEntry_(entry) {
+  const best = entry && entry.best ? entry.best : null;
+  return {
+    account: entry.account,
+    name: entry.name || '',
+    number: entry.number || '',
+    attempts: parseInt(entry.attempts, 10) || 0,
+    status: entry.status || 'joined',
+    best: best
+  };
+}
+
+function sortLiveBoardLists_(mode, entries) {
+  const finished = entries.filter(function (e) { return e.best; });
+  const byAchievement = finished.slice().sort(function (a, b) {
+    const fa = Date.parse(a.best.finishedAt || '') || 0;
+    const fb = Date.parse(b.best.finishedAt || '') || 0;
+    return fb - fa;
+  });
+  const byScore = finished.slice().sort(function (a, b) {
+    if (mode === 'word-link') {
+      if (a.best.durationSec !== b.best.durationSec) return a.best.durationSec - b.best.durationSec;
+      return (a.best.wrongCount || 0) - (b.best.wrongCount || 0);
+    }
+    if (a.best.scoreRate !== b.best.scoreRate) return b.best.scoreRate - a.best.scoreRate;
+    return a.best.durationSec - b.best.durationSec;
+  });
+  const bySpeed = finished.slice().sort(function (a, b) {
+    if (a.best.durationSec !== b.best.durationSec) return a.best.durationSec - b.best.durationSec;
+    if (mode === 'word-link') return (a.best.wrongCount || 0) - (b.best.wrongCount || 0);
+    return b.best.scoreRate - a.best.scoreRate;
+  });
+  return {
+    achievement: byAchievement,
+    scoreRate: byScore,
+    speed: bySpeed
+  };
+}
+
+function handleLiveApi_(action, requestData) {
+  try {
+    if (action === 'liveCreate') return apiLiveCreate_(requestData);
+    if (action === 'liveJoin') return apiLiveJoin_(requestData);
+    if (action === 'liveSubmit') return apiLiveSubmit_(requestData);
+    if (action === 'liveBoard') return apiLiveBoard_(requestData);
+    if (action === 'liveClose') return apiLiveClose_(requestData);
+    return { status: 'error', message: '未知のライブAPI: ' + action };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function apiLiveCreate_(requestData) {
+  const admin = requireAssignmentAdminFromRequest_(requestData || {});
+  if (!admin.ok) return { status: 'error', message: admin.error };
+  const mode = String(requestData.mode || '').trim();
+  if (mode !== 'vocab' && mode !== 'word-link') {
+    return { status: 'error', message: 'mode は vocab または word-link が必要です' };
+  }
+  const launchOptions = requestData.launchOptions || {};
+  if (!launchOptions.bookName || !launchOptions.sheetName) {
+    return { status: 'error', message: 'ブックと教材（シート）が必要です' };
+  }
+  const timeLimitSec = Math.max(0, parseInt(requestData.timeLimitSec, 10) || 0);
+  const ttlSec = computeLiveRoomTtlSec_(timeLimitSec);
+  const pin = generateLivePin_();
+  const nowMs = Date.now();
+  const targetClass = String(requestData.targetClass || '').trim();
+  const roster = buildLiveRoster_(targetClass);
+  const title = String(requestData.title || '').trim()
+    || (launchOptions.bookName + ' / ' + launchOptions.sheetName);
+  const meta = {
+    pin: pin,
+    title: title,
+    mode: mode,
+    launchOptions: launchOptions,
+    targetClass: targetClass,
+    timeLimitSec: timeLimitSec,
+    autoSubmitOnTimeout: requestData.autoSubmitOnTimeout !== false,
+    createdAt: nowMs,
+    closesAt: timeLimitSec > 0 ? (nowMs + timeLimitSec * 1000) : 0,
+    createdBy: String(admin.email || '').trim().toLowerCase(),
+    roster: roster
+  };
+  putLiveMeta_(pin, meta, ttlSec);
+  return {
+    status: 'success',
+    data: {
+      pin: pin,
+      title: title,
+      mode: mode,
+      targetClass: targetClass,
+      timeLimitSec: timeLimitSec,
+      autoSubmitOnTimeout: meta.autoSubmitOnTimeout,
+      closesAt: meta.closesAt,
+      rosterCount: roster.length,
+      ttlSec: ttlSec
+    }
+  };
+}
+
+function apiLiveJoin_(requestData) {
+  const authReq = requireAuthToken_(requestData || {});
+  if (!authReq.ok) return { status: 'error', message: authReq.error };
+  const pin = String(requestData.pin || '').trim();
+  if (!/^\d{4}$/.test(pin)) return { status: 'error', message: '参加コードは4桁の数字です' };
+  const meta = getLiveMeta_(pin);
+  if (!meta) return { status: 'error', message: '参加コードが無効か、部屋の有効期限が切れています' };
+  if (!isLiveRoomOpen_(meta)) return { status: 'error', message: 'この部屋は終了しました' };
+  const user = resolveAuthUserFromRequest_(authReq);
+  const account = String(user.account || authReq.auth.email || '').trim().toLowerCase();
+  if (!account) return { status: 'error', message: 'アカウント情報を取得できません' };
+  if (String(user.class || '').trim().toLowerCase() === 'admin') {
+    return { status: 'error', message: '管理者アカウントは参加できません' };
+  }
+  if (meta.targetClass && !isTargetFieldMatch_(meta.targetClass, user.class)) {
+    return { status: 'error', message: 'この部屋の対象クラスではありません' };
+  }
+  const ttlSec = computeLiveRoomTtlSec_(meta.timeLimitSec);
+  let entry = getLiveEntry_(pin, account);
+  if (!entry) {
+    entry = {
+      account: account,
+      name: String(user.name || '').trim(),
+      number: String(user.number != null ? user.number : '').trim(),
+      class: String(user.class || '').trim(),
+      attempts: 0,
+      status: 'joined',
+      best: null
+    };
+    putLiveEntry_(pin, account, entry, ttlSec);
+  }
+  if (!meta.roster || !meta.roster.length) {
+    appendLiveIndexAccount_(pin, account, ttlSec);
+  }
+  return {
+    status: 'success',
+    data: {
+      pin: pin,
+      title: meta.title,
+      mode: meta.mode,
+      timeLimitSec: meta.timeLimitSec,
+      autoSubmitOnTimeout: meta.autoSubmitOnTimeout !== false,
+      closesAt: meta.closesAt,
+      launchOptions: meta.launchOptions,
+      entry: entry
+    }
+  };
+}
+
+function apiLiveSubmit_(requestData) {
+  const authReq = requireAuthToken_(requestData || {});
+  if (!authReq.ok) return { status: 'error', message: authReq.error };
+  const pin = String(requestData.pin || '').trim();
+  const meta = getLiveMeta_(pin);
+  if (!meta) return { status: 'error', message: '部屋が見つかりません' };
+  if (!isLiveRoomOpen_(meta)) return { status: 'error', message: 'この部屋は終了しました' };
+  const user = resolveAuthUserFromRequest_(authReq);
+  const account = String(user.account || authReq.auth.email || '').trim().toLowerCase();
+  if (!account) return { status: 'error', message: 'アカウント情報を取得できません' };
+  if (meta.targetClass && !isTargetFieldMatch_(meta.targetClass, user.class)) {
+    return { status: 'error', message: 'この部屋の対象クラスではありません' };
+  }
+  const ttlSec = computeLiveRoomTtlSec_(meta.timeLimitSec);
+  const attempt = normalizeLiveAttempt_(meta.mode, requestData.attempt || requestData);
+  if (meta.mode === 'word-link' && attempt.total <= 0) {
+    return { status: 'error', message: 'Word Link は完走後のみ提出できます' };
+  }
+  let entry = getLiveEntry_(pin, account);
+  if (!entry) {
+    entry = {
+      account: account,
+      name: String(user.name || '').trim(),
+      number: String(user.number != null ? user.number : '').trim(),
+      class: String(user.class || '').trim(),
+      attempts: 0,
+      status: 'joined',
+      best: null
+    };
+  }
+  entry.attempts = (parseInt(entry.attempts, 10) || 0) + 1;
+  let updated = false;
+  if (isLiveBetterAttempt_(meta.mode, attempt, entry.best)) {
+    entry.best = attempt;
+    updated = true;
+  }
+  entry.status = entry.best ? 'finished' : entry.status;
+  putLiveEntry_(pin, account, entry, ttlSec);
+  if (!meta.roster || !meta.roster.length) {
+    appendLiveIndexAccount_(pin, account, ttlSec);
+  }
+  return {
+    status: 'success',
+    data: {
+      updated: updated,
+      entry: entry
+    }
+  };
+}
+
+function apiLiveBoard_(requestData) {
+  const admin = requireAssignmentAdminFromRequest_(requestData || {});
+  if (!admin.ok) return { status: 'error', message: admin.error };
+  const pin = String(requestData.pin || '').trim();
+  const meta = getLiveMeta_(pin);
+  if (!meta) return { status: 'error', message: '部屋が見つかりません' };
+  const ttlSec = computeLiveRoomTtlSec_(meta.timeLimitSec);
+  putLiveMeta_(pin, meta, ttlSec);
+  const keys = collectLiveEntryKeys_(meta, pin);
+  const cache = liveCache_();
+  const rawMap = keys.length ? cache.getAll(keys) : {};
+  const entries = [];
+  Object.keys(rawMap).forEach(function (key) {
+    try {
+      entries.push(buildLiveBoardEntry_(JSON.parse(rawMap[key])));
+    } catch (e) { /* ignore */ }
+  });
+  const lists = sortLiveBoardLists_(meta.mode, entries);
+  const rosterCount = (meta.roster && meta.roster.length) ? meta.roster.length : readLiveIndexAccounts_(pin).length;
+  const finishedCount = entries.filter(function (e) { return !!e.best; }).length;
+  return {
+    status: 'success',
+    data: {
+      pin: pin,
+      title: meta.title,
+      mode: meta.mode,
+      closesAt: meta.closesAt,
+      timeLimitSec: meta.timeLimitSec,
+      rosterCount: rosterCount,
+      finishedCount: finishedCount,
+      joinedCount: entries.length,
+      lists: lists,
+      entries: entries
+    }
+  };
+}
+
+function apiLiveClose_(requestData) {
+  const admin = requireAssignmentAdminFromRequest_(requestData || {});
+  if (!admin.ok) return { status: 'error', message: admin.error };
+  const pin = String(requestData.pin || '').trim();
+  const meta = getLiveMeta_(pin);
+  if (!meta) return { status: 'success', data: { closed: true } };
+  const cache = liveCache_();
+  const keys = collectLiveEntryKeys_(meta, pin);
+  keys.push(liveMetaKey_(pin));
+  keys.push(liveIndexKey_(pin));
+  cache.removeAll(keys);
+  return { status: 'success', data: { closed: true } };
 }
