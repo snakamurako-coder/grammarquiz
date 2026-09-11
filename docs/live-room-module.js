@@ -3,8 +3,8 @@
  */
 const LiveRoomModule = (function () {
   const STORAGE_KEY = 'dd_live_room';
-  const POST_TIMEOUT_MS = 20000;
-  const BOARD_POLL_MS = 3000;
+  const POST_TIMEOUT_MS = 45000;
+  const BOARD_POLL_MS = 4000;
 
   let activeRoom_ = null;
   let localBest_ = null;
@@ -278,7 +278,10 @@ const LiveRoomModule = (function () {
   function restoreFromStorage_() {
     hideBoardScreen_();
     const stored = loadStoredRoom_();
-    if (!stored || !stored.pin) return;
+    if (!stored || !stored.pin) {
+      refreshUi_();
+      return;
+    }
     if (stored.closesAt && Date.now() > stored.closesAt) {
       saveStoredRoom_(null);
       return;
@@ -304,6 +307,7 @@ const LiveRoomModule = (function () {
       return;
     }
     restoreFromStorage_();
+    refreshUi_();
   }
 
   function refreshUi_() {
@@ -370,9 +374,13 @@ const LiveRoomModule = (function () {
   }
 
   async function createRoom(mode) {
+    return createRoomWithOpts_(mode, showCreateDialog_(mode));
+  }
+
+  async function createRoomWithOpts_(mode, opts) {
     if (!isAdminUser_()) throw new Error('管理者のみ部屋を開けます');
     if (!window.VocabSettingsModule) throw new Error('設定モジュールが未初期化です');
-    const opts = showCreateDialog_(mode);
+    opts = opts || {};
     const launchOptions = window.VocabSettingsModule.getQuizOptions();
     if (!launchOptions.bookName || !launchOptions.sheetName) {
       throw new Error('ブックと教材（シート）を選択してください');
@@ -387,6 +395,7 @@ const LiveRoomModule = (function () {
       title: opts.title
     });
     const data = res.data || {};
+    if (!data.pin) throw new Error('参加コードを発行できませんでした');
     const room = {
       pin: data.pin,
       title: data.title,
@@ -584,6 +593,30 @@ const LiveRoomModule = (function () {
     return '授業ライブ: ベストスコアは更新されませんでした';
   }
 
+  function paintBoardHeaderFromRoom_(room) {
+    room = room || activeRoom_ || {};
+    const titleEl = el_('live-board-title');
+    const pinEl = el_('live-board-pin');
+    const metaEl = el_('live-board-meta');
+    const timerEl = el_('live-board-timer');
+    if (titleEl) titleEl.textContent = room.title || '授業ライブ';
+    if (pinEl) pinEl.textContent = room.pin || '';
+    if (metaEl) {
+      metaEl.textContent = '名簿 ' + (room.rosterCount || 0) + ' 人'
+        + (room.pin ? '　参加コード ' + room.pin : '');
+    }
+    if (timerEl) {
+      if (room.closesAt) {
+        const left = Math.max(0, Math.ceil((room.closesAt - Date.now()) / 1000));
+        timerEl.textContent = left > 0 ? ('残り ' + formatLimit_(left)) : '終了';
+      } else if (room.timeLimitSec > 0) {
+        timerEl.textContent = formatLimit_(room.timeLimitSec);
+      } else {
+        timerEl.textContent = '制限なし';
+      }
+    }
+  }
+
   function showBoardScreen_() {
     const screen = el_('live-room-board-screen');
     if (screen) {
@@ -591,6 +624,7 @@ const LiveRoomModule = (function () {
       screen.setAttribute('aria-hidden', 'false');
     }
     document.body.classList.add('live-room-board-active');
+    paintBoardHeaderFromRoom_(activeRoom_);
     const settingsEl = el_('live-board-settings');
     if (settingsEl && activeRoom_) {
       settingsEl.textContent = formatLaunchSummary_(
@@ -613,7 +647,7 @@ const LiveRoomModule = (function () {
     const metaEl = el_('live-board-meta');
     const timerEl = el_('live-board-timer');
     if (titleEl) titleEl.textContent = data.title || '授業ライブ';
-    if (pinEl) pinEl.textContent = data.pin || '';
+    if (pinEl) pinEl.textContent = data.pin || (activeRoom_ && activeRoom_.pin) || pinEl.textContent || '';
     if (metaEl) {
       metaEl.textContent = '達成 ' + (data.finishedCount || 0)
         + ' / 名簿 ' + (data.rosterCount || data.joinedCount || 0);
@@ -720,8 +754,19 @@ const LiveRoomModule = (function () {
     document.querySelectorAll('.live-room-open-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         const mode = btn.getAttribute('data-live-mode') || 'vocab';
+        if (!isAdminUser_()) {
+          alert('管理者のみ部屋を開けます');
+          return;
+        }
+        let opts;
+        try {
+          opts = showCreateDialog_(mode);
+        } catch (e) {
+          alert(e.message || e);
+          return;
+        }
         BusyButton.run(btn, function () {
-          return createRoom(mode);
+          return createRoomWithOpts_(mode, opts);
         }, '部屋を開いています…').catch(function (e) {
           alert(e.message || e);
         });
@@ -783,6 +828,7 @@ const LiveRoomModule = (function () {
     hideBoardScreen_();
     bindUi_();
     restoreFromStorage_();
+    refreshUi_();
     if (window.AuthGateService) {
       AuthGateService.fetchUserIfNeeded().then(function () {
         tryResumeAfterAuth_();

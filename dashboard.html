@@ -50,6 +50,20 @@ th{background:#f5f5f5}
 .sub-panel{margin-top:8px;padding-top:8px;border-top:1px dashed #ddd}
 .points-row{display:flex;gap:10px;flex-wrap:wrap}
 .points-row .form-group{flex:1;min-width:120px;margin-bottom:0}
+.live-dash-pin {
+  font-size: clamp(2.4rem, 10vw, 4.2rem);
+  font-weight: bold;
+  letter-spacing: 0.22em;
+  color: #1565c0;
+  text-align: center;
+  padding: 12px 8px;
+  background: #e3f2fd;
+  border-radius: 12px;
+  margin: 8px 0;
+}
+.live-dash-board { display: none; margin-top: 12px; }
+.live-dash-board.is-open { display: block; }
+.live-dash-meta { color: #546e7a; font-size: .92em; text-align: center; }
 @media (max-width:640px){.form-grid{grid-template-columns:1fr}}
   </style>
 </head>
@@ -60,6 +74,34 @@ th{background:#f5f5f5}
   </p>
   <p style="text-align:center;font-size:.8em;color:#666;margin:-4px 0 16px;">管理操作は whitelist の <code>class</code> 列が <strong>admin</strong> のアカウントのみ可能です。</p>
   <div id="status-banner" style="display:none;" class="alert-box"></div>
+
+  <div class="setting-section">
+    <div class="section-title">授業ライブ</div>
+    <p class="hint">教室のスクリーン向けです。部屋を開くと4桁コードが大きく出ます。生徒は学習画面で同じコードを入れて参加します。記録はシートに残しません。</p>
+    <div class="form-grid">
+      <div class="form-group"><label>種別</label>
+        <select id="live-mode">
+          <option value="vocab">単語クイズ</option>
+          <option value="word-link">Word Link</option>
+        </select>
+      </div>
+      <div class="form-group"><label>制限時間（分・0＝なし）</label><input id="live-limit-min" type="number" min="0" value="8"></div>
+      <div class="form-group"><label>ブック</label><select id="live-book"></select></div>
+      <div class="form-group"><label>教材（シート）</label><select id="live-sheet"></select></div>
+      <div class="form-group"><label>対象クラス（空＝制限なし）</label><input id="live-target-class" type="text" placeholder="例: A（PIN を知っていれば誰でも参加可）"></div>
+      <div class="form-group"><label>表示名（空＝教材名）</label><input id="live-title" type="text"></div>
+    </div>
+    <button type="button" id="live-open-btn" class="btn-primary">この設定で授業ライブを開く</button>
+    <div id="live-dash-board" class="live-dash-board">
+      <div class="live-dash-pin" id="live-dash-pin">----</div>
+      <div class="live-dash-meta" id="live-dash-meta"></div>
+      <div class="live-dash-meta" id="live-dash-counts" style="margin-top:6px;"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button type="button" id="live-refresh-btn" class="btn-small">ボード更新</button>
+        <button type="button" id="live-close-btn" class="btn-small btn-danger">部屋を閉じる</button>
+      </div>
+    </div>
+  </div>
 
   <div class="setting-section">
     <div class="section-title">宿題・小テスト</div>
@@ -673,6 +715,175 @@ async function syncCheckSheetsNow() {
   }
 }
 
+}
+
+var liveCatalog_ = { presets: [] };
+var livePin_ = '';
+var livePollId_ = null;
+
+function liveBooks_() {
+  return liveCatalog_.presets || [];
+}
+
+function liveSheets_(bookName) {
+  var books = liveBooks_();
+  for (var i = 0; i < books.length; i++) {
+    if (books[i].bookName === bookName) return books[i].sheets || [];
+  }
+  return [];
+}
+
+function fillLiveBooks_() {
+  var sel = document.getElementById('live-book');
+  if (!sel) return;
+  var books = liveBooks_();
+  sel.innerHTML = books.map(function (b) {
+    return '<option value="' + escapeHtml(b.bookName) + '">' + escapeHtml(b.bookName) + '</option>';
+  }).join('') || '<option value="">（プリセットがありません）</option>';
+  fillLiveSheets_();
+}
+
+function fillLiveSheets_() {
+  var book = (document.getElementById('live-book') || {}).value || '';
+  var sel = document.getElementById('live-sheet');
+  if (!sel) return;
+  var sheets = liveSheets_(book);
+  sel.innerHTML = sheets.map(function (s) {
+    return '<option value="' + escapeHtml(s.sheetName) + '">' + escapeHtml(s.sheetName)
+      + (s.wordCount != null ? ' (' + s.wordCount + '語)' : '') + '</option>';
+  }).join('') || '<option value="">（シートがありません）</option>';
+}
+
+async function initLiveCatalog_() {
+  var res = await gasRun('apiAdminGetVocabCatalog');
+  if (res.status !== 'success') throw new Error(res.message || '単語カタログ取得失敗');
+  liveCatalog_ = res.data || { presets: [] };
+  fillLiveBooks_();
+}
+
+function buildLiveLaunchOptions_(mode) {
+  var bookName = (document.getElementById('live-book') || {}).value || '';
+  var sheetName = (document.getElementById('live-sheet') || {}).value || '';
+  var opts = {
+    bookType: 'preset',
+    bookName: bookName,
+    sheetName: sheetName,
+    filters: { dai: [], chu: [], sho: [] },
+    homeworkMode: false
+  };
+  if (mode === 'word-link') {
+    opts.linkQuestionCount = 25;
+    opts.vocabSubMode = 'link';
+    return opts;
+  }
+  opts.axes = {
+    directions: ['jaen'],
+    grains: ['WD'],
+    response: 'choice',
+    choiceStyle: 'dedicated'
+  };
+  opts.formats = ['vocab-jaen'];
+  opts.questionCount = 10;
+  opts.choiceCount = 4;
+  opts.dummyMethod = 'none';
+  opts.dummyScope = 'sheet';
+  opts.includeUnknown = true;
+  opts.includeNone = true;
+  return opts;
+}
+
+function paintLiveDash_(data) {
+  data = data || {};
+  livePin_ = data.pin || livePin_;
+  var board = document.getElementById('live-dash-board');
+  var pinEl = document.getElementById('live-dash-pin');
+  var metaEl = document.getElementById('live-dash-meta');
+  var countsEl = document.getElementById('live-dash-counts');
+  if (board) board.classList.add('is-open');
+  if (pinEl) pinEl.textContent = livePin_ || '----';
+  if (metaEl) {
+    metaEl.textContent = (data.title || '') + (data.pin ? '　コード ' + data.pin : '');
+  }
+  if (countsEl) {
+    countsEl.textContent = '達成 ' + (data.finishedCount || 0)
+      + ' / 参加 ' + (data.joinedCount || 0)
+      + ' / 名簿 ' + (data.rosterCount || 0);
+  }
+}
+
+function startLivePoll_() {
+  stopLivePoll_();
+  livePollId_ = setInterval(function () {
+    refreshLiveBoard_().catch(function () {});
+  }, 4000);
+}
+
+function stopLivePoll_() {
+  if (livePollId_) {
+    clearInterval(livePollId_);
+    livePollId_ = null;
+  }
+}
+
+async function openLiveRoom_() {
+  var btn = document.getElementById('live-open-btn');
+  var mode = (document.getElementById('live-mode') || {}).value || 'vocab';
+  var launchOptions = buildLiveLaunchOptions_(mode);
+  if (!launchOptions.bookName || !launchOptions.sheetName) {
+    showBanner('ブックと教材（シート）を選択してください', false);
+    return;
+  }
+  var mins = parseInt((document.getElementById('live-limit-min') || {}).value, 10);
+  var timeLimitSec = (!isNaN(mins) && mins > 0) ? mins * 60 : 0;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '部屋を開いています…';
+  }
+  try {
+    var result = await gasRun('apiAdminLiveCreate', {
+      mode: mode,
+      launchOptions: launchOptions,
+      targetClass: (document.getElementById('live-target-class') || {}).value || '',
+      timeLimitSec: timeLimitSec,
+      autoSubmitOnTimeout: true,
+      title: (document.getElementById('live-title') || {}).value || ''
+    });
+    if (result.status !== 'success') throw new Error(result.message || '部屋を開けませんでした');
+    var data = result.data || {};
+    if (!data.pin) throw new Error('参加コードを発行できませんでした');
+    paintLiveDash_(data);
+    showBanner('授業ライブを開きました。コード ' + data.pin, true);
+    startLivePoll_();
+    refreshLiveBoard_().catch(function () {});
+  } catch (e) {
+    showBanner(e.message || String(e), false);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'この設定で授業ライブを開く';
+    }
+  }
+}
+
+async function refreshLiveBoard_() {
+  if (!livePin_) return;
+  var result = await gasRun('apiAdminLiveBoard', livePin_);
+  if (result.status !== 'success') throw new Error(result.message || 'ボード取得に失敗しました');
+  paintLiveDash_(result.data || {});
+}
+
+async function closeLiveRoom_() {
+  if (!livePin_) return;
+  if (!window.confirm('授業ライブを終了しますか？')) return;
+  var result = await gasRun('apiAdminLiveClose', livePin_);
+  if (result.status !== 'success') throw new Error(result.message || '終了に失敗しました');
+  stopLivePoll_();
+  livePin_ = '';
+  var board = document.getElementById('live-dash-board');
+  if (board) board.classList.remove('is-open');
+  showBanner('授業ライブを終了しました', true);
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   var pagesLink = document.getElementById('pages-link');
   if (pagesLink && PAGES_URL) pagesLink.href = PAGES_URL;
@@ -686,9 +897,16 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('check-save-btn').addEventListener('click', saveCheckSheetSettings);
   document.getElementById('check-sync-btn').addEventListener('click', syncCheckSheetsNow);
   document.getElementById('check-agg-add-btn').addEventListener('click', addCheckAggregationRow_);
+  document.getElementById('live-open-btn').addEventListener('click', openLiveRoom_);
+  document.getElementById('live-refresh-btn').addEventListener('click', refreshLiveBoard_);
+  document.getElementById('live-close-btn').addEventListener('click', closeLiveRoom_);
+  document.getElementById('live-book').addEventListener('change', fillLiveSheets_);
 
   AssignmentSectionBuilder.init().catch(function (e) {
     showBanner('教材カタログの読込に失敗: ' + (e.message || e), false);
+  });
+  initLiveCatalog_().catch(function (e) {
+    showBanner('授業ライブ用カタログの読込に失敗: ' + (e.message || e), false);
   });
   loadAssignments();
   loadSubmissions();

@@ -526,6 +526,12 @@ function doPost(e) {
       return handleLogin_(requestData);
     }
 
+    // 授業ライブは Cache + 認証のみ。毎回の Drive 初期化を挟むと作成・ボードがタイムアウトする
+    if (action === 'liveCreate' || action === 'liveJoin' || action === 'liveSubmit'
+        || action === 'liveBoard' || action === 'liveClose') {
+      return sendResponse(handleLiveApi_(action, requestData));
+    }
+
     ensureEnvironment();
 
     if (action === "logout") {
@@ -542,10 +548,6 @@ function doPost(e) {
         || action === 'adminListSubmissions') {
       syncWhitelistCacheIfStale_();
       return sendResponse(handleAssignmentApi_(action, requestData));
-    } else if (action === 'liveCreate' || action === 'liveJoin' || action === 'liveSubmit'
-        || action === 'liveBoard' || action === 'liveClose') {
-      syncWhitelistCacheIfStale_();
-      return sendResponse(handleLiveApi_(action, requestData));
     } else {
       return sendResponse({ status: "error", message: "無効なactionです: " + action });
     }
@@ -4524,6 +4526,29 @@ function apiAdminGetGrammarCatalog() {
   }
 }
 
+/** dashboard: 授業ライブ（google.script.run） */
+function apiAdminLiveCreate(payload) {
+  try {
+    return apiLiveCreate_(payload || {});
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+function apiAdminLiveBoard(pin) {
+  try {
+    return apiLiveBoard_({ pin: pin || '' });
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+function apiAdminLiveClose(pin) {
+  try {
+    return apiLiveClose_({ pin: pin || '' });
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
 /** dashboard: 単語プリセットカタログ */
 function apiAdminGetVocabCatalog() {
   try {
@@ -4737,7 +4762,11 @@ function getLiveMeta_(pin) {
 }
 
 function putLiveMeta_(pin, meta, ttlSec) {
-  liveCache_().put(liveMetaKey_(pin), JSON.stringify(meta), ttlSec);
+  const raw = JSON.stringify(meta);
+  if (raw.length > 90000) {
+    throw new Error('出題設定が大きすぎて部屋を開けません。区分の指定を減らしてください。');
+  }
+  liveCache_().put(liveMetaKey_(pin), raw, ttlSec);
 }
 
 function getLiveEntry_(pin, account) {

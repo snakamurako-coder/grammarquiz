@@ -1104,12 +1104,22 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
   width: 5.5em; min-height: 44px; font-size: 1.2em; text-align: center; letter-spacing: 0.15em;
   border: 1px solid #ccc; border-radius: 8px;
 }
+body.live-room-board-active {
+  max-width: none;
+  padding: 0;
+  overflow: hidden;
+}
 body.live-room-board-active #settings-screen,
 body.live-room-board-active #game-screen,
-body.live-room-board-active #result-screen { display: none !important; }
+body.live-room-board-active #result-screen,
+body.live-room-board-active #vocab-card-screen,
+body.live-room-board-active #vocab-link-screen,
+body.live-room-board-active #reading-screen,
+body.live-room-board-active #login-screen { display: none !important; }
 #live-room-board-screen {
   display: none; position: fixed; inset: 0; z-index: 12000; background: #0f172a; color: #f8fafc;
   flex-direction: column; padding: 16px; overflow: hidden;
+  width: 100vw; height: 100dvh; max-width: none; box-sizing: border-box;
 }
 .live-board-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .live-board-title { font-size: clamp(1.2rem, 4vw, 1.8rem); font-weight: bold; margin: 0; }
@@ -7903,8 +7913,9 @@ const VocabSettingsModule = (() => {
   }
 
   function getQuizOptions() {
-    const dummyMethod = document.getElementById('vocab-dummy-method').value;
-    let choiceCount = parseInt(document.getElementById('vocab-choice-count').value, 10);
+    const dummyMethod = (document.getElementById('vocab-dummy-method') || {}).value || 'none';
+    let choiceCount = parseInt((document.getElementById('vocab-choice-count') || {}).value, 10);
+    if (isNaN(choiceCount) || choiceCount < 2) choiceCount = 4;
     if (dummyMethod === 'diffPos' && choiceCount > 4) choiceCount = 4;
     const launch = VocabLaunchConfig.get();
     const axes = {
@@ -7921,8 +7932,8 @@ const VocabSettingsModule = (() => {
     if (isNaN(poolDummyCount) || poolDummyCount < 0) poolDummyCount = 2;
     const affixTypeEl = document.querySelector('input[name="vocab-affix-type"]:checked');
     return {
-      bookName: document.getElementById('vocab-book-select').value,
-      sheetName: document.getElementById('vocab-sheet-select').value,
+      bookName: (document.getElementById('vocab-book-select') || {}).value || '',
+      sheetName: (document.getElementById('vocab-sheet-select') || {}).value || '',
       filters: {
         dai: getSelectedDivisions('dai'),
         chu: getSelectedDivisions('chu'),
@@ -7941,12 +7952,12 @@ const VocabSettingsModule = (() => {
       })(),
       choiceCount: choiceCount,
       poolDummyCount: poolDummyCount,
-      includeUnknown: (axes.response === 'choice' && axes.choiceStyle !== 'pool') && document.getElementById('vocab-include-unknown').checked,
-      includeNone: (axes.response === 'choice' && axes.choiceStyle !== 'pool') && document.getElementById('vocab-include-none').checked,
-      dummyScope: document.getElementById('vocab-dummy-scope').value,
+      includeUnknown: (axes.response === 'choice' && axes.choiceStyle !== 'pool') && !!(document.getElementById('vocab-include-unknown') || {}).checked,
+      includeNone: (axes.response === 'choice' && axes.choiceStyle !== 'pool') && !!(document.getElementById('vocab-include-none') || {}).checked,
+      dummyScope: (document.getElementById('vocab-dummy-scope') || {}).value || 'sheet',
       dummyMethod: dummyMethod,
       affixType: affixTypeEl ? affixTypeEl.value : 'prefix',
-      affixLen: parseInt(document.getElementById('vocab-affix-len').value, 10),
+      affixLen: parseInt((document.getElementById('vocab-affix-len') || {}).value, 10) || 2,
       cardTarget: getCardTargetSettings_(),
       bookType: (document.getElementById('vocab-book-type') || {}).value || 'preset',
       linkQuestionCount: parseInt((document.getElementById('vocab-link-count') || {}).value, 10) || 25,
@@ -12118,8 +12129,12 @@ window.onLoginSuccess = function(user) {
   initVocabModules();
   if (window.VocabSessionDraftModule) VocabSessionDraftModule.init();
   if (window.LiveRoomModule) {
-    if (typeof LiveRoomModule.tryResumeAfterAuth_ === 'function') LiveRoomModule.tryResumeAfterAuth_();
-    else LiveRoomModule.refreshUi_();
+    try {
+      if (typeof LiveRoomModule.tryResumeAfterAuth_ === 'function') LiveRoomModule.tryResumeAfterAuth_();
+      else LiveRoomModule.refreshUi_();
+    } catch (e) {
+      console.warn('授業ライブ復帰:', e.message || e);
+    }
   }
   if (window.UserDriveModule && UserDriveModule.isEnabled()) {
     prepareDriveAfterLogin_();
