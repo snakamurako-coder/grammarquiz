@@ -235,39 +235,56 @@ const LiveRoomModule = (function () {
     });
   }
 
-  function formatLaunchSummary_(mode, opts, timeLimitSec) {
+  function launchSummaryCols_(mode, opts, timeLimitSec) {
     opts = opts || {};
-    const lines = [];
-    lines.push('種別: ' + (mode === 'word-link' ? 'Word Link' : '単語クイズ'));
+    const left = [];
+    const right = [];
+    left.push('種別: ' + (mode === 'word-link' ? 'Word Link' : '単語クイズ'));
     if (opts.bookName || opts.sheetName) {
-      lines.push('教材: ' + (opts.bookName || '—') + ' / ' + (opts.sheetName || '—'));
+      left.push('教材: ' + (opts.bookName || '—') + ' / ' + (opts.sheetName || '—'));
     }
     const filters = opts.filters || {};
     const divParts = [];
     if (filters.dai && filters.dai.length) divParts.push('大:' + filters.dai.join(','));
     if (filters.chu && filters.chu.length) divParts.push('中:' + filters.chu.join(','));
     if (filters.sho && filters.sho.length) divParts.push('小:' + filters.sho.join(','));
-    lines.push('区分: ' + (divParts.length ? divParts.join(' / ') : '指定なし（シート全体）'));
+    left.push('区分: ' + (divParts.length ? divParts.join(' / ') : '指定なし（シート全体）'));
     if (mode === 'word-link') {
       const linkMode = opts.linkMode || (opts.wordLink && opts.wordLink.linkMode);
-      if (linkMode) lines.push('形式: ' + wordLinkModeLabel_(linkMode));
-      else lines.push('形式: START直前に選択');
-      lines.push('出題数: ' + (opts.linkQuestionCount || 25) + '語');
+      if (linkMode) right.push('形式: ' + wordLinkModeLabel_(linkMode));
+      else right.push('形式: START直前に選択');
+      right.push('出題数: ' + (opts.linkQuestionCount || 25) + '語');
     } else {
       const axes = opts.axes || {};
       const dirMap = { jaen: '和英', enja: '英和' };
       const grainMap = { WD: '語', PH: '句', EX: '例文' };
       const dirs = (axes.directions || []).map(function (d) { return dirMap[d] || d; });
       const grains = (axes.grains || []).map(function (g) { return grainMap[g] || g; });
-      lines.push('方向: ' + (dirs.length ? dirs.join('・') : '—'));
-      lines.push('単位: ' + (grains.length ? grains.join('・') : '—'));
+      right.push('方向: ' + (dirs.length ? dirs.join('・') : '—'));
+      right.push('単位: ' + (grains.length ? grains.join('・') : '—'));
       const respMap = { choice: '選択', typing: '入力', speech: '音声' };
-      lines.push('解答: ' + (respMap[axes.response] || axes.response || '—'));
-      if (opts.questionCount) lines.push('出題数: ' + (opts.questionCount === 'all' ? 'すべて' : opts.questionCount + '問'));
+      right.push('解答: ' + (respMap[axes.response] || axes.response || '—'));
+      if (opts.questionCount) right.push('出題数: ' + (opts.questionCount === 'all' ? 'すべて' : opts.questionCount + '問'));
     }
-    if (timeLimitSec > 0) lines.push('制限時間: ' + formatLimit_(timeLimitSec));
-    else lines.push('制限時間: なし');
-    return lines.join('\n');
+    if (timeLimitSec > 0) right.push('制限時間: ' + formatLimit_(timeLimitSec));
+    else right.push('制限時間: なし');
+    return { left: left, right: right };
+  }
+
+  function formatLaunchSummary_(mode, opts, timeLimitSec) {
+    const cols = launchSummaryCols_(mode, opts, timeLimitSec);
+    return cols.left.concat(cols.right).join('\n');
+  }
+
+  function paintLaunchSummary_(el, mode, opts, timeLimitSec) {
+    if (!el) return;
+    const cols = launchSummaryCols_(mode, opts, timeLimitSec);
+    function colHtml(lines) {
+      return '<div class="live-board-settings-col">' + lines.map(function (line) {
+        return escapeHtml_(line);
+      }).join('<br>') + '</div>';
+    }
+    el.innerHTML = colHtml(cols.left) + colHtml(cols.right);
   }
 
   function clearRoomTimer_() {
@@ -713,8 +730,7 @@ const LiveRoomModule = (function () {
     if (titleEl) titleEl.textContent = room.title || '授業ライブ';
     if (pinEl) pinEl.textContent = room.pin || '';
     if (metaEl) {
-      metaEl.textContent = '名簿 ' + (room.rosterCount || 0) + ' 人'
-        + (room.pin ? '　参加コード ' + room.pin : '');
+      metaEl.textContent = '名簿 ' + (room.rosterCount || 0) + ' 人';
     }
     if (timerEl) {
       if (room.closesAt) {
@@ -737,9 +753,9 @@ const LiveRoomModule = (function () {
     document.body.classList.add('live-room-board-active');
     paintBoardHeaderFromRoom_(activeRoom_);
     applyFontPt_(loadFontPt_(), false);
-    const settingsEl = el_('live-board-settings');
-    if (settingsEl && activeRoom_) {
-      settingsEl.textContent = formatLaunchSummary_(
+    if (activeRoom_) {
+      paintLaunchSummary_(
+        el_('live-board-settings'),
         activeRoom_.mode, activeRoom_.launchOptions, activeRoom_.timeLimitSec);
     }
     updateBoardTabLabels_(activeRoom_ && activeRoom_.mode);
@@ -777,14 +793,12 @@ const LiveRoomModule = (function () {
       activeRoom_.launchOptions = data.launchOptions;
       saveStoredRoom_(activeRoom_);
     }
-    const settingsEl = el_('live-board-settings');
-    if (settingsEl) {
-      settingsEl.textContent = formatLaunchSummary_(
-        data.mode || (activeRoom_ && activeRoom_.mode),
-        data.launchOptions || (activeRoom_ && activeRoom_.launchOptions),
-        data.timeLimitSec != null ? data.timeLimitSec : (activeRoom_ && activeRoom_.timeLimitSec)
-      );
-    }
+    paintLaunchSummary_(
+      el_('live-board-settings'),
+      data.mode || (activeRoom_ && activeRoom_.mode),
+      data.launchOptions || (activeRoom_ && activeRoom_.launchOptions),
+      data.timeLimitSec != null ? data.timeLimitSec : (activeRoom_ && activeRoom_.timeLimitSec)
+    );
     updateBoardTabLabels_(data.mode || (activeRoom_ && activeRoom_.mode));
     renderBoardList_('live-board-list-achievement', data.lists && data.lists.achievement, data.mode, 'achievement');
     renderBoardList_('live-board-list-score', data.lists && data.lists.scoreRate, data.mode, 'score');

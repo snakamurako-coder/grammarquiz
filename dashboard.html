@@ -53,14 +53,16 @@ th{background:#f5f5f5}
 .live-dash-section { padding: 12px; --live-list-pt: 18; }
 .live-dash-title { font-size: 1.05rem; font-weight: bold; margin: 0; color: #f8fafc; }
 .live-dash-pin {
-  font-size: clamp(1.5rem, 5vw, 2.4rem);
-  font-weight: bold;
-  letter-spacing: 0.18em;
+  font-size: 64pt;
+  font-weight: 800;
+  letter-spacing: 0.12em;
   color: #38bdf8;
   line-height: 1;
   margin: 0;
   padding: 0;
   background: transparent;
+  text-align: right;
+  white-space: nowrap;
 }
 .live-dash-board { display: none; }
 .live-dash-board.is-open { display: block; }
@@ -80,16 +82,43 @@ body.live-board-open .live-dash-section {
   border-bottom: 1px solid #334155;
   padding: 8px 12px 6px;
 }
+.live-dash-header-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 18px;
+  align-items: start;
+}
+.live-dash-header-main { min-width: 0; }
 .live-dash-header-row {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 10px 16px;
   flex-wrap: wrap;
 }
-.live-dash-settings {
-  color: #cbd5e1; font-size: 0.8rem; line-height: 1.35; white-space: pre-wrap; padding: 4px 0 0;
+.live-dash-header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
 }
-.live-dash-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.live-dash-header-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.live-dash-settings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 20px;
+  color: #cbd5e1;
+  font-size: calc(var(--live-list-pt, 18) * 1pt);
+  line-height: 1.3;
+  padding: 4px 0 0;
+}
+.live-board-settings-col { min-width: 0; }
+.live-dash-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .live-dash-actions .btn-small { min-height: 34px; }
 .live-dash-body { padding: 8px 12px 12px; overflow: auto; }
 .live-board-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 0; }
@@ -160,26 +189,34 @@ body.live-board-open .live-dash-section {
     </div>
     <div id="live-dash-board" class="live-dash-board">
       <div class="live-dash-header-band">
-        <div class="live-dash-header-row">
-          <h2 class="live-dash-title" id="live-dash-title">授業ライブ</h2>
-          <div class="live-dash-pin" id="live-dash-pin">----</div>
-          <div class="live-dash-timer" id="live-dash-timer"></div>
-          <div class="live-dash-meta" id="live-dash-meta"></div>
-          <div class="live-dash-meta" id="live-dash-counts"></div>
-          <label class="live-board-font-ctrl">
-            文字
-            <button type="button" id="live-dash-font-minus" aria-label="文字サイズを小さく">−</button>
-            <input type="number" id="live-dash-font-input" min="1" max="50" step="1" value="18" aria-label="リスト文字サイズ（pt）">
-            <button type="button" id="live-dash-font-plus" aria-label="文字サイズを大きく">+</button>
-            pt
-          </label>
-          <div class="live-dash-actions">
-            <button type="button" id="live-refresh-btn" class="btn-small">更新</button>
-            <button type="button" id="live-export-btn" class="btn-small">結果を保存</button>
-            <button type="button" id="live-close-btn" class="btn-small btn-danger">部屋を閉じる</button>
+        <div class="live-dash-header-grid">
+          <div class="live-dash-header-main">
+            <div class="live-dash-header-row">
+              <h2 class="live-dash-title" id="live-dash-title">授業ライブ</h2>
+              <div class="live-dash-timer" id="live-dash-timer"></div>
+              <div class="live-dash-meta" id="live-dash-meta"></div>
+              <div class="live-dash-meta" id="live-dash-counts"></div>
+            </div>
+            <div class="live-dash-settings" id="live-dash-settings"></div>
+          </div>
+          <div class="live-dash-header-right">
+            <div class="live-dash-header-tools">
+              <label class="live-board-font-ctrl">
+                文字
+                <button type="button" id="live-dash-font-minus" aria-label="文字サイズを小さく">−</button>
+                <input type="number" id="live-dash-font-input" min="1" max="50" step="1" value="18" aria-label="リスト文字サイズ（pt）">
+                <button type="button" id="live-dash-font-plus" aria-label="文字サイズを大きく">+</button>
+                pt
+              </label>
+              <div class="live-dash-actions">
+                <button type="button" id="live-refresh-btn" class="btn-small">更新</button>
+                <button type="button" id="live-export-btn" class="btn-small">結果を保存</button>
+                <button type="button" id="live-close-btn" class="btn-small btn-danger">部屋を閉じる</button>
+              </div>
+            </div>
+            <div class="live-dash-pin" id="live-dash-pin">----</div>
           </div>
         </div>
-        <div class="live-dash-settings" id="live-dash-settings"></div>
         <div class="live-board-tabs">
           <button type="button" class="live-board-tab" data-live-tab="achievement">達成</button>
           <button type="button" class="live-board-tab" data-live-tab="score">正解率</button>
@@ -950,21 +987,50 @@ function applyLiveFontPt_(pt, persist) {
   return pt;
 }
 
-function formatLiveLaunchSummary_(mode, opts, timeLimitSec) {
+function launchLiveSummaryCols_(mode, opts, timeLimitSec) {
   opts = opts || {};
-  var lines = [];
-  lines.push('種別: ' + (mode === 'word-link' ? 'Word Link' : '単語クイズ'));
+  var left = [];
+  var right = [];
+  left.push('種別: ' + (mode === 'word-link' ? 'Word Link' : '単語クイズ'));
   if (opts.bookName || opts.sheetName) {
-    lines.push('教材: ' + (opts.bookName || '—') + ' / ' + (opts.sheetName || '—'));
+    left.push('教材: ' + (opts.bookName || '—') + ' / ' + (opts.sheetName || '—'));
   }
+  var filters = opts.filters || {};
+  var divParts = [];
+  if (filters.dai && filters.dai.length) divParts.push('大:' + filters.dai.join(','));
+  if (filters.chu && filters.chu.length) divParts.push('中:' + filters.chu.join(','));
+  if (filters.sho && filters.sho.length) divParts.push('小:' + filters.sho.join(','));
+  left.push('区分: ' + (divParts.length ? divParts.join(' / ') : '指定なし（シート全体）'));
   if (mode === 'word-link') {
-    if (opts.linkMode) lines.push('形式: ' + wordLinkModeLabel_(opts.linkMode));
-    else lines.push('形式: START直前に選択');
-    lines.push('出題数: ' + (opts.linkQuestionCount || 25) + '語');
+    if (opts.linkMode) right.push('形式: ' + wordLinkModeLabel_(opts.linkMode));
+    else right.push('形式: START直前に選択');
+    right.push('出題数: ' + (opts.linkQuestionCount || 25) + '語');
+  } else {
+    var axes = opts.axes || {};
+    var dirMap = { jaen: '和英', enja: '英和' };
+    var grainMap = { WD: '語', PH: '句', EX: '例文' };
+    var dirs = (axes.directions || []).map(function (d) { return dirMap[d] || d; });
+    var grains = (axes.grains || []).map(function (g) { return grainMap[g] || g; });
+    right.push('方向: ' + (dirs.length ? dirs.join('・') : '—'));
+    right.push('単位: ' + (grains.length ? grains.join('・') : '—'));
+    var respMap = { choice: '選択', typing: '入力', speech: '音声' };
+    right.push('解答: ' + (respMap[axes.response] || axes.response || '—'));
+    if (opts.questionCount) right.push('出題数: ' + (opts.questionCount === 'all' ? 'すべて' : opts.questionCount + '問'));
   }
-  if (timeLimitSec > 0) lines.push('制限時間: ' + formatLiveLimit_(timeLimitSec));
-  else lines.push('制限時間: なし');
-  return lines.join('\n');
+  if (timeLimitSec > 0) right.push('制限時間: ' + formatLiveLimit_(timeLimitSec));
+  else right.push('制限時間: なし');
+  return { left: left, right: right };
+}
+
+function paintLiveLaunchSummary_(el, mode, opts, timeLimitSec) {
+  if (!el) return;
+  var cols = launchLiveSummaryCols_(mode, opts, timeLimitSec);
+  function colHtml(lines) {
+    return '<div class="live-board-settings-col">' + lines.map(function (line) {
+      return escapeHtml(line);
+    }).join('<br>') + '</div>';
+  }
+  el.innerHTML = colHtml(cols.left) + colHtml(cols.right);
 }
 
 function setLiveBoardOpen_(open) {
@@ -1047,7 +1113,7 @@ function paintLiveDash_(data) {
   var settingsEl = document.getElementById('live-dash-settings');
   if (pinEl) pinEl.textContent = livePin_ || '----';
   if (titleEl) titleEl.textContent = data.title || '授業ライブ';
-  if (metaEl) metaEl.textContent = data.pin ? 'コード ' + data.pin : '';
+  if (metaEl) metaEl.textContent = '';
   if (countsEl) {
     countsEl.textContent = '達成 ' + (data.finishedCount || 0)
       + ' / 参加 ' + (data.joinedCount || 0)
@@ -1061,9 +1127,7 @@ function paintLiveDash_(data) {
       timerEl.textContent = data.timeLimitSec > 0 ? formatLiveLimit_(data.timeLimitSec) : '制限なし';
     }
   }
-  if (settingsEl) {
-    settingsEl.textContent = formatLiveLaunchSummary_(data.mode, data.launchOptions, data.timeLimitSec);
-  }
+  paintLiveLaunchSummary_(settingsEl, data.mode, data.launchOptions, data.timeLimitSec);
   updateLiveDashTabLabels_(data.mode);
   renderLiveDashList_('live-dash-list-achievement', data.lists && data.lists.achievement, data.mode, 'achievement');
   renderLiveDashList_('live-dash-list-score', data.lists && data.lists.scoreRate, data.mode, 'score');
