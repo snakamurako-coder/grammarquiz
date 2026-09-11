@@ -228,30 +228,69 @@ const LiveRoomModule = (function () {
     return !!(activeRoom_ && activeRoom_.isTeacher);
   }
 
-  function restoreFromStorage_() {
-    const stored = loadStoredRoom_();
-    if (!stored || !stored.pin) return;
-    if (stored.closesAt && Date.now() > stored.closesAt) {
-      saveStoredRoom_(null);
-      return;
-    }
+  function isLoggedIn_() {
+    return !!(window.AuthGateService && AuthGateService.isValid());
+  }
+
+  function canRestoreTeacher_(stored) {
+    return !!(stored && stored.isTeacher && isLoggedIn_() && isAdminUser_());
+  }
+
+  function canRestoreStudent_(stored) {
+    return !!(stored && stored.pin && !stored.isTeacher && isLoggedIn_());
+  }
+
+  function applyStoredRoom_(stored) {
     activeRoom_ = stored;
     localBest_ = stored.localBest || null;
-    refreshUi_();
+    timeoutFired_ = false;
     if (stored.isTeacher) {
       showBoardScreen_();
       startBoardPoll_();
     } else if (stored.closesAt) {
       startRoomTimer_(stored.closesAt);
     }
+    refreshUi_();
+  }
+
+  function restoreFromStorage_() {
+    hideBoardScreen_();
+    const stored = loadStoredRoom_();
+    if (!stored || !stored.pin) return;
+    if (stored.closesAt && Date.now() > stored.closesAt) {
+      saveStoredRoom_(null);
+      return;
+    }
+    if (stored.isTeacher) {
+      if (!canRestoreTeacher_(stored)) return;
+      applyStoredRoom_(stored);
+      return;
+    }
+    if (!canRestoreStudent_(stored)) return;
+    applyStoredRoom_(stored);
+  }
+
+  function tryResumeAfterAuth_() {
+    if (activeRoom_) {
+      if (activeRoom_.isTeacher && (!isLoggedIn_() || !isAdminUser_())) {
+        hideBoardScreen_();
+        stopBoardPoll_();
+        refreshUi_();
+        return;
+      }
+      refreshUi_();
+      return;
+    }
+    restoreFromStorage_();
   }
 
   function refreshUi_() {
     const banner = el_('live-room-student-banner');
+    const teacherBanner = el_('live-room-teacher-banner');
     const adminBtns = document.querySelectorAll('.live-room-open-btn');
     const joinPanel = el_('live-room-join-panel');
     if (banner) {
-      if (activeRoom_ && !activeRoom_.isTeacher) {
+      if (activeRoom_ && !activeRoom_.isTeacher && isLoggedIn_()) {
         banner.style.display = 'block';
         banner.textContent = '授業ライブ参加中: ' + (activeRoom_.title || activeRoom_.pin)
           + '（コード ' + activeRoom_.pin + '）';
@@ -259,9 +298,24 @@ const LiveRoomModule = (function () {
         banner.style.display = 'none';
       }
     }
+    const storedTeacher = (activeRoom_ && activeRoom_.isTeacher) ? activeRoom_ : loadStoredRoom_();
+    const boardVisible = document.body.classList.contains('live-room-board-active');
+    if (teacherBanner) {
+      if (canRestoreTeacher_(storedTeacher) && !boardVisible) {
+        teacherBanner.style.display = 'block';
+        teacherBanner.innerHTML = '授業ライブ開催中: ' + escapeHtml_(storedTeacher.title || storedTeacher.pin)
+          + '（コード ' + escapeHtml_(storedTeacher.pin) + '）'
+          + ' <button type="button" class="btn-secondary" id="live-room-show-board-btn" style="width:auto;min-width:auto;padding:4px 10px;margin-left:8px;">ボードを表示</button>';
+        const showBtn = el_('live-room-show-board-btn');
+        if (showBtn) showBtn.onclick = reopenTeacherBoard_;
+      } else {
+        teacherBanner.style.display = 'none';
+        teacherBanner.innerHTML = '';
+      }
+    }
     const homework = window.VocabLaunchConfig && VocabLaunchConfig.isHomeworkMode();
     adminBtns.forEach(function (btn) {
-      btn.style.display = (isAdminUser_() && !homework) ? '' : 'none';
+      btn.style.display = (isAdminUser_() && isLoggedIn_() && !homework) ? '' : 'none';
     });
     if (joinPanel && activeRoom_ && !activeRoom_.isTeacher) {
       const pinInput = el_('live-room-pin-input');
@@ -357,9 +411,36 @@ const LiveRoomModule = (function () {
   }
 
   async function closeRoom() {
-    if (!activeRoom_ || !activeRoom_.isTeacher) return;
-    await post_({ action: 'liveClose', pin: activeRoom_.pin });
+    const room = (activeRoom_ && activeRoom_.isTeacher) ? activeRoom_ : loadStoredRoom_();
+    if (!room || !room.isTeacher) return;
+    if (!isLoggedIn_()) {
+      dismissBoardToSettings_();
+      return;
+    }
+    activeRoom_ = room;
+    await post_({ action: 'liveClose', pin: room.pin });
     await leaveRoom();
+  }
+
+  function dismissBoardToSettings_() {
+    stopBoardPoll_();
+    hideBoardScreen_();
+    const settingsScreen = document.getElementById('settings-screen');
+    const loginScreen = document.getElementById('login-screen');
+    if (isLoggedIn_()) {
+      if (settingsScreen) settingsScreen.style.display = 'block';
+      if (loginScreen) loginScreen.style.display = 'none';
+    } else {
+      if (loginScreen) loginScreen.style.display = 'block';
+      if (settingsScreen) settingsScreen.style.display = 'none';
+    }
+    refreshUi_();
+  }
+
+  function reopenTeacherBoard_() {
+    const stored = (activeRoom_ && activeRoom_.isTeacher) ? activeRoom_ : loadStoredRoom_();
+    if (!canRestoreTeacher_(stored)) return;
+    applyStoredRoom_(stored);
   }
 
   async function submitAttempt(attempt, options) {
@@ -594,6 +675,12 @@ const LiveRoomModule = (function () {
         });
       });
     }
+    const backBtn = el_('live-board-back-btn');
+    if (backBtn) {
+      backBtn.addEventListener('click', function () {
+        dismissBoardToSettings_();
+      });
+    }
     document.querySelectorAll('.live-board-tab').forEach(function (btn) {
       btn.addEventListener('click', function () {
         switchBoardTab_(btn.getAttribute('data-live-tab'));
@@ -602,10 +689,16 @@ const LiveRoomModule = (function () {
   }
 
   function init() {
+    hideBoardScreen_();
     bindUi_();
     restoreFromStorage_();
     if (window.AuthGateService) {
-      AuthGateService.fetchUserIfNeeded().then(refreshUi_).catch(function () {});
+      AuthGateService.fetchUserIfNeeded().then(function () {
+        tryResumeAfterAuth_();
+      }).catch(function () {
+        hideBoardScreen_();
+        refreshUi_();
+      });
     }
   }
 
@@ -617,6 +710,7 @@ const LiveRoomModule = (function () {
     closeRoom: closeRoom,
     submitAttempt: submitAttempt,
     trySubmitFromSession: trySubmitFromSession,
+    tryResumeAfterAuth_: tryResumeAfterAuth_,
     formatLiveResultMessage_: formatLiveResultMessage_,
     getActiveRoom: getActiveRoom,
     isActive: isActive,

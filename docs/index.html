@@ -1083,10 +1083,12 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
 .paper-quiz-start-row { display: flex; flex-direction: column; gap: 8px; }
 .paper-quiz-start-row .btn-secondary { width: 100%; }
 .live-room-open-btn { width: 100%; min-height: 44px; font-size: 0.92em; font-weight: bold; }
-#live-room-student-banner {
+#live-room-student-banner,
+#live-room-teacher-banner {
   display: none; margin: 0 0 10px; padding: 10px 12px; background: #e3f2fd;
   border: 1px solid #90caf9; border-radius: 8px; color: #1565c0; font-size: 0.9em; font-weight: 600;
 }
+#live-room-teacher-banner { display: none; }
 #live-room-join-panel {
   margin: 0 0 12px; padding: 12px; background: #f8f9fa; border-radius: 8px;
   border: 1px solid #eceff1;
@@ -1641,6 +1643,7 @@ body.live-room-board-active #result-screen { display: none !important; }
           </div>
         </div>
       </div>
+      <div id="live-room-teacher-banner" role="status" style="display:none;"></div>
       <div id="live-room-student-banner" role="status"></div>
       <div id="live-room-join-panel">
         <div class="subsection-title" style="margin-bottom:8px;">授業ライブに参加</div>
@@ -2347,6 +2350,7 @@ body.live-room-board-active #result-screen { display: none !important; }
       <div class="live-board-panel" data-live-panel="speed" id="live-board-list-speed" style="display:none;"></div>
     </div>
     <div class="live-board-actions">
+      <button type="button" class="btn-secondary" id="live-board-back-btn">学習画面に戻る</button>
       <button type="button" class="btn-secondary" id="live-board-close-btn">部屋を閉じる</button>
     </div>
   </div>
@@ -12094,7 +12098,10 @@ window.onLoginSuccess = function(user) {
   try { sessionStorage.removeItem('dd_my_vocab_book_url'); } catch (e) {}
   initVocabModules();
   if (window.VocabSessionDraftModule) VocabSessionDraftModule.init();
-  if (window.LiveRoomModule) LiveRoomModule.refreshUi_();
+  if (window.LiveRoomModule) {
+    if (typeof LiveRoomModule.tryResumeAfterAuth_ === 'function') LiveRoomModule.tryResumeAfterAuth_();
+    else LiveRoomModule.refreshUi_();
+  }
   if (window.UserDriveModule && UserDriveModule.isEnabled()) {
     prepareDriveAfterLogin_();
   } else {
