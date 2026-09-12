@@ -4952,6 +4952,8 @@ function buildLiveBoardEntry_(entry) {
     class: entry.class || '',
     attempts: parseInt(entry.attempts, 10) || 0,
     status: entry.status || 'joined',
+    working: !!(entry && entry.working),
+    lastActiveAt: parseInt(entry && entry.lastActiveAt, 10) || 0,
     best: best
   };
 }
@@ -5480,6 +5482,13 @@ function apiLiveCreate_(requestData) {
   const launchOptions = requestData.launchOptions || {};
   if (!launchOptions.bookName || !launchOptions.sheetName) {
     return { status: 'error', message: 'ブックと教材（シート）が必要です' };
+  }
+  if (mode === 'word-link') {
+    const linkMode = String(launchOptions.linkMode || '').trim();
+    if (!LIVE_WORD_LINK_MODE_LABELS[linkMode]) {
+      return { status: 'error', message: 'Word Link の形式（英和 / 和英 / Audio）を選んでください' };
+    }
+    launchOptions.linkMode = linkMode;
   }
   const timeLimitSec = Math.max(0, parseInt(requestData.timeLimitSec, 10) || 0);
   const ttlSec = computeLiveRoomTtlSec_(timeLimitSec);

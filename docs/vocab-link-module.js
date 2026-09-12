@@ -34,9 +34,23 @@ const VocabLinkModule = (function () {
   let pauseStartedAt = null;
   let pausedSec = 0;
   let firstPlayToken = 0;
+  let lockedMode_ = '';
 
   function el_(id) {
     return document.getElementById(id);
+  }
+
+  function normalizeLinkMode_(key) {
+    const mode = String(key || '').trim();
+    return MODE_LABELS[mode] ? mode : '';
+  }
+
+  function applyModeLockUi_() {
+    const locked = !!lockedMode_;
+    ['vl-change-mode-btn', 'vl-change-mode-btn-2'].forEach(function (id) {
+      const btn = el_(id);
+      if (btn) btn.style.display = locked ? 'none' : '';
+    });
   }
 
   function unreg_() {
@@ -97,6 +111,12 @@ const VocabLinkModule = (function () {
     }
     const settings = document.getElementById('settings-screen');
     if (settings) settings.style.display = 'none';
+    applyModeLockUi_();
+    if (lockedMode_) {
+      currentMode = lockedMode_;
+      startNewGame_(masterPairs.slice(), false);
+      return;
+    }
     showStartScreen_();
   }
 
@@ -117,6 +137,8 @@ const VocabLinkModule = (function () {
     }
     const settings = document.getElementById('settings-screen');
     if (settings) settings.style.display = 'block';
+    lockedMode_ = '';
+    applyModeLockUi_();
   }
 
   function clearBoard_() {
@@ -132,6 +154,11 @@ const VocabLinkModule = (function () {
   }
 
   function showStartScreen_() {
+    if (lockedMode_) {
+      currentMode = lockedMode_;
+      startNewGame_(masterPairs.slice(), false);
+      return;
+    }
     stopTimer_();
     resetAudioLock_(true);
     if (window.TtsModule && typeof window.TtsModule.stop === 'function') {
@@ -147,6 +174,8 @@ const VocabLinkModule = (function () {
   function showReadyScreen_() {
     hideOverlay_('vl-start-screen');
     hideOverlay_('vl-result-screen');
+    const readyLabel = el_('vl-ready-mode-label');
+    if (readyLabel) readyLabel.textContent = MODE_LABELS[currentMode] || '';
     const ready = el_('vl-ready-screen');
     if (ready) ready.style.display = 'flex';
   }
@@ -454,6 +483,7 @@ const VocabLinkModule = (function () {
     }
 
     renderResultList_();
+    applyModeLockUi_();
     const result = el_('vl-result-screen');
     if (result) result.style.display = 'flex';
 
@@ -698,6 +728,8 @@ const VocabLinkModule = (function () {
       window.TtsModule.prime();
     }
 
+    lockedMode_ = normalizeLinkMode_(options && options.linkMode);
+    if (lockedMode_) currentMode = lockedMode_;
     showScreen_();
   }
 

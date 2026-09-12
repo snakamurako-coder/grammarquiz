@@ -139,6 +139,10 @@ const LiveRoomModule = (function () {
     return map[key] || key || '';
   }
 
+  function isWordLinkMode_(key) {
+    return key === 'wl-eija' || key === 'wl-jaei' || key === 'awl-eija' || key === 'awl-jaei';
+  }
+
   function compareWordLinkBest_(aBest, bBest) {
     aBest = aBest || {};
     bBest = bBest || {};
@@ -360,7 +364,7 @@ const LiveRoomModule = (function () {
     if (mode === 'word-link') {
       const linkMode = opts.linkMode || (opts.wordLink && opts.wordLink.linkMode);
       if (linkMode) right.push('形式: ' + wordLinkModeLabel_(linkMode));
-      else right.push('形式: START直前に選択');
+      else right.push('形式: 未指定');
       right.push('出題数: ' + (opts.linkQuestionCount || 25) + '語');
     } else {
       const axes = opts.axes || {};
@@ -567,6 +571,10 @@ const LiveRoomModule = (function () {
     if (backendBlock) {
       backendBlock.style.display = (isAdminUser_() && isLoggedIn_() && !homework) ? '' : 'none';
     }
+    const liveModeWrap = el_('vocab-link-live-mode-wrap');
+    if (liveModeWrap) {
+      liveModeWrap.style.display = (isAdminUser_() && isLoggedIn_() && !homework) ? '' : 'none';
+    }
     if (joinPanel && activeRoom_ && !activeRoom_.isTeacher) {
       const pinInput = el_('live-room-pin-input');
       if (pinInput) pinInput.value = activeRoom_.pin;
@@ -602,6 +610,14 @@ const LiveRoomModule = (function () {
     const launchOptions = window.VocabSettingsModule.getQuizOptions();
     if (!launchOptions.bookName || !launchOptions.sheetName) {
       throw new Error('ブックと教材（シート）を選択してください');
+    }
+    if (mode === 'word-link') {
+      const linkMode = String(opts.linkMode || launchOptions.linkMode
+        || (el_('vocab-link-live-mode') || {}).value || '').trim();
+      if (!isWordLinkMode_(linkMode)) {
+        throw new Error('Word Link の形式（英和 / 和英 / Audio）を選んでください');
+      }
+      launchOptions.linkMode = linkMode;
     }
     const backend = opts.backend || getSelectedBackend_();
     const res = await post_({

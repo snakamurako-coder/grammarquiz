@@ -892,6 +892,18 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
   align-items: center;
   z-index: 105;
 }
+.vl-ready-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+.vl-ready-mode-label {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
 .vl-start-go-btn {
   background: #38bdf8;
   color: #0f172a;
@@ -2050,6 +2062,16 @@ body.live-room-board-active #login-screen { display: none !important; }
             <option value="50">50語</option>
           </select>
         </div>
+        <div class="form-group" id="vocab-link-live-mode-wrap" style="display:none;">
+          <label>授業ライブの形式</label>
+          <select id="vocab-link-live-mode">
+            <option value="wl-eija">Word Link 英和</option>
+            <option value="wl-jaei">Word Link 和英</option>
+            <option value="awl-eija">Audio WL 英和</option>
+            <option value="awl-jaei">Audio WL 和英</option>
+          </select>
+          <p class="filter-axis-hint" style="margin-top:6px;">生徒はモード選択をせず、START 画面から始まります。</p>
+        </div>
         <button type="button" id="vocab-link-start-btn" class="btn-primary">Word Link を開始する</button>
         <button type="button" class="btn-secondary live-room-open-btn" data-live-mode="word-link" style="display:none;">この設定で授業ライブを開く</button>
       </div>
@@ -2663,7 +2685,10 @@ body.live-room-board-active #login-screen { display: none !important; }
     </div>
 
     <div class="vl-overlay-screen vl-ready-screen" id="vl-ready-screen" style="display: none;">
-      <button type="button" class="vl-start-go-btn" id="vl-ready-start-btn">START!</button>
+      <div class="vl-ready-stack">
+        <p id="vl-ready-mode-label" class="vl-ready-mode-label"></p>
+        <button type="button" class="vl-start-go-btn" id="vl-ready-start-btn">START!</button>
+      </div>
     </div>
 
     <header class="vl-header">
@@ -7642,6 +7667,7 @@ const VocabSettingsModule = (() => {
       cardTarget: getCardTargetSettings_(),
       vocabSubMode: vocabSubMode_,
       linkQuestionCount: parseInt((document.getElementById('vocab-link-count') || {}).value, 10) || 25,
+      linkMode: (document.getElementById('vocab-link-live-mode') || {}).value || '',
       filters: {
         dai: getSelectedDivisions('dai'),
         chu: getSelectedDivisions('chu'),
@@ -7726,6 +7752,10 @@ const VocabSettingsModule = (() => {
       const linkCountEl = document.getElementById('vocab-link-count');
       if (linkCountEl && saved.linkQuestionCount != null) {
         linkCountEl.value = String(saved.linkQuestionCount);
+      }
+      const linkModeEl = document.getElementById('vocab-link-live-mode');
+      if (linkModeEl && saved.linkMode && ['wl-eija', 'wl-jaei', 'awl-eija', 'awl-jaei'].indexOf(saved.linkMode) >= 0) {
+        linkModeEl.value = saved.linkMode;
       }
       applyVocabModeTab_(saved.vocabSubMode || 'card', false);
     } finally {

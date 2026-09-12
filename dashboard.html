@@ -252,14 +252,14 @@ body.live-board-open .live-dash-section {
       <div class="form-group"><label>教材（シート）</label><select id="live-sheet"></select></div>
       <div class="form-group"><label>対象クラス（空＝制限なし）</label><input id="live-target-class" type="text" placeholder="例: A（PIN を知っていれば誰でも参加可）"></div>
       <div class="form-group"><label>表示名（空＝教材名）</label><input id="live-title" type="text"></div>
-      <div class="form-group" id="live-link-mode-wrap" style="display:none;"><label>Word Link 形式（表示用）</label>
+      <div class="form-group" id="live-link-mode-wrap" style="display:none;"><label>Word Link 形式</label>
         <select id="live-link-mode">
-          <option value="">START直前に選択</option>
-          <option value="wl-eija">Word Link 英和</option>
+          <option value="wl-eija" selected>Word Link 英和</option>
           <option value="wl-jaei">Word Link 和英</option>
           <option value="awl-eija">Audio WL 英和</option>
           <option value="awl-jaei">Audio WL 和英</option>
         </select>
+        <p class="hint">生徒はモード選択をせず、START 画面から始まります。</p>
       </div>
     </div>
     <div id="live-dash-backend-block" class="live-backend-block">
@@ -1060,8 +1060,7 @@ function buildLiveLaunchOptions_(mode) {
   if (mode === 'word-link') {
     opts.linkQuestionCount = 25;
     opts.vocabSubMode = 'link';
-    var linkMode = (document.getElementById('live-link-mode') || {}).value || '';
-    if (linkMode) opts.linkMode = linkMode;
+    opts.linkMode = (document.getElementById('live-link-mode') || {}).value || 'wl-eija';
     return opts;
   }
   opts.axes = {
@@ -1207,7 +1206,7 @@ function launchLiveSummaryCols_(mode, opts, timeLimitSec) {
   left.push('区分: ' + (divParts.length ? divParts.join(' / ') : '指定なし（シート全体）'));
   if (mode === 'word-link') {
     if (opts.linkMode) right.push('形式: ' + wordLinkModeLabel_(opts.linkMode));
-    else right.push('形式: START直前に選択');
+    else right.push('形式: 未指定');
     right.push('出題数: ' + (opts.linkQuestionCount || 25) + '語');
   } else {
     var axes = opts.axes || {};
@@ -1402,6 +1401,14 @@ async function openLiveRoom_() {
   if (!launchOptions.bookName || !launchOptions.sheetName) {
     showBanner('ブックと教材（シート）を選択してください', false);
     return;
+  }
+  if (mode === 'word-link') {
+    var linkMode = String(launchOptions.linkMode || '').trim();
+    if (['wl-eija', 'wl-jaei', 'awl-eija', 'awl-jaei'].indexOf(linkMode) < 0) {
+      showBanner('Word Link の形式を選んでください', false);
+      return;
+    }
+    launchOptions.linkMode = linkMode;
   }
   var mins = parseInt((document.getElementById('live-limit-min') || {}).value, 10);
   var timeLimitSec = (!isNaN(mins) && mins > 0) ? mins * 60 : 0;
