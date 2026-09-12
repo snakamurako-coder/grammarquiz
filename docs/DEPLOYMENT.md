@@ -254,6 +254,52 @@ GAS② `?action=exportStatic` から `docs/data/manifest-index.json` と
 
 ---
 
+## 授業ライブ Firebase β（任意）
+
+部屋開設時に **標準（4秒更新）** または **リアルタイム β** を選択できる。生徒は PIN 参加時に自動追随。いずれか一方を将来廃止する前提でアダプタ分離済み。
+
+### 1. Firebase コンソール
+
+1. プロジェクトを作成（または既存を使用）
+2. **Firestore Database** を有効化（本番モード推奨）
+3. **プロジェクトの設定 → 全般 → マイアプリ** から Web アプリを追加し、`apiKey` / `authDomain` / `projectId` / `appId` を控える
+4. **IAM → サービスアカウント** で JSON キーを発行（Firestore 書込権限）。`client_email` と `private_key` を GAS に登録
+
+### 2. Security Rules
+
+リポジトリの [firebase/firestore.rules](../firebase/firestore.rules) を Firebase コンソール → Firestore → ルール に貼り付けて公開。
+
+- 部屋 `liveRooms/{pin}` の作成・削除: GAS サービスアカウント（REST）のみ（Rules 上はクライアント write 禁止）
+- `entries/{account}`: クライアント read/write 可（教室用途・なりすましは自己責任モデル）
+
+### 3. GAS Script Properties（①② 両方に同じ値）
+
+| キー | 例 |
+|---|---|
+| `FIREBASE_PROJECT_ID` | `your-project-id` |
+| `FIREBASE_CLIENT_EMAIL` | `firebase-adminsdk-...@....iam.gserviceaccount.com` |
+| `FIREBASE_PRIVATE_KEY` | `-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n` |
+| `FIREBASE_WEB_API_KEY` | Web API Key |
+| `FIREBASE_AUTH_DOMAIN` | `your-project.firebaseapp.com` |
+| `FIREBASE_APP_ID` | `1:...:web:...` |
+| `LIVE_BACKEND_DEFAULT` | `gas` または `firebase`（省略時 `gas`） |
+
+`code.gs` 変更後は **GAS①・GAS② 両方** `clasp deploy -i`。
+
+### 4. 教室での確認チェックリスト
+
+| 確認項目 | 標準 | Firebase β |
+|---|---|---|
+| 部屋作成・PIN 表示 | GAS Cache | Cache stub + Firestore meta |
+| 生徒参加・出題設定 | GAS `liveJoin` | 同左（参加は GAS 1 回） |
+| 提出後ボード更新 | 最大 ~4 秒 | 学習画面ボードは即時（onSnapshot） |
+| 時間切れ一斉提出 | ジッターあり | ジッターなし |
+| 部屋を閉じる → SS 保存 | `livemode` フォルダ | Firestore 読取 → 同左 |
+
+管理ダッシュボードのボードは **GAS 経由 4 秒ポーリング**（Firestore 部屋も GAS が Firestore を読む）。リアルタイム表示の正式 UI は **学習画面の授業ライブボード**。
+
+---
+
 ## トラブルシューティング
 
 - **`client_secret missing` / ログイン直後にトークン交換失敗**: GAS①② の Script Properties に `CLIENT_SECRET` が無い、または未デプロイ。GCP コンソールの OAuth クライアントからシークレットをコピーし、両プロジェクトに登録 → Deploy All
@@ -265,3 +311,6 @@ GAS② `?action=exportStatic` から `docs/data/manifest-index.json` と
 - **マイページ／マイ単語帳が空**: ユーザー Drive は Pages の `UserDriveModule`（GAS① ではない）。[USER_DATA_SANCTUARY.md](USER_DATA_SANCTUARY.md) §0・HANDOVER「ユーザー Drive — 動作確認済み」
 - **教材の更新が反映されない**: サーバー側の版キャッシュ（120秒）が切れるのを待つか「キャッシュ更新」ボタン
 - **初回表示が遅い**: `docs/data/manifest-index.json` が未生成。`scripts/export-static.ps1` を実行
+- **Firebase β が選べない / 部屋を開けない**: GAS①② の Script Properties に Firebase 6 項目が揃っているか。`LIVE_BACKEND_DEFAULT=firebase` だけでは不足
+- **Firebase β で提出できない**: Firestore Rules が反映されているか。ブラウザコンソールの Firestore エラーを確認
+- **Firebase β で閉じられない**: サービスアカウントに Firestore 削除権限があるか。GAS 実行ログの Firestore REST エラーを確認

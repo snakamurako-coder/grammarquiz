@@ -1,8 +1,9 @@
 /**
- * 授業ライブ v1 — Cache 上の部屋・ベストスコア採用
+ * 授業ライブ v1 — GAS Cache（4秒ポーリング）または Firebase β（リアルタイム）
  */
 const LiveRoomModule = (function () {
   const STORAGE_KEY = 'dd_live_room';
+  const BACKEND_UI_ROOT = 'live-room-backend-block';
   const FONT_KEY = 'dd_live_board_font_pt';
   const FONT_MIN = 1;
   const FONT_MAX = 50;
@@ -44,6 +45,33 @@ const LiveRoomModule = (function () {
     if (String(user.role || '').toLowerCase() === 'admin') return true;
     if (String(user.class || '').trim().toLowerCase() === 'admin') return true;
     return false;
+  }
+
+  function isFirebaseRoom_(room) {
+    room = room || activeRoom_;
+    return !!(room && String(room.backend || '').toLowerCase() === 'firebase');
+  }
+
+  function getSelectedBackend_() {
+    if (window.LiveFirebase && typeof LiveFirebase.getSelectedBackend === 'function') {
+      return LiveFirebase.getSelectedBackend(BACKEND_UI_ROOT);
+    }
+    return 'gas';
+  }
+
+  function backendLabel_(backend) {
+    if (window.LiveFirebase && typeof LiveFirebase.backendLabel === 'function') {
+      return LiveFirebase.backendLabel(backend);
+    }
+    return backend === 'firebase' ? 'リアルタイムβ' : '標準';
+  }
+
+  function paintBackendBadge_(backend) {
+    const badge = el_('live-board-backend-badge');
+    if (!badge) return;
+    badge.textContent = backendLabel_(backend || 'gas');
+    badge.classList.toggle('is-firebase', backend === 'firebase');
+    badge.style.display = '';
   }
 
   async function post_(payload, retries, timeoutMs) {
@@ -371,7 +399,7 @@ const LiveRoomModule = (function () {
     timeoutFired_ = false;
     if (stored.isTeacher) {
       showBoardScreen_();
-      startBoardPoll_();
+      startBoardUpdates_();
     } else if (stored.closesAt) {
       startRoomTimer_(stored.closesAt);
     }
@@ -402,7 +430,7 @@ const LiveRoomModule = (function () {
     if (activeRoom_) {
       if (activeRoom_.isTeacher && (!isLoggedIn_() || !isAdminUser_())) {
         hideBoardScreen_();
-        stopBoardPoll_();
+        stopBoardUpdates_();
         refreshUi_();
         return;
       }
@@ -423,7 +451,8 @@ const LiveRoomModule = (function () {
         banner.style.display = 'block';
         const statusEl = el_('live-room-student-status');
         if (statusEl) {
-          statusEl.textContent = '授業ライブ参加中: ' + (activeRoom_.title || activeRoom_.pin)
+          statusEl.textContent = '授業ライブ参加中 [' + backendLabel_(activeRoom_.backend) + ']: '
+            + (activeRoom_.title || activeRoom_.pin)
             + '（コード ' + activeRoom_.pin + '）';
         }
         const settingsEl = el_('live-room-student-settings');
@@ -439,7 +468,8 @@ const LiveRoomModule = (function () {
     if (teacherBanner) {
       if (canRestoreTeacher_(storedTeacher) && !boardVisible) {
         teacherBanner.style.display = 'block';
-        teacherBanner.innerHTML = '授業ライブ開催中: ' + escapeHtml_(storedTeacher.title || storedTeacher.pin)
+        teacherBanner.innerHTML = '授業ライブ開催中 [' + escapeHtml_(backendLabel_(storedTeacher.backend)) + ']: '
+          + escapeHtml_(storedTeacher.title || storedTeacher.pin)
           + '（コード ' + escapeHtml_(storedTeacher.pin) + '）'
           + ' <button type="button" class="btn-secondary" id="live-room-show-board-btn" style="width:auto;min-width:auto;padding:4px 10px;margin-left:8px;">ボードを表示</button>';
         const showBtn = el_('live-room-show-board-btn');
@@ -453,6 +483,10 @@ const LiveRoomModule = (function () {
     adminBtns.forEach(function (btn) {
       btn.style.display = (isAdminUser_() && isLoggedIn_() && !homework) ? '' : 'none';
     });
+    const backendBlock = el_(BACKEND_UI_ROOT);
+    if (backendBlock) {
+      backendBlock.style.display = (isAdminUser_() && isLoggedIn_() && !homework) ? '' : 'none';
+    }
     if (joinPanel && activeRoom_ && !activeRoom_.isTeacher) {
       const pinInput = el_('live-room-pin-input');
       if (pinInput) pinInput.value = activeRoom_.pin;
@@ -489,9 +523,11 @@ const LiveRoomModule = (function () {
     if (!launchOptions.bookName || !launchOptions.sheetName) {
       throw new Error('ブックと教材（シート）を選択してください');
     }
+    const backend = opts.backend || getSelectedBackend_();
     const res = await post_({
       action: 'liveCreate',
       mode: mode,
+      backend: backend,
       launchOptions: launchOptions,
       targetClass: opts.targetClass,
       timeLimitSec: opts.timeLimitSec,
@@ -502,6 +538,7 @@ const LiveRoomModule = (function () {
     if (!data.pin) throw new Error('参加コードを発行できませんでした');
     const room = {
       pin: data.pin,
+      backend: data.backend || backend,
       title: data.title,
       mode: data.mode,
       isTeacher: true,
@@ -515,7 +552,7 @@ const LiveRoomModule = (function () {
     boardDefaultedPin_ = '';
     setActiveRoom_(room);
     showBoardScreen_();
-    startBoardPoll_();
+    startBoardUpdates_();
     return room;
   }
 
@@ -529,6 +566,7 @@ const LiveRoomModule = (function () {
     const data = res.data || {};
     const room = {
       pin: data.pin,
+      backend: data.backend || 'gas',
       title: data.title,
       mode: data.mode,
       isTeacher: false,
@@ -581,7 +619,7 @@ const LiveRoomModule = (function () {
   }
 
   async function leaveRoom() {
-    stopBoardPoll_();
+    stopBoardUpdates_();
     clearRoomTimer_();
     activeRoom_ = null;
     localBest_ = null;
@@ -624,7 +662,7 @@ const LiveRoomModule = (function () {
   }
 
   function dismissBoardToSettings_() {
-    stopBoardPoll_();
+    stopBoardUpdates_();
     hideBoardScreen_();
     const settingsScreen = document.getElementById('settings-screen');
     const loginScreen = document.getElementById('login-screen');
@@ -651,6 +689,22 @@ const LiveRoomModule = (function () {
     const normalized = normalizeAttempt_(mode, attempt);
     if (!isBetterAttempt_(mode, normalized, localBest_)) {
       return { skipped: true, reason: 'not_better', localBest: localBest_ };
+    }
+    if (isFirebaseRoom_()) {
+      if (!window.LiveFirebase) throw new Error('Firebase モジュールが読み込まれていません');
+      const user = (window.AuthGateService && AuthGateService.getUser()) || {};
+      const fbRes = await LiveFirebase.submitEntry(
+        activeRoom_.pin, mode, user, normalized, localBest_);
+      if (fbRes.updated && fbRes.entry && fbRes.entry.best) {
+        localBest_ = fbRes.entry.best;
+        activeRoom_.localBest = fbRes.entry.best;
+        saveStoredRoom_(activeRoom_);
+      }
+      return {
+        updated: !!fbRes.updated,
+        entry: fbRes.entry || {},
+        localBest: localBest_
+      };
     }
     if (!options.skipJitter) {
       const user = (window.AuthGateService && AuthGateService.getUser()) || {};
@@ -729,6 +783,7 @@ const LiveRoomModule = (function () {
     const timerEl = el_('live-board-timer');
     if (titleEl) titleEl.textContent = room.title || '授業ライブ';
     if (pinEl) pinEl.textContent = room.pin || '';
+    paintBackendBadge_(room.backend);
     if (metaEl) {
       metaEl.textContent = '名簿 ' + (room.rosterCount || 0) + ' 人';
     }
@@ -775,6 +830,7 @@ const LiveRoomModule = (function () {
     const pinEl = el_('live-board-pin');
     const metaEl = el_('live-board-meta');
     const timerEl = el_('live-board-timer');
+    if (data.backend) paintBackendBadge_(data.backend);
     if (titleEl) titleEl.textContent = data.title || '授業ライブ';
     if (pinEl) pinEl.textContent = data.pin || (activeRoom_ && activeRoom_.pin) || pinEl.textContent || '';
     if (metaEl) {
@@ -789,8 +845,9 @@ const LiveRoomModule = (function () {
         timerEl.textContent = '制限なし';
       }
     }
-    if (data.launchOptions && activeRoom_) {
-      activeRoom_.launchOptions = data.launchOptions;
+    if (activeRoom_) {
+      if (data.backend) activeRoom_.backend = data.backend;
+      if (data.launchOptions) activeRoom_.launchOptions = data.launchOptions;
       saveStoredRoom_(activeRoom_);
     }
     paintLaunchSummary_(
@@ -893,6 +950,38 @@ const LiveRoomModule = (function () {
     if (boardPollId_) {
       clearInterval(boardPollId_);
       boardPollId_ = null;
+    }
+  }
+
+  function startBoardUpdates_() {
+    stopBoardUpdates_();
+    if (!activeRoom_ || !activeRoom_.isTeacher) return;
+    if (isFirebaseRoom_() && window.LiveFirebase) {
+      LiveFirebase.subscribeBoard(
+        activeRoom_.pin,
+        activeRoom_.mode,
+        {
+          title: activeRoom_.title,
+          closesAt: activeRoom_.closesAt,
+          timeLimitSec: activeRoom_.timeLimitSec,
+          launchOptions: activeRoom_.launchOptions,
+          rosterCount: activeRoom_.rosterCount
+        },
+        function (data) { renderBoard_(data); },
+        function (e) { console.warn('Firebase ライブボード:', e.message || e); }
+      ).catch(function (e) {
+        console.warn('Firebase 購読開始:', e.message || e);
+        startBoardPoll_();
+      });
+      return;
+    }
+    startBoardPoll_();
+  }
+
+  function stopBoardUpdates_() {
+    stopBoardPoll_();
+    if (window.LiveFirebase && typeof LiveFirebase.unsubscribeBoard === 'function') {
+      LiveFirebase.unsubscribeBoard();
     }
   }
 
@@ -1006,6 +1095,9 @@ const LiveRoomModule = (function () {
   function init() {
     hideBoardScreen_();
     bindUi_();
+    if (window.LiveFirebase && typeof LiveFirebase.applyBackendUi === 'function') {
+      LiveFirebase.applyBackendUi(BACKEND_UI_ROOT, 'live-backend-hint').catch(function () { /* ignore */ });
+    }
     restoreFromStorage_();
     refreshUi_();
     if (window.AuthGateService) {

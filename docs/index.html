@@ -1221,6 +1221,34 @@ body.live-room-board-active #login-screen { display: none !important; }
   justify-content: flex-end;
 }
 .live-board-title { font-size: clamp(1rem, 2.4vw, 1.35rem); font-weight: bold; margin: 0; line-height: 1.2; }
+.live-backend-block {
+  margin: 12px 0 8px;
+  padding: 10px 12px;
+  border: 1px dashed #90caf9;
+  border-radius: 10px;
+  background: #f3f9ff;
+}
+.live-backend-block label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 14px;
+  font-size: 0.92em;
+  cursor: pointer;
+}
+.live-backend-block label input:disabled + span { opacity: 0.5; }
+.live-board-backend-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #334155;
+  color: #e2e8f0;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.live-board-backend-badge.is-firebase { background: #0ea5e9; color: #0f172a; }
 .live-board-pin {
   font-size: 64pt;
   font-weight: 800;
@@ -1786,6 +1814,12 @@ body.live-room-board-active #login-screen { display: none !important; }
         </div>
       </div>
       <div id="live-room-entry-block">
+      <div id="live-room-backend-block" class="live-backend-block" style="display:none;">
+        <div class="subsection-title" style="margin-bottom:6px;">ライブ接続方式（β）</div>
+        <label><input type="radio" name="live-backend" value="gas" checked><span>標準（4秒更新）</span></label>
+        <label><input type="radio" name="live-backend" value="firebase"><span>リアルタイム β（Firebase）</span></label>
+        <p id="live-backend-hint" class="filter-axis-hint" style="margin:6px 0 0;"></p>
+      </div>
       <div id="live-room-teacher-banner" role="status" style="display:none;"></div>
       <div id="live-room-student-banner" role="status">
         <div class="live-room-student-row">
@@ -2485,6 +2519,7 @@ body.live-room-board-active #login-screen { display: none !important; }
         <div class="live-board-header-main">
           <div class="live-board-header-row">
             <h2 class="live-board-title" id="live-board-title">授業ライブ</h2>
+            <span class="live-board-backend-badge" id="live-board-backend-badge" style="display:none;" aria-hidden="true"></span>
             <div class="live-board-timer" id="live-board-timer"></div>
             <div class="live-board-meta" id="live-board-meta"></div>
           </div>
@@ -2626,6 +2661,7 @@ body.live-room-board-active #login-screen { display: none !important; }
 <script src="vocab-session-draft.js"></script>
 <script src="vocab-card-module.js"></script>
 <script src="vocab-link-module.js"></script>
+<script src="live-firebase.js"></script>
 <script src="live-room-module.js"></script>
 <script>
 /** true: GAS① 認証ゲート必須（短命 auth トークン） */

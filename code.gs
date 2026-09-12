@@ -41,7 +41,16 @@ const PROP = {
   CHECK_SCOPE_ATTR2: 'CHECK_SCOPE_ATTR2',
   CHECK_SCOPE_ATTR3: 'CHECK_SCOPE_ATTR3',
   CHECK_SCOPE_ATTR4: 'CHECK_SCOPE_ATTR4',
-  CHECK_SCOPE_ATTR5: 'CHECK_SCOPE_ATTR5'
+  CHECK_SCOPE_ATTR5: 'CHECK_SCOPE_ATTR5',
+  /** 授業ライブ Firebase β（GAS のみ保持・Pages には Web 用のみ返す） */
+  FIREBASE_PROJECT_ID: 'FIREBASE_PROJECT_ID',
+  FIREBASE_CLIENT_EMAIL: 'FIREBASE_CLIENT_EMAIL',
+  FIREBASE_PRIVATE_KEY: 'FIREBASE_PRIVATE_KEY',
+  FIREBASE_WEB_API_KEY: 'FIREBASE_WEB_API_KEY',
+  FIREBASE_AUTH_DOMAIN: 'FIREBASE_AUTH_DOMAIN',
+  FIREBASE_APP_ID: 'FIREBASE_APP_ID',
+  /** 部屋開設 UI の初期選択: gas | firebase */
+  LIVE_BACKEND_DEFAULT: 'LIVE_BACKEND_DEFAULT'
 };
 
 const AUTH_CACHE_PREFIX = 'auth_';
@@ -153,6 +162,9 @@ function doGet(e) {
     const token = e.parameter.token;
     if (token) invalidateAuthToken_(token);
     return sendResponse({ status: "success", message: "ログアウトしました" });
+  }
+  if (action === 'liveConfig') {
+    return sendResponse(apiLiveConfig_({}));
   }
 
   if (action) {
@@ -528,7 +540,8 @@ function doPost(e) {
 
     // 授業ライブは Cache + 認証のみ。毎回の Drive 初期化を挟むと作成・ボードがタイムアウトする
     if (action === 'liveCreate' || action === 'liveJoin' || action === 'liveSubmit'
-        || action === 'liveBoard' || action === 'liveClose' || action === 'liveExport') {
+        || action === 'liveBoard' || action === 'liveClose' || action === 'liveExport'
+        || action === 'liveConfig') {
       return sendResponse(handleLiveApi_(action, requestData));
     }
 
@@ -4563,6 +4576,19 @@ function apiAdminLiveExport(pin) {
   }
 }
 
+/** dashboard: 授業ライブ Firebase 公開設定（Web 用のみ） */
+function apiAdminLiveConfig() {
+  try {
+    const access = checkDashboardAccess_();
+    if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
+      return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
+    }
+    return apiLiveConfig_({});
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
 /** dashboard: 単語プリセットカタログ */
 function apiAdminGetVocabCatalog() {
   try {
@@ -4682,7 +4708,7 @@ function exportStaticPresetData_() {
 }
 
 // =========================================================
-// 授業ライブ（Cache のみ・シート非保存・ベストスコア採用）
+// 授業ライブ（GAS Cache または Firebase β・シート非保存・ベストスコア採用）
 // =========================================================
 
 const LIVE_META_PREFIX = 'live_meta_';
@@ -5125,8 +5151,269 @@ function readLiveEntriesForPin_(meta, pin) {
   return entries;
 }
 
-function exportLiveResultsBook_(pin, meta) {
-  const entries = readLiveEntriesForPin_(meta, pin);
+function normalizeLiveBackend_(backend) {
+  return String(backend || '').trim().toLowerCase() === 'firebase' ? 'firebase' : 'gas';
+}
+
+function isLiveFirebaseBackend_(meta) {
+  return normalizeLiveBackend_(meta && meta.backend) === 'firebase';
+}
+
+function getLiveBackendDefault_() {
+  const raw = String(PropertiesService.getScriptProperties().getProperty(PROP.LIVE_BACKEND_DEFAULT) || '').trim().toLowerCase();
+  return raw === 'firebase' ? 'firebase' : 'gas';
+}
+
+function isFirebaseServerConfigured_() {
+  const props = PropertiesService.getScriptProperties();
+  return !!(
+    String(props.getProperty(PROP.FIREBASE_PROJECT_ID) || '').trim()
+    && String(props.getProperty(PROP.FIREBASE_CLIENT_EMAIL) || '').trim()
+    && String(props.getProperty(PROP.FIREBASE_PRIVATE_KEY) || '').trim()
+  );
+}
+
+function isFirebaseWebConfigured_() {
+  const props = PropertiesService.getScriptProperties();
+  return !!(
+    isFirebaseServerConfigured_()
+    && String(props.getProperty(PROP.FIREBASE_WEB_API_KEY) || '').trim()
+    && String(props.getProperty(PROP.FIREBASE_AUTH_DOMAIN) || '').trim()
+    && String(props.getProperty(PROP.FIREBASE_APP_ID) || '').trim()
+  );
+}
+
+function buildLiveConfigPayload_() {
+  const props = PropertiesService.getScriptProperties();
+  const firebaseEnabled = isFirebaseWebConfigured_();
+  const projectId = String(props.getProperty(PROP.FIREBASE_PROJECT_ID) || '').trim();
+  return {
+    defaultBackend: getLiveBackendDefault_(),
+    firebaseEnabled: firebaseEnabled,
+    webConfig: firebaseEnabled ? {
+      apiKey: String(props.getProperty(PROP.FIREBASE_WEB_API_KEY) || '').trim(),
+      authDomain: String(props.getProperty(PROP.FIREBASE_AUTH_DOMAIN) || '').trim(),
+      projectId: projectId,
+      appId: String(props.getProperty(PROP.FIREBASE_APP_ID) || '').trim()
+    } : null
+  };
+}
+
+function apiLiveConfig_(requestData) {
+  return {
+    status: 'success',
+    data: buildLiveConfigPayload_()
+  };
+}
+
+function getFirebasePrivateKey_() {
+  const raw = String(PropertiesService.getScriptProperties().getProperty(PROP.FIREBASE_PRIVATE_KEY) || '');
+  return raw.replace(/\\n/g, '\n');
+}
+
+function getFirebaseAccessToken_() {
+  const props = PropertiesService.getScriptProperties();
+  const email = String(props.getProperty(PROP.FIREBASE_CLIENT_EMAIL) || '').trim();
+  const projectId = String(props.getProperty(PROP.FIREBASE_PROJECT_ID) || '').trim();
+  const privateKey = getFirebasePrivateKey_();
+  if (!email || !projectId || !privateKey) {
+    throw new Error('Firebase Script Properties が未設定です');
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const header = Utilities.base64EncodeWebSafe(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const claim = Utilities.base64EncodeWebSafe(JSON.stringify({
+    iss: email,
+    scope: 'https://www.googleapis.com/auth/datastore',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600,
+    iat: now
+  }));
+  const signatureInput = header + '.' + claim;
+  const signature = Utilities.base64EncodeWebSafe(
+    Utilities.computeRsaSha256Signature(signatureInput, privateKey)
+  );
+  const jwt = signatureInput + '.' + signature;
+  const res = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
+    method: 'post',
+    payload: {
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt
+    },
+    muteHttpExceptions: true
+  });
+  if (res.getResponseCode() !== 200) {
+    throw new Error('Firebase アクセストークン取得失敗: HTTP ' + res.getResponseCode());
+  }
+  const data = JSON.parse(res.getContentText());
+  if (!data.access_token) throw new Error('Firebase アクセストークンが空です');
+  return data.access_token;
+}
+
+function firestoreBaseUrl_() {
+  const projectId = String(PropertiesService.getScriptProperties().getProperty(PROP.FIREBASE_PROJECT_ID) || '').trim();
+  if (!projectId) throw new Error('FIREBASE_PROJECT_ID が未設定です');
+  return 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(projectId) + '/databases/(default)/documents';
+}
+
+function firestoreEncodeValue_(val) {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === 'boolean') return { booleanValue: val };
+  if (typeof val === 'number') {
+    if (Number.isInteger(val)) return { integerValue: String(val) };
+    return { doubleValue: val };
+  }
+  if (typeof val === 'string') return { stringValue: val };
+  if (Array.isArray(val)) {
+    return { arrayValue: { values: val.map(function (item) { return firestoreEncodeValue_(item); }) } };
+  }
+  if (typeof val === 'object') {
+    const fields = {};
+    Object.keys(val).forEach(function (key) {
+      fields[key] = firestoreEncodeValue_(val[key]);
+    });
+    return { mapValue: { fields: fields } };
+  }
+  return { stringValue: String(val) };
+}
+
+function firestoreDecodeValue_(encoded) {
+  if (!encoded || typeof encoded !== 'object') return null;
+  if ('nullValue' in encoded) return null;
+  if ('booleanValue' in encoded) return !!encoded.booleanValue;
+  if ('integerValue' in encoded) return parseInt(encoded.integerValue, 10);
+  if ('doubleValue' in encoded) return parseFloat(encoded.doubleValue);
+  if ('stringValue' in encoded) return encoded.stringValue;
+  if (encoded.arrayValue && encoded.arrayValue.values) {
+    return encoded.arrayValue.values.map(firestoreDecodeValue_);
+  }
+  if (encoded.mapValue && encoded.mapValue.fields) {
+    const out = {};
+    Object.keys(encoded.mapValue.fields).forEach(function (key) {
+      out[key] = firestoreDecodeValue_(encoded.mapValue.fields[key]);
+    });
+    return out;
+  }
+  return null;
+}
+
+function firestoreEncodeFields_(obj) {
+  const fields = {};
+  Object.keys(obj || {}).forEach(function (key) {
+    fields[key] = firestoreEncodeValue_(obj[key]);
+  });
+  return fields;
+}
+
+function firestoreDecodeFields_(fields) {
+  const out = {};
+  Object.keys(fields || {}).forEach(function (key) {
+    out[key] = firestoreDecodeValue_(fields[key]);
+  });
+  return out;
+}
+
+function firestoreRequest_(method, path, body, query) {
+  const token = getFirebaseAccessToken_();
+  let url = firestoreBaseUrl_() + path;
+  if (query) {
+    const qs = Object.keys(query).map(function (k) {
+      return encodeURIComponent(k) + '=' + encodeURIComponent(query[k]);
+    }).join('&');
+    if (qs) url += (url.indexOf('?') >= 0 ? '&' : '?') + qs;
+  }
+  const options = {
+    method: method,
+    headers: { Authorization: 'Bearer ' + token },
+    muteHttpExceptions: true
+  };
+  if (body != null) {
+    options.contentType = 'application/json';
+    options.payload = JSON.stringify(body);
+  }
+  const res = UrlFetchApp.fetch(url, options);
+  const code = res.getResponseCode();
+  const text = res.getContentText();
+  if (code === 404) return null;
+  if (code < 200 || code >= 300) {
+    throw new Error('Firestore REST 失敗 (' + method + ' ' + path + '): HTTP ' + code + ' ' + text);
+  }
+  if (!text) return {};
+  return JSON.parse(text);
+}
+
+function firebaseCreateLiveRoom_(pin, meta) {
+  const docPath = '/liveRooms/' + encodeURIComponent(pin) + '?currentDocument.exists=false';
+  firestoreRequest_('PATCH', docPath, { fields: firestoreEncodeFields_(meta) });
+}
+
+function firebaseReadLiveEntry_(pin, account) {
+  account = String(account || '').trim().toLowerCase();
+  if (!account) return null;
+  const docPath = '/liveRooms/' + encodeURIComponent(pin) + '/entries/' + encodeURIComponent(account);
+  const res = firestoreRequest_('GET', docPath, null, null);
+  if (!res || !res.fields) return null;
+  const data = firestoreDecodeFields_(res.fields);
+  data.account = account;
+  return buildLiveBoardEntry_(data);
+}
+
+function firebaseWriteLiveEntry_(pin, entry) {
+  const account = String((entry && entry.account) || '').trim().toLowerCase();
+  if (!account) throw new Error('account が必要です');
+  const docPath = '/liveRooms/' + encodeURIComponent(pin) + '/entries/' + encodeURIComponent(account);
+  firestoreRequest_('PATCH', docPath, { fields: firestoreEncodeFields_(entry) });
+}
+
+function firebaseReadLiveEntries_(pin) {
+  const docPath = '/liveRooms/' + encodeURIComponent(pin) + '/entries';
+  const res = firestoreRequest_('GET', docPath, null, null);
+  if (!res || !res.documents) return [];
+  return res.documents.map(function (doc) {
+    const data = firestoreDecodeFields_(doc.fields || {});
+    if (!data.account && doc.name) {
+      const parts = String(doc.name).split('/');
+      data.account = parts[parts.length - 1];
+    }
+    return buildLiveBoardEntry_(data);
+  });
+}
+
+function firebaseDeleteLiveRoom_(pin) {
+  const entries = firebaseReadLiveEntries_(pin);
+  entries.forEach(function (entry) {
+    const account = String((entry && entry.account) || '').trim().toLowerCase();
+    if (!account) return;
+    try {
+      firestoreRequest_('DELETE', '/liveRooms/' + encodeURIComponent(pin) + '/entries/' + encodeURIComponent(account));
+    } catch (e) { /* ignore */ }
+  });
+  try {
+    firestoreRequest_('DELETE', '/liveRooms/' + encodeURIComponent(pin));
+  } catch (e) { /* ignore */ }
+}
+
+function buildLiveBoardResponse_(meta, pin, entries) {
+  const lists = sortLiveBoardLists_(meta.mode, entries);
+  const rosterCount = (meta.roster && meta.roster.length) ? meta.roster.length : entries.length;
+  const finishedCount = entries.filter(function (e) { return !!e.best; }).length;
+  return {
+    pin: pin,
+    title: meta.title,
+    mode: meta.mode,
+    backend: normalizeLiveBackend_(meta.backend),
+    closesAt: meta.closesAt,
+    timeLimitSec: meta.timeLimitSec,
+    rosterCount: rosterCount,
+    finishedCount: finishedCount,
+    joinedCount: entries.length,
+    lists: lists,
+    entries: entries,
+    launchOptions: meta.launchOptions || null
+  };
+}
+
+function exportLiveResultsBook_(pin, meta, entriesOverride) {
+  const entries = entriesOverride || readLiveEntriesForPin_(meta, pin);
   const merged = mergeLiveRosterAndEntries_(meta, entries);
   const finished = merged.filter(function (r) { return r.best; }).slice().sort(function (a, b) {
     if (meta.mode === 'word-link') return compareWordLinkBest_(a.best, b.best);
@@ -5165,6 +5452,7 @@ function exportLiveResultsBook_(pin, meta) {
 
 function handleLiveApi_(action, requestData) {
   try {
+    if (action === 'liveConfig') return apiLiveConfig_(requestData);
     if (action === 'liveCreate') return apiLiveCreate_(requestData);
     if (action === 'liveJoin') return apiLiveJoin_(requestData);
     if (action === 'liveSubmit') return apiLiveSubmit_(requestData);
@@ -5190,6 +5478,10 @@ function apiLiveCreate_(requestData) {
   }
   const timeLimitSec = Math.max(0, parseInt(requestData.timeLimitSec, 10) || 0);
   const ttlSec = computeLiveRoomTtlSec_(timeLimitSec);
+  const backend = normalizeLiveBackend_(requestData.backend || getLiveBackendDefault_());
+  if (backend === 'firebase' && !isFirebaseServerConfigured_()) {
+    return { status: 'error', message: 'Firebase β は Script Properties 未設定のため使えません' };
+  }
   const pin = generateLivePin_();
   const nowMs = Date.now();
   const targetClass = String(requestData.targetClass || '').trim();
@@ -5198,6 +5490,7 @@ function apiLiveCreate_(requestData) {
     || (launchOptions.bookName + ' / ' + launchOptions.sheetName);
   const meta = {
     pin: pin,
+    backend: backend,
     title: title,
     mode: mode,
     launchOptions: launchOptions,
@@ -5210,10 +5503,14 @@ function apiLiveCreate_(requestData) {
     roster: roster
   };
   putLiveMeta_(pin, meta, ttlSec);
+  if (backend === 'firebase') {
+    firebaseCreateLiveRoom_(pin, meta);
+  }
   return {
     status: 'success',
     data: {
       pin: pin,
+      backend: backend,
       title: title,
       mode: mode,
       targetClass: targetClass,
@@ -5239,24 +5536,43 @@ function apiLiveJoin_(requestData) {
   const account = String(user.account || authReq.auth.email || '').trim().toLowerCase();
   if (!account) return { status: 'error', message: 'アカウント情報を取得できません' };
   const ttlSec = computeLiveRoomTtlSec_(meta.timeLimitSec);
-  let entry = getLiveEntry_(pin, account);
-  if (!entry) {
-    entry = {
-      account: account,
-      name: String(user.name || '').trim(),
-      number: String(user.number != null ? user.number : '').trim(),
-      class: String(user.class || '').trim(),
-      attempts: 0,
-      status: 'joined',
-      best: null
-    };
-    putLiveEntry_(pin, account, entry, ttlSec);
+  const backend = normalizeLiveBackend_(meta.backend);
+  let entry = null;
+  if (backend === 'firebase') {
+    entry = firebaseReadLiveEntry_(pin, account);
+    if (!entry) {
+      entry = {
+        account: account,
+        name: String(user.name || '').trim(),
+        number: String(user.number != null ? user.number : '').trim(),
+        class: String(user.class || '').trim(),
+        attempts: 0,
+        status: 'joined',
+        best: null
+      };
+      firebaseWriteLiveEntry_(pin, entry);
+    }
+  } else {
+    entry = getLiveEntry_(pin, account);
+    if (!entry) {
+      entry = {
+        account: account,
+        name: String(user.name || '').trim(),
+        number: String(user.number != null ? user.number : '').trim(),
+        class: String(user.class || '').trim(),
+        attempts: 0,
+        status: 'joined',
+        best: null
+      };
+      putLiveEntry_(pin, account, entry, ttlSec);
+    }
+    appendLiveIndexAccount_(pin, account, ttlSec);
   }
-  appendLiveIndexAccount_(pin, account, ttlSec);
   return {
     status: 'success',
     data: {
       pin: pin,
+      backend: backend,
       title: meta.title,
       mode: meta.mode,
       timeLimitSec: meta.timeLimitSec,
@@ -5274,6 +5590,16 @@ function apiLiveSubmit_(requestData) {
   const pin = String(requestData.pin || '').trim();
   const meta = getLiveMeta_(pin);
   if (!meta) return { status: 'error', message: '部屋が見つかりません' };
+  if (isLiveFirebaseBackend_(meta)) {
+    return {
+      status: 'success',
+      data: {
+        backend: 'firebase',
+        redirect: true,
+        message: 'この部屋は Firebase β 経由で提出してください'
+      }
+    };
+  }
   if (!isLiveRoomOpen_(meta)) return { status: 'error', message: 'この部屋は終了しました' };
   const user = resolveAuthUserFromRequest_(authReq);
   const account = String(user.account || authReq.auth.email || '').trim().toLowerCase();
@@ -5321,25 +5647,15 @@ function apiLiveBoard_(requestData) {
   if (!meta) return { status: 'error', message: '部屋が見つかりません' };
   const ttlSec = computeLiveRoomTtlSec_(meta.timeLimitSec);
   putLiveMeta_(pin, meta, ttlSec);
-  const entries = readLiveEntriesForPin_(meta, pin);
-  const lists = sortLiveBoardLists_(meta.mode, entries);
-  const rosterCount = (meta.roster && meta.roster.length) ? meta.roster.length : readLiveIndexAccounts_(pin).length;
-  const finishedCount = entries.filter(function (e) { return !!e.best; }).length;
+  let entries;
+  if (isLiveFirebaseBackend_(meta)) {
+    entries = firebaseReadLiveEntries_(pin);
+  } else {
+    entries = readLiveEntriesForPin_(meta, pin);
+  }
   return {
     status: 'success',
-    data: {
-      pin: pin,
-      title: meta.title,
-      mode: meta.mode,
-      closesAt: meta.closesAt,
-      timeLimitSec: meta.timeLimitSec,
-      rosterCount: rosterCount,
-      finishedCount: finishedCount,
-      joinedCount: entries.length,
-      lists: lists,
-      entries: entries,
-      launchOptions: meta.launchOptions || null
-    }
+    data: buildLiveBoardResponse_(meta, pin, entries)
   };
 }
 
@@ -5349,7 +5665,11 @@ function apiLiveExport_(requestData) {
   const pin = String(requestData.pin || '').trim();
   const meta = getLiveMeta_(pin);
   if (!meta) return { status: 'error', message: '部屋が見つかりません' };
-  const exported = exportLiveResultsBook_(pin, meta);
+  let entriesOverride = null;
+  if (isLiveFirebaseBackend_(meta)) {
+    entriesOverride = firebaseReadLiveEntries_(pin);
+  }
+  const exported = exportLiveResultsBook_(pin, meta, entriesOverride);
   return { status: 'success', data: exported };
 }
 
@@ -5359,9 +5679,14 @@ function apiLiveClose_(requestData) {
   const pin = String(requestData.pin || '').trim();
   const meta = getLiveMeta_(pin);
   if (!meta) return { status: 'success', data: { closed: true } };
+  const isFirebase = isLiveFirebaseBackend_(meta);
+  let entriesOverride = null;
+  if (isFirebase) {
+    entriesOverride = firebaseReadLiveEntries_(pin);
+  }
   let exported = null;
   try {
-    exported = exportLiveResultsBook_(pin, meta);
+    exported = exportLiveResultsBook_(pin, meta, entriesOverride);
   } catch (e) {
     return {
       status: 'error',
@@ -5369,10 +5694,22 @@ function apiLiveClose_(requestData) {
     };
   }
   const cache = liveCache_();
-  const keys = collectLiveEntryKeys_(meta, pin);
-  keys.push(liveMetaKey_(pin));
-  keys.push(liveIndexKey_(pin));
-  cache.removeAll(keys);
+  if (isFirebase) {
+    try {
+      firebaseDeleteLiveRoom_(pin);
+    } catch (e) {
+      return {
+        status: 'error',
+        message: 'Firestore の削除に失敗したため部屋を閉じていません: ' + e.toString()
+      };
+    }
+    cache.remove(liveMetaKey_(pin));
+  } else {
+    const keys = collectLiveEntryKeys_(meta, pin);
+    keys.push(liveMetaKey_(pin));
+    keys.push(liveIndexKey_(pin));
+    cache.removeAll(keys);
+  }
   return {
     status: 'success',
     data: {

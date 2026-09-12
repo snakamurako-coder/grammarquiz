@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 部屋 meta の作成・削除は GAS サービスアカウント（REST）のみ。クライアントは読取のみ。
+    match /liveRooms/{pin} {
+      allow read: if true;
+      allow write: if false;
+
+      // 生徒提出: クライアント送信を信頼（教室用途）。delete は禁止。
+      match /entries/{account} {
+        allow read: if true;
+        allow create, update: if request.resource.data.keys().hasAll(['account', 'name'])
+          && request.resource.data.account == account;
+        allow delete: if false;
+      }
+    }
+  }
+}

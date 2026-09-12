@@ -148,6 +148,20 @@ body.live-board-open .live-dash-section {
   min-width: 32px; min-height: 32px; border: 1px solid #475569; border-radius: 6px;
   background: #1e293b; color: #e2e8f0; cursor: pointer; font-size: 1rem;
 }
+.live-backend-block {
+  margin: 8px 0 12px; padding: 10px 12px; border: 1px dashed #90caf9;
+  border-radius: 10px; background: #f3f9ff;
+}
+.live-backend-block label {
+  display: inline-flex; align-items: center; gap: 6px; margin-right: 14px;
+  font-size: .92em; cursor: pointer;
+}
+.live-backend-block label input:disabled + span { opacity: .5; }
+.live-board-backend-badge {
+  display: inline-block; font-size: .72rem; font-weight: 700; padding: 2px 8px;
+  border-radius: 999px; background: #334155; color: #e2e8f0; margin-left: 8px;
+}
+.live-board-backend-badge.is-firebase { background: #0ea5e9; color: #0f172a; }
 @media (max-width:640px){.form-grid{grid-template-columns:1fr}}
   </style>
 </head>
@@ -185,6 +199,12 @@ body.live-board-open .live-dash-section {
         </select>
       </div>
     </div>
+    <div id="live-dash-backend-block" class="live-backend-block">
+      <div class="subsection-title" style="margin-bottom:6px;">ライブ接続方式（β）</div>
+      <label><input type="radio" name="live-backend" value="gas" checked><span>標準（4秒更新）</span></label>
+      <label><input type="radio" name="live-backend" value="firebase"><span>リアルタイム β（Firebase）</span></label>
+      <p id="live-dash-backend-hint" class="hint" style="margin:6px 0 0;">管理画面のボードは GAS 経由で更新します。生徒端末の即時反映は学習画面ボードが正式です。</p>
+    </div>
     <button type="button" id="live-open-btn" class="btn-primary">この設定で授業ライブを開く</button>
     </div>
     <div id="live-dash-board" class="live-dash-board">
@@ -193,6 +213,7 @@ body.live-board-open .live-dash-section {
           <div class="live-dash-header-main">
             <div class="live-dash-header-row">
               <h2 class="live-dash-title" id="live-dash-title">授業ライブ</h2>
+          <span class="live-board-backend-badge" id="live-dash-backend-badge" style="display:none;" aria-hidden="true"></span>
               <div class="live-dash-timer" id="live-dash-timer"></div>
               <div class="live-dash-meta" id="live-dash-meta"></div>
               <div class="live-dash-meta" id="live-dash-counts"></div>
@@ -847,9 +868,11 @@ async function syncCheckSheetsNow() {
 
 var liveCatalog_ = { presets: [] };
 var livePin_ = '';
+var liveBackend_ = 'gas';
 var livePollId_ = null;
 var liveBoardMode_ = '';
 var liveBoardDefaultedPin_ = '';
+var liveConfig_ = { firebaseEnabled: false, defaultBackend: 'gas' };
 var LIVE_FONT_KEY = 'dd_live_board_font_pt';
 var LIVE_FONT_MIN = 1;
 var LIVE_FONT_MAX = 50;
@@ -899,6 +922,43 @@ async function initLiveCatalog_() {
   if (res.status !== 'success') throw new Error(res.message || '単語カタログ取得失敗');
   liveCatalog_ = res.data || { presets: [] };
   fillLiveBooks_();
+}
+
+function liveBackendLabel_(backend) {
+  return backend === 'firebase' ? 'リアルタイムβ' : '標準';
+}
+
+function getLiveSelectedBackend_() {
+  var root = document.getElementById('live-dash-backend-block');
+  if (!root) return 'gas';
+  var checked = root.querySelector('input[name="live-backend"]:checked');
+  return (checked && checked.value === 'firebase') ? 'firebase' : 'gas';
+}
+
+function paintLiveBackendBadge_(backend) {
+  var badge = document.getElementById('live-dash-backend-badge');
+  if (!badge) return;
+  badge.textContent = liveBackendLabel_(backend || 'gas');
+  badge.classList.toggle('is-firebase', backend === 'firebase');
+  badge.style.display = '';
+}
+
+async function initLiveBackendUi_() {
+  try {
+    var res = await gasRun('apiAdminLiveConfig');
+    if (res.status === 'success' && res.data) liveConfig_ = res.data;
+  } catch (e) {
+    console.warn('liveConfig:', e.message || e);
+  }
+  var root = document.getElementById('live-dash-backend-block');
+  var fbRadio = root ? root.querySelector('input[name="live-backend"][value="firebase"]') : null;
+  var gasRadio = root ? root.querySelector('input[name="live-backend"][value="gas"]') : null;
+  if (gasRadio && liveConfig_.defaultBackend === 'gas') gasRadio.checked = true;
+  if (fbRadio && liveConfig_.defaultBackend === 'firebase' && liveConfig_.firebaseEnabled) fbRadio.checked = true;
+  if (fbRadio) {
+    fbRadio.disabled = !liveConfig_.firebaseEnabled;
+    if (!liveConfig_.firebaseEnabled && gasRadio) gasRadio.checked = true;
+  }
 }
 
 function buildLiveLaunchOptions_(mode) {
@@ -1102,8 +1162,10 @@ function renderLiveDashList_(containerId, rows, mode, kind) {
 function paintLiveDash_(data) {
   data = data || {};
   livePin_ = data.pin || livePin_;
+  liveBackend_ = data.backend || liveBackend_ || 'gas';
   liveBoardMode_ = data.mode || liveBoardMode_;
   setLiveBoardOpen_(true);
+  paintLiveBackendBadge_(liveBackend_);
   applyLiveFontPt_(loadLiveFontPt_(), false);
   var pinEl = document.getElementById('live-dash-pin');
   var titleEl = document.getElementById('live-dash-title');
@@ -1182,8 +1244,10 @@ async function openLiveRoom_() {
     btn.textContent = '部屋を開いています…';
   }
   try {
+    var backend = getLiveSelectedBackend_();
     var result = await gasRun('apiAdminLiveCreate', {
       mode: mode,
+      backend: backend,
       launchOptions: launchOptions,
       targetClass: (document.getElementById('live-target-class') || {}).value || '',
       timeLimitSec: timeLimitSec,
@@ -1230,6 +1294,7 @@ async function closeLiveRoom_() {
   if (result.status !== 'success') throw new Error(result.message || '終了に失敗しました');
   stopLivePoll_();
   livePin_ = '';
+  liveBackend_ = 'gas';
   liveBoardDefaultedPin_ = '';
   setLiveBoardOpen_(false);
   offerSpreadsheet_(result.data || {});
@@ -1290,6 +1355,9 @@ document.addEventListener('DOMContentLoaded', function() {
   });
   initLiveCatalog_().catch(function (e) {
     showBanner('授業ライブ用カタログの読込に失敗: ' + (e.message || e), false);
+  });
+  initLiveBackendUi_().catch(function (e) {
+    showBanner('授業ライブ設定の読込に失敗: ' + (e.message || e), false);
   });
   loadAssignments();
   loadSubmissions();
