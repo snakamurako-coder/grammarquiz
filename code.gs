@@ -545,6 +545,11 @@ function doPost(e) {
       return sendResponse(handleLiveApi_(action, requestData));
     }
 
+    // 宿題一覧も Drive 初期化を挟まない（本体 SS の課題・提出シートだけ読む）
+    if (action === 'listMyAssignments') {
+      return sendResponse(handleAssignmentApi_(action, requestData));
+    }
+
     ensureEnvironment();
 
     if (action === "logout") {
@@ -553,7 +558,7 @@ function doPost(e) {
     } else if (action === "submitFormSummary") {
       syncWhitelistCacheIfStale_();
       return sendResponse(apiSubmitFormSummary_(requestData));
-    } else if (action === 'listMyAssignments' || action === 'getAssignment'
+    } else if (action === 'getAssignment'
         || action === 'startAssignmentAttempt' || action === 'submitAssignmentAttempt'
         || action === 'reportQuizAchievement' || action === 'saveHomeworkProgress'
         || action === 'adminListAssignments'

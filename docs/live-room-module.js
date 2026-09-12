@@ -8,6 +8,9 @@ const LiveRoomModule = (function () {
   const FONT_MIN = 1;
   const FONT_MAX = 50;
   const FONT_DEFAULT = 18;
+  const BEST_N_KEY = 'dd_live_board_best_n';
+  const BEST_N_DEFAULT = 8;
+  const BEST_N_PRESETS = [3, 4, 8, 16];
   const POST_TIMEOUT_MS = 45000;
   const EXPORT_TIMEOUT_MS = 60000;
   const BOARD_POLL_MS = 4000;
@@ -15,6 +18,10 @@ const LiveRoomModule = (function () {
   let activeRoom_ = null;
   let localBest_ = null;
   let boardPollId_ = null;
+  let boardClockId_ = null;
+  let lastBoardData_ = null;
+  let boardPrevByKind_ = { achievement: {}, score: {}, speed: {} };
+  let boardListSigByKind_ = { achievement: '', score: '', speed: '' };
   let roomTimerId_ = null;
   let timeoutFired_ = false;
   let boardDefaultedPin_ = '';
@@ -228,6 +235,72 @@ const LiveRoomModule = (function () {
     return pt;
   }
 
+  function loadBestN_() {
+    try {
+      const n = parseInt(localStorage.getItem(BEST_N_KEY), 10);
+      if (isNaN(n)) return BEST_N_DEFAULT;
+      return Math.min(200, Math.max(1, n));
+    } catch (e) {
+      return BEST_N_DEFAULT;
+    }
+  }
+
+  function saveBestN_(n) {
+    n = Math.min(200, Math.max(1, parseInt(n, 10) || BEST_N_DEFAULT));
+    try { localStorage.setItem(BEST_N_KEY, String(n)); } catch (e) { /* ignore */ }
+    return n;
+  }
+
+  function applyBestNToUi_(n) {
+    n = saveBestN_(n);
+    const input = el_('live-board-best-n');
+    const select = el_('live-board-best-n-select');
+    if (input && String(input.value) !== String(n)) input.value = String(n);
+    if (select) {
+      select.value = BEST_N_PRESETS.indexOf(n) >= 0 ? String(n) : '';
+    }
+    return n;
+  }
+
+  function bestFingerprint_(best) {
+    best = best || {};
+    return [best.scoreRate, best.durationSec, best.wrongCount, best.finishedAt, best.linkMode].join('|');
+  }
+
+  function paintBoardTimerText_(closesAt, timeLimitSec) {
+    const timerEl = el_('live-board-timer');
+    if (!timerEl) return;
+    if (closesAt) {
+      const left = Math.max(0, Math.ceil((closesAt - Date.now()) / 1000));
+      timerEl.textContent = left > 0 ? formatBoardClock_(left) : '終了';
+      timerEl.classList.toggle('is-urgent', left > 0 && left <= 30);
+      return;
+    }
+    timerEl.classList.remove('is-urgent');
+    if (timeLimitSec > 0) timerEl.textContent = formatBoardClock_(timeLimitSec);
+    else timerEl.textContent = '制限なし';
+  }
+
+  function startBoardClock_() {
+    stopBoardClock_();
+    function tick() {
+      const room = activeRoom_ || {};
+      const data = lastBoardData_ || {};
+      const closesAt = data.closesAt || room.closesAt || 0;
+      const timeLimitSec = data.timeLimitSec != null ? data.timeLimitSec : room.timeLimitSec;
+      paintBoardTimerText_(closesAt, timeLimitSec);
+    }
+    tick();
+    boardClockId_ = setInterval(tick, 250);
+  }
+
+  function stopBoardClock_() {
+    if (boardClockId_) {
+      clearInterval(boardClockId_);
+      boardClockId_ = null;
+    }
+  }
+
   function relocateLiveEntry_() {
     const block = el_('live-room-entry-block');
     if (!block) return;
@@ -250,6 +323,13 @@ const LiveRoomModule = (function () {
     const r = s % 60;
     if (m > 0) return m + ':' + String(r).padStart(2, '0');
     return String(r) + '秒';
+  }
+
+  function formatBoardClock_(sec) {
+    const s = Math.max(0, parseInt(sec, 10) || 0);
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return m + ':' + String(r).padStart(2, '0');
   }
 
   function paintRoomTimer_(text, urgent, hide) {
@@ -620,6 +700,7 @@ const LiveRoomModule = (function () {
 
   async function leaveRoom() {
     stopBoardUpdates_();
+    stopBoardClock_();
     clearRoomTimer_();
     activeRoom_ = null;
     localBest_ = null;
@@ -780,23 +861,14 @@ const LiveRoomModule = (function () {
     const titleEl = el_('live-board-title');
     const pinEl = el_('live-board-pin');
     const metaEl = el_('live-board-meta');
-    const timerEl = el_('live-board-timer');
     if (titleEl) titleEl.textContent = room.title || '授業ライブ';
     if (pinEl) pinEl.textContent = room.pin || '';
     paintBackendBadge_(room.backend);
     if (metaEl) {
       metaEl.textContent = '名簿 ' + (room.rosterCount || 0) + ' 人';
     }
-    if (timerEl) {
-      if (room.closesAt) {
-        const left = Math.max(0, Math.ceil((room.closesAt - Date.now()) / 1000));
-        timerEl.textContent = left > 0 ? ('残り ' + formatLimit_(left)) : '終了';
-      } else if (room.timeLimitSec > 0) {
-        timerEl.textContent = formatLimit_(room.timeLimitSec);
-      } else {
-        timerEl.textContent = '制限なし';
-      }
-    }
+    paintBoardTimerText_(room.closesAt, room.timeLimitSec);
+    startBoardClock_();
   }
 
   function showBoardScreen_() {
@@ -806,6 +878,7 @@ const LiveRoomModule = (function () {
       screen.setAttribute('aria-hidden', 'false');
     }
     document.body.classList.add('live-room-board-active');
+    applyBestNToUi_(loadBestN_());
     paintBoardHeaderFromRoom_(activeRoom_);
     applyFontPt_(loadFontPt_(), false);
     if (activeRoom_) {
@@ -823,13 +896,13 @@ const LiveRoomModule = (function () {
       screen.setAttribute('aria-hidden', 'true');
     }
     document.body.classList.remove('live-room-board-active');
+    stopBoardClock_();
   }
 
   function renderBoard_(data) {
     const titleEl = el_('live-board-title');
     const pinEl = el_('live-board-pin');
     const metaEl = el_('live-board-meta');
-    const timerEl = el_('live-board-timer');
     if (data.backend) paintBackendBadge_(data.backend);
     if (titleEl) titleEl.textContent = data.title || '授業ライブ';
     if (pinEl) pinEl.textContent = data.pin || (activeRoom_ && activeRoom_.pin) || pinEl.textContent || '';
@@ -837,14 +910,12 @@ const LiveRoomModule = (function () {
       metaEl.textContent = '達成 ' + (data.finishedCount || 0)
         + ' / 名簿 ' + (data.rosterCount || data.joinedCount || 0);
     }
-    if (timerEl) {
-      if (data.closesAt) {
-        const left = Math.max(0, Math.ceil((data.closesAt - Date.now()) / 1000));
-        timerEl.textContent = left > 0 ? ('残り ' + formatLimit_(left)) : '終了';
-      } else {
-        timerEl.textContent = '制限なし';
-      }
+    lastBoardData_ = data;
+    if (activeRoom_) {
+      if (data.closesAt) activeRoom_.closesAt = data.closesAt;
+      if (data.timeLimitSec != null) activeRoom_.timeLimitSec = data.timeLimitSec;
     }
+    startBoardClock_();
     if (activeRoom_) {
       if (data.backend) activeRoom_.backend = data.backend;
       if (data.launchOptions) activeRoom_.launchOptions = data.launchOptions;
@@ -862,6 +933,8 @@ const LiveRoomModule = (function () {
     renderBoardList_('live-board-list-speed', data.lists && data.lists.speed, data.mode, 'speed');
     if (boardDefaultedPin_ !== (data.pin || (activeRoom_ && activeRoom_.pin) || '')) {
       boardDefaultedPin_ = data.pin || (activeRoom_ && activeRoom_.pin) || '';
+      boardPrevByKind_ = { achievement: {}, score: {}, speed: {} };
+      boardListSigByKind_ = { achievement: '', score: '', speed: '' };
       switchBoardTab_(data.mode === 'word-link' ? 'score' : 'score');
     }
   }
@@ -878,7 +951,17 @@ const LiveRoomModule = (function () {
     const el = el_(containerId);
     if (!el) return;
     rows = rows || [];
+    const prevMap = boardPrevByKind_[kind] || {};
+    const nextMap = {};
+    const limit = loadBestN_();
+    const shown = rows.slice(0, limit);
+    const sig = limit + ':' + shown.map(function (r) {
+      return String(r.account || '') + ':' + bestFingerprint_(r.best);
+    }).join(';');
+    if (sig === boardListSigByKind_[kind] && el.querySelector('table')) return;
+    boardListSigByKind_[kind] = sig;
     if (!rows.length) {
+      boardPrevByKind_[kind] = {};
       el.innerHTML = '<p class="filter-axis-hint" style="margin:0;">まだ達成者がいません</p>';
       return;
     }
@@ -890,9 +973,22 @@ const LiveRoomModule = (function () {
     else if (kind === 'speed') html += '<th>タイム</th>';
     else html += '<th>正解率</th>';
     html += '</tr></thead><tbody>';
-    rows.forEach(function (row, idx) {
+    shown.forEach(function (row, idx) {
+      const account = String(row.account || row.name || idx);
+      const rank = idx + 1;
       const best = row.best || {};
-      html += '<tr><td>' + (idx + 1) + '</td><td>' + escapeHtml_(row.number || '—') + '</td><td>'
+      const fp = bestFingerprint_(best);
+      const prev = prevMap[account];
+      const classes = [];
+      if (Object.keys(prevMap).length) {
+        if (prev && prev.fp && prev.fp !== fp) classes.push('live-row-best-flash');
+        else if (!prev && fp) classes.push('live-row-best-flash');
+        if (prev && prev.rank && prev.rank !== rank) classes.push('live-row-rank-shift');
+      }
+      nextMap[account] = { rank: rank, fp: fp };
+      const cls = classes.length ? (' class="' + classes.join(' ') + '"') : '';
+      html += '<tr' + cls + ' data-account="' + escapeHtml_(account) + '"><td>' + rank + '</td><td>'
+        + escapeHtml_(row.number || '—') + '</td><td>'
         + escapeHtml_(row.name || '—') + '</td>';
       if (isWl) html += '<td>' + escapeHtml_(wordLinkModeLabel_(best.linkMode) || '—') + '</td>';
       if (kind === 'achievement') {
@@ -913,6 +1009,7 @@ const LiveRoomModule = (function () {
     });
     html += '</tbody></table>';
     el.innerHTML = html;
+    boardPrevByKind_[kind] = nextMap;
   }
 
   function escapeHtml_(s) {
@@ -1088,6 +1185,28 @@ const LiveRoomModule = (function () {
       fontInput.addEventListener('input', function () {
         const n = parseInt(fontInput.value, 10);
         if (!isNaN(n)) applyFontPt_(n, true);
+      });
+    }
+    applyBestNToUi_(loadBestN_());
+    const bestSelect = el_('live-board-best-n-select');
+    const bestInput = el_('live-board-best-n');
+    if (bestSelect) {
+      bestSelect.addEventListener('change', function () {
+        if (!bestSelect.value) return;
+        applyBestNToUi_(bestSelect.value);
+        if (lastBoardData_) renderBoard_(lastBoardData_);
+      });
+    }
+    if (bestInput) {
+      bestInput.addEventListener('change', function () {
+        applyBestNToUi_(bestInput.value);
+        if (lastBoardData_) renderBoard_(lastBoardData_);
+      });
+      bestInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          applyBestNToUi_(bestInput.value);
+          if (lastBoardData_) renderBoard_(lastBoardData_);
+        }
       });
     }
   }

@@ -64,11 +64,74 @@ th{background:#f5f5f5}
   text-align: right;
   white-space: nowrap;
 }
+.live-dash-pin-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-top: 4px;
+}
 .live-dash-board { display: none; }
 .live-dash-board.is-open { display: block; }
 .live-dash-setup.is-hidden { display: none; }
 .live-dash-meta { color: #94a3b8; font-size: .85em; }
-.live-dash-timer { font-size: .95rem; font-weight: bold; color: #d97706; }
+.live-dash-timer {
+  font-size: clamp(2.2rem, 7vw, 48pt);
+  font-weight: 800;
+  color: #fbbf24;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.live-dash-timer.is-urgent { color: #fb7185; animation: live-timer-urgent 0.9s ease-in-out infinite; }
+@keyframes live-timer-urgent {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.live-board-best-n-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  white-space: nowrap;
+}
+.live-board-best-n-ctrl select,
+.live-board-best-n-ctrl input {
+  min-height: 32px;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #f8fafc;
+  font-size: 0.95rem;
+}
+.live-board-best-n-ctrl select { min-width: 3.6em; }
+.live-board-best-n-ctrl input { width: 3.6em; text-align: center; }
+.live-board-table tr.live-row-best-flash td {
+  animation: live-best-glow 1.7s ease-out;
+}
+.live-board-table tr.live-row-best-flash td:last-child {
+  animation: live-best-glow 1.7s ease-out, live-best-pop 0.7s ease-out;
+}
+@keyframes live-best-glow {
+  0% { background-color: rgba(251, 191, 36, 0.55); box-shadow: inset 0 0 0 1px #fbbf24; }
+  100% { background-color: transparent; box-shadow: none; }
+}
+@keyframes live-best-pop {
+  0% { color: #fde68a; text-shadow: 0 0 16px #fbbf24; transform: scale(1.25); }
+  100% { color: inherit; text-shadow: none; transform: scale(1); }
+}
+.live-board-table tr.live-row-rank-shift td {
+  animation: live-rank-surge 1.35s ease-out;
+}
+@keyframes live-rank-surge {
+  0% { background-color: rgba(56, 189, 248, 0.55); transform: translateX(-10px); }
+  55% { background-color: rgba(167, 139, 250, 0.28); transform: translateX(0); }
+  100% { background-color: transparent; transform: none; }
+}
 body.live-board-open { max-width: none; }
 body.live-board-open > .header-title,
 body.live-board-open > p { display: none; }
@@ -214,7 +277,18 @@ body.live-board-open .live-dash-section {
             <div class="live-dash-header-row">
               <h2 class="live-dash-title" id="live-dash-title">授業ライブ</h2>
           <span class="live-board-backend-badge" id="live-dash-backend-badge" style="display:none;" aria-hidden="true"></span>
-              <div class="live-dash-timer" id="live-dash-timer"></div>
+              <label class="live-board-best-n-ctrl">
+                ベスト
+                <select id="live-dash-best-n-select" aria-label="表示件数の候補">
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="8" selected>8</option>
+                  <option value="16">16</option>
+                  <option value="">指定</option>
+                </select>
+                <input type="number" id="live-dash-best-n" min="1" max="200" value="8" inputmode="numeric" aria-label="表示件数">
+                まで表示
+              </label>
               <div class="live-dash-meta" id="live-dash-meta"></div>
               <div class="live-dash-meta" id="live-dash-counts"></div>
             </div>
@@ -235,7 +309,10 @@ body.live-board-open .live-dash-section {
                 <button type="button" id="live-close-btn" class="btn-small btn-danger">部屋を閉じる</button>
               </div>
             </div>
-            <div class="live-dash-pin" id="live-dash-pin">----</div>
+            <div class="live-dash-pin-stack">
+              <div class="live-dash-pin" id="live-dash-pin">----</div>
+              <div class="live-dash-timer" id="live-dash-timer"></div>
+            </div>
           </div>
         </div>
         <div class="live-board-tabs">
@@ -877,6 +954,15 @@ var LIVE_FONT_KEY = 'dd_live_board_font_pt';
 var LIVE_FONT_MIN = 1;
 var LIVE_FONT_MAX = 50;
 var LIVE_FONT_DEFAULT = 18;
+var LIVE_BEST_N_KEY = 'dd_live_board_best_n';
+var LIVE_BEST_N_DEFAULT = 8;
+var LIVE_BEST_N_PRESETS = [3, 4, 8, 16];
+var liveClosesAt_ = 0;
+var liveTimeLimitSec_ = 0;
+var liveClockId_ = null;
+var liveLastBoardData_ = null;
+var livePrevByKind_ = { achievement: {}, score: {}, speed: {} };
+var liveListSigByKind_ = { achievement: '', score: '', speed: '' };
 var LIVE_WL_LABELS = {
   'wl-eija': 'Word Link 英和',
   'wl-jaei': 'Word Link 和英',
@@ -1025,6 +1111,13 @@ function formatLiveLimit_(sec) {
   return String(r) + '秒';
 }
 
+function formatLiveClock_(sec) {
+  var s = Math.max(0, parseInt(sec, 10) || 0);
+  var m = Math.floor(s / 60);
+  var r = s % 60;
+  return m + ':' + String(r).padStart(2, '0');
+}
+
 function loadLiveFontPt_() {
   try {
     var n = parseInt(localStorage.getItem(LIVE_FONT_KEY), 10);
@@ -1045,6 +1138,57 @@ function applyLiveFontPt_(pt, persist) {
     try { localStorage.setItem(LIVE_FONT_KEY, String(pt)); } catch (e) {}
   }
   return pt;
+}
+
+function loadLiveBestN_() {
+  try {
+    var n = parseInt(localStorage.getItem(LIVE_BEST_N_KEY), 10);
+    if (isNaN(n)) return LIVE_BEST_N_DEFAULT;
+    return Math.min(200, Math.max(1, n));
+  } catch (e) {
+    return LIVE_BEST_N_DEFAULT;
+  }
+}
+
+function applyLiveBestN_(n) {
+  n = Math.min(200, Math.max(1, parseInt(n, 10) || LIVE_BEST_N_DEFAULT));
+  try { localStorage.setItem(LIVE_BEST_N_KEY, String(n)); } catch (e) {}
+  var input = document.getElementById('live-dash-best-n');
+  var select = document.getElementById('live-dash-best-n-select');
+  if (input && String(input.value) !== String(n)) input.value = String(n);
+  if (select) select.value = LIVE_BEST_N_PRESETS.indexOf(n) >= 0 ? String(n) : '';
+  return n;
+}
+
+function liveBestFingerprint_(best) {
+  best = best || {};
+  return [best.scoreRate, best.durationSec, best.wrongCount, best.finishedAt, best.linkMode].join('|');
+}
+
+function paintLiveDashTimerText_() {
+  var timerEl = document.getElementById('live-dash-timer');
+  if (!timerEl) return;
+  if (liveClosesAt_) {
+    var left = Math.max(0, Math.ceil((liveClosesAt_ - Date.now()) / 1000));
+    timerEl.textContent = left > 0 ? formatLiveClock_(left) : '終了';
+    timerEl.classList.toggle('is-urgent', left > 0 && left <= 30);
+    return;
+  }
+  timerEl.classList.remove('is-urgent');
+  timerEl.textContent = liveTimeLimitSec_ > 0 ? formatLiveClock_(liveTimeLimitSec_) : '制限なし';
+}
+
+function startLiveClock_() {
+  stopLiveClock_();
+  paintLiveDashTimerText_();
+  liveClockId_ = setInterval(paintLiveDashTimerText_, 250);
+}
+
+function stopLiveClock_() {
+  if (liveClockId_) {
+    clearInterval(liveClockId_);
+    liveClockId_ = null;
+  }
 }
 
 function launchLiveSummaryCols_(mode, opts, timeLimitSec) {
@@ -1099,6 +1243,8 @@ function setLiveBoardOpen_(open) {
   if (board) board.classList.toggle('is-open', !!open);
   if (setup) setup.classList.toggle('is-hidden', !!open);
   document.body.classList.toggle('live-board-open', !!open);
+  if (open) startLiveClock_();
+  else stopLiveClock_();
 }
 
 function switchLiveDashTab_(tabId) {
@@ -1122,7 +1268,17 @@ function renderLiveDashList_(containerId, rows, mode, kind) {
   var el = document.getElementById(containerId);
   if (!el) return;
   rows = rows || [];
+  var prevMap = livePrevByKind_[kind] || {};
+  var nextMap = {};
+  var limit = loadLiveBestN_();
+  var shown = rows.slice(0, limit);
+  var sig = limit + ':' + shown.map(function (r) {
+    return String(r.account || '') + ':' + liveBestFingerprint_(r.best);
+  }).join(';');
+  if (sig === liveListSigByKind_[kind] && el.querySelector('table')) return;
+  liveListSigByKind_[kind] = sig;
   if (!rows.length) {
+    livePrevByKind_[kind] = {};
     el.innerHTML = '<p class="hint" style="margin:0;color:#94a3b8;">まだ達成者がいません</p>';
     return;
   }
@@ -1134,9 +1290,21 @@ function renderLiveDashList_(containerId, rows, mode, kind) {
   else if (kind === 'speed') html += '<th>タイム</th>';
   else html += '<th>正解率</th>';
   html += '</tr></thead><tbody>';
-  rows.forEach(function (row, idx) {
+  shown.forEach(function (row, idx) {
+    var account = String(row.account || row.name || idx);
+    var rank = idx + 1;
     var best = row.best || {};
-    html += '<tr><td>' + (idx + 1) + '</td><td>' + escapeHtml(row.number || '—') + '</td><td>'
+    var fp = liveBestFingerprint_(best);
+    var prev = prevMap[account];
+    var classes = [];
+    if (Object.keys(prevMap).length) {
+      if (prev && prev.fp && prev.fp !== fp) classes.push('live-row-best-flash');
+      else if (!prev && fp) classes.push('live-row-best-flash');
+      if (prev && prev.rank && prev.rank !== rank) classes.push('live-row-rank-shift');
+    }
+    nextMap[account] = { rank: rank, fp: fp };
+    var cls = classes.length ? (' class="' + classes.join(' ') + '"') : '';
+    html += '<tr' + cls + '><td>' + rank + '</td><td>' + escapeHtml(row.number || '—') + '</td><td>'
       + escapeHtml(row.name || '—') + '</td>';
     if (isWl) html += '<td>' + escapeHtml(wordLinkModeLabel_(best.linkMode) || '—') + '</td>';
     if (kind === 'achievement') {
@@ -1157,6 +1325,7 @@ function renderLiveDashList_(containerId, rows, mode, kind) {
   });
   html += '</tbody></table>';
   el.innerHTML = html;
+  livePrevByKind_[kind] = nextMap;
 }
 
 function paintLiveDash_(data) {
@@ -1171,7 +1340,6 @@ function paintLiveDash_(data) {
   var titleEl = document.getElementById('live-dash-title');
   var metaEl = document.getElementById('live-dash-meta');
   var countsEl = document.getElementById('live-dash-counts');
-  var timerEl = document.getElementById('live-dash-timer');
   var settingsEl = document.getElementById('live-dash-settings');
   if (pinEl) pinEl.textContent = livePin_ || '----';
   if (titleEl) titleEl.textContent = data.title || '授業ライブ';
@@ -1181,14 +1349,10 @@ function paintLiveDash_(data) {
       + ' / 参加 ' + (data.joinedCount || 0)
       + ' / 名簿 ' + (data.rosterCount || 0);
   }
-  if (timerEl) {
-    if (data.closesAt) {
-      var left = Math.max(0, Math.ceil((data.closesAt - Date.now()) / 1000));
-      timerEl.textContent = left > 0 ? ('残り ' + formatLiveLimit_(left)) : '終了';
-    } else {
-      timerEl.textContent = data.timeLimitSec > 0 ? formatLiveLimit_(data.timeLimitSec) : '制限なし';
-    }
-  }
+  liveLastBoardData_ = data;
+  liveClosesAt_ = data.closesAt || 0;
+  liveTimeLimitSec_ = data.timeLimitSec || 0;
+  startLiveClock_();
   paintLiveLaunchSummary_(settingsEl, data.mode, data.launchOptions, data.timeLimitSec);
   updateLiveDashTabLabels_(data.mode);
   renderLiveDashList_('live-dash-list-achievement', data.lists && data.lists.achievement, data.mode, 'achievement');
@@ -1196,6 +1360,8 @@ function paintLiveDash_(data) {
   renderLiveDashList_('live-dash-list-speed', data.lists && data.lists.speed, data.mode, 'speed');
   if (liveBoardDefaultedPin_ !== (data.pin || livePin_ || '')) {
     liveBoardDefaultedPin_ = data.pin || livePin_ || '';
+    livePrevByKind_ = { achievement: {}, score: {}, speed: {} };
+    liveListSigByKind_ = { achievement: '', score: '', speed: '' };
     switchLiveDashTab_('score');
   }
 }
@@ -1293,9 +1459,12 @@ async function closeLiveRoom_() {
   var result = await gasRun('apiAdminLiveClose', livePin_);
   if (result.status !== 'success') throw new Error(result.message || '終了に失敗しました');
   stopLivePoll_();
+  stopLiveClock_();
   livePin_ = '';
   liveBackend_ = 'gas';
   liveBoardDefaultedPin_ = '';
+  liveClosesAt_ = 0;
+  liveLastBoardData_ = null;
   setLiveBoardOpen_(false);
   offerSpreadsheet_(result.data || {});
   showBanner('授業ライブを終了しました', true);
@@ -1303,6 +1472,7 @@ async function closeLiveRoom_() {
 
 function bindLiveFontControls_() {
   applyLiveFontPt_(loadLiveFontPt_(), false);
+  applyLiveBestN_(loadLiveBestN_());
   var minus = document.getElementById('live-dash-font-minus');
   var plus = document.getElementById('live-dash-font-plus');
   var input = document.getElementById('live-dash-font-input');
@@ -1313,6 +1483,27 @@ function bindLiveFontControls_() {
     input.addEventListener('input', function () {
       var n = parseInt(input.value, 10);
       if (!isNaN(n)) applyLiveFontPt_(n, true);
+    });
+  }
+  var bestSelect = document.getElementById('live-dash-best-n-select');
+  var bestInput = document.getElementById('live-dash-best-n');
+  if (bestSelect) {
+    bestSelect.addEventListener('change', function () {
+      if (!bestSelect.value) return;
+      applyLiveBestN_(bestSelect.value);
+      if (liveLastBoardData_) paintLiveDash_(liveLastBoardData_);
+    });
+  }
+  if (bestInput) {
+    bestInput.addEventListener('change', function () {
+      applyLiveBestN_(bestInput.value);
+      if (liveLastBoardData_) paintLiveDash_(liveLastBoardData_);
+    });
+    bestInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        applyLiveBestN_(bestInput.value);
+        if (liveLastBoardData_) paintLiveDash_(liveLastBoardData_);
+      }
     });
   }
 }

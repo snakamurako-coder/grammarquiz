@@ -1258,8 +1258,71 @@ body.live-room-board-active #login-screen { display: none !important; }
   text-align: right;
   white-space: nowrap;
 }
+.live-board-pin-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-top: 4px;
+}
 .live-board-meta { font-size: 0.85rem; color: #94a3b8; }
-.live-board-timer { font-size: 0.95rem; font-weight: bold; color: #fbbf24; }
+.live-board-timer {
+  font-size: clamp(2.2rem, 7vw, 48pt);
+  font-weight: 800;
+  color: #fbbf24;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.live-board-timer.is-urgent { color: #fb7185; animation: live-timer-urgent 0.9s ease-in-out infinite; }
+@keyframes live-timer-urgent {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.live-board-best-n-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  white-space: nowrap;
+}
+.live-board-best-n-ctrl select,
+.live-board-best-n-ctrl input {
+  min-height: 32px;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #f8fafc;
+  font-size: 0.95rem;
+}
+.live-board-best-n-ctrl select { min-width: 3.6em; }
+.live-board-best-n-ctrl input { width: 3.6em; text-align: center; }
+.live-board-table tr.live-row-best-flash td {
+  animation: live-best-glow 1.7s ease-out;
+}
+.live-board-table tr.live-row-best-flash td:last-child {
+  animation: live-best-glow 1.7s ease-out, live-best-pop 0.7s ease-out;
+}
+@keyframes live-best-glow {
+  0% { background-color: rgba(251, 191, 36, 0.55); box-shadow: inset 0 0 0 1px #fbbf24; }
+  100% { background-color: transparent; box-shadow: none; }
+}
+@keyframes live-best-pop {
+  0% { color: #fde68a; text-shadow: 0 0 16px #fbbf24; transform: scale(1.25); }
+  100% { color: inherit; text-shadow: none; transform: scale(1); }
+}
+.live-board-table tr.live-row-rank-shift td {
+  animation: live-rank-surge 1.35s ease-out;
+}
+@keyframes live-rank-surge {
+  0% { background-color: rgba(56, 189, 248, 0.55); transform: translateX(-10px); }
+  55% { background-color: rgba(167, 139, 250, 0.28); transform: translateX(0); }
+  100% { background-color: transparent; transform: none; }
+}
 .live-board-font-ctrl {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 0.82rem; color: #cbd5e1;
@@ -2520,7 +2583,18 @@ body.live-room-board-active #login-screen { display: none !important; }
           <div class="live-board-header-row">
             <h2 class="live-board-title" id="live-board-title">授業ライブ</h2>
             <span class="live-board-backend-badge" id="live-board-backend-badge" style="display:none;" aria-hidden="true"></span>
-            <div class="live-board-timer" id="live-board-timer"></div>
+            <label class="live-board-best-n-ctrl">
+              ベスト
+              <select id="live-board-best-n-select" aria-label="表示件数の候補">
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="8" selected>8</option>
+                <option value="16">16</option>
+                <option value="">指定</option>
+              </select>
+              <input type="number" id="live-board-best-n" min="1" max="200" value="8" inputmode="numeric" aria-label="表示件数">
+              まで表示
+            </label>
             <div class="live-board-meta" id="live-board-meta"></div>
           </div>
           <div class="live-board-settings" id="live-board-settings"></div>
@@ -2540,7 +2614,10 @@ body.live-room-board-active #login-screen { display: none !important; }
               <button type="button" class="btn-secondary" id="live-board-close-btn">部屋を閉じる</button>
             </div>
           </div>
-          <div class="live-board-pin" id="live-board-pin"></div>
+          <div class="live-board-pin-stack">
+            <div class="live-board-pin" id="live-board-pin"></div>
+            <div class="live-board-timer" id="live-board-timer"></div>
+          </div>
         </div>
       </div>
       <div class="live-board-tabs">
