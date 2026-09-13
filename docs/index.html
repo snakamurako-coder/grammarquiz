@@ -1297,11 +1297,37 @@ body.live-poll-student-active #live-room-board-screen { display: none !important
 .live-poll-timer-unit > span {
   font-size: 0.82em; color: #546e7a; font-weight: 600;
 }
-.live-poll-timer-input {
+.live-poll-timer-input,
+input.live-poll-timer-input,
+select.live-poll-timer-input {
   box-sizing: border-box;
-  width: 4.5em; min-width: 4.5em; height: 40px;
-  font-size: 1em; border: 1px solid #ccc; border-radius: 8px;
-  padding: 0 8px; text-align: center;
+  display: block;
+  width: 4.5em; min-width: 4.5em; max-width: 4.5em;
+  height: 40px; min-height: 40px; max-height: 40px;
+  line-height: 38px;
+  font-size: 16px; font-family: inherit;
+  border: 1px solid #ccc; border-radius: 8px;
+  padding: 0 8px; margin: 0; text-align: center;
+  background: #fff; color: inherit;
+  vertical-align: top;
+}
+input[type="number"].live-poll-timer-input {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"].live-poll-timer-input::-webkit-outer-spin-button,
+input[type="number"].live-poll-timer-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+  height: 0;
+}
+select.live-poll-timer-input {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%23546e7a' d='M1 1l5 5 5-5'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 22px;
 }
 .live-poll-timer-hint { font-size: 0.82em; color: #666; margin: 6px 0 0; }
 body.live-poll-setup-active,
@@ -1345,12 +1371,28 @@ body.live-poll-setup-active #live-poll-setup-screen { display: flex !important; 
   border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fff;
 }
 .live-poll-q-editor-row {
-  display: grid; grid-template-columns: 1fr 9em 4.5em 1fr 1fr auto;
-  gap: 8px; align-items: center; margin-bottom: 8px;
+  display: block;
+  border: 1px solid #eceff1;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #fafbfc;
 }
-@media (max-width: 640px) {
-  .live-poll-q-editor-row { grid-template-columns: 1fr 1fr; }
+.live-poll-q-editor-top {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
 }
+.live-poll-q-editor-top input[data-field="label"] { width: 6em; min-width: 5em; min-height: 40px; }
+.live-poll-q-editor-top select[data-field="choiceSet"] { min-width: 9em; min-height: 40px; }
+.live-poll-q-editor-top input[data-field="choiceCount"] { width: 4.5em; min-height: 40px; text-align: center; }
+.live-poll-q-editor-top input[data-field="customChoices"] { flex: 1; min-width: 160px; min-height: 40px; }
+.live-poll-q-editor-choices {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+}
+.live-poll-q-editor-choices .live-poll-choice-btn {
+  min-height: 40px; min-width: 48px; padding: 4px 10px;
+  font-size: 1em;
+}
+.live-poll-q-editor-hint { margin: 6px 0 0; font-size: 0.82em; color: #546e7a; }
 .live-poll-continue-row {
   margin: 10px 0; padding: 10px 12px; background: #e8f5e9; border-radius: 8px;
   border: 1px solid #a5d6a7;

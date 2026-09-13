@@ -176,11 +176,14 @@ const LivePollModule = (function () {
     if (!kindEl.options.length) {
       kindEl.innerHTML = CS.kindOptionsHtml('ABC');
     }
-    kindEl.addEventListener('change', syncImprovChoiceUi_);
-    const countEl = el_('live-poll-choice-count');
-    const customEl = el_('live-poll-custom-choices');
-    if (countEl) countEl.addEventListener('input', syncImprovChoiceUi_);
-    if (customEl) customEl.addEventListener('input', syncImprovChoiceUi_);
+    if (!kindEl.dataset.bound) {
+      kindEl.dataset.bound = '1';
+      kindEl.addEventListener('change', syncImprovChoiceUi_);
+      const countEl = el_('live-poll-choice-count');
+      const customEl = el_('live-poll-custom-choices');
+      if (countEl) countEl.addEventListener('input', syncImprovChoiceUi_);
+      if (customEl) customEl.addEventListener('input', syncImprovChoiceUi_);
+    }
     syncImprovChoiceUi_();
   }
 
@@ -260,16 +263,33 @@ const LivePollModule = (function () {
     return html;
   }
 
+  function parseAnswerList_(raw) {
+    const CS = choiceSets_();
+    if (CS && typeof CS.parseAnswerList === 'function') return CS.parseAnswerList(raw);
+    if (raw == null || raw === '') return [];
+    if (Array.isArray(raw)) return raw.map(function (s) { return String(s).trim(); }).filter(Boolean);
+    return [String(raw).trim()].filter(Boolean);
+  }
+
+  function formatAnswerList_(raw) {
+    return parseAnswerList_(raw).join(' / ');
+  }
+
   function judgeHtml_(ownAnswer, revealed, type) {
-    if (revealed == null || revealed === '') return '';
+    const list = parseAnswerList_(revealed);
+    if (!list.length) return '';
+    const shown = formatAnswerList_(list);
     if (ownAnswer == null || String(ownAnswer).trim() === '') {
-      return '<p class="live-poll-judge is-miss">未回答 × 正解: ' + escapeHtml_(revealed) + '</p>';
+      return '<p class="live-poll-judge is-miss">未回答 × 正解: ' + escapeHtml_(shown) + '</p>';
     }
     let ok;
-    if (type === 'written') ok = normalizeText_(ownAnswer) === normalizeText_(revealed);
-    else ok = String(ownAnswer) === String(revealed);
+    if (type === 'written') {
+      ok = list.some(function (ans) { return normalizeText_(ownAnswer) === normalizeText_(ans); });
+    } else {
+      ok = list.indexOf(String(ownAnswer)) >= 0;
+    }
     if (ok) return '<p class="live-poll-judge is-ok">○ 正解</p>';
-    return '<p class="live-poll-judge is-miss">× 不正解（正解: ' + escapeHtml_(revealed) + '）</p>';
+    return '<p class="live-poll-judge is-miss">× 不正解（正解: ' + escapeHtml_(shown) + '）</p>';
   }
 
   function tallyFromEntries_(pub, entries) {
@@ -444,26 +464,92 @@ const LivePollModule = (function () {
     return '<option value="ABC">ABC</option>';
   }
 
+  function rowChoiceConfig_(row) {
+    const kindEl = row.querySelector('[data-field="choiceSet"]');
+    const countEl = row.querySelector('[data-field="choiceCount"]');
+    const customEl = row.querySelector('[data-field="customChoices"]');
+    return {
+      choiceSet: (kindEl && kindEl.value) || 'ABC',
+      choiceCount: parseInt(countEl && countEl.value, 10) || 0,
+      customChoices: (customEl && customEl.value) || ''
+    };
+  }
+
+  function selectedAnswersFromRow_(row) {
+    try {
+      return parseAnswerList_(JSON.parse(row.getAttribute('data-answers') || '[]'));
+    } catch (e) {
+      return parseAnswerList_(row.getAttribute('data-answers') || '');
+    }
+  }
+
+  function setRowAnswers_(row, list) {
+    row.setAttribute('data-answers', JSON.stringify(parseAnswerList_(list)));
+  }
+
+  function paintRowAnswerChips_(row) {
+    const CS = choiceSets_();
+    const wrap = row.querySelector('[data-field="answer-picks"]');
+    const written = row.querySelector('[data-field="answer"]');
+    const hint = row.querySelector('[data-field="answer-hint"]');
+    if (!wrap) return;
+    const kind = (row.querySelector('[data-field="choiceSet"]') || {}).value || 'ABC';
+    const isWritten = CS ? CS.isWritten(kind) : kind === 'WRITTEN';
+    if (isWritten) {
+      wrap.innerHTML = '';
+      wrap.style.display = 'none';
+      if (written) written.style.display = '';
+      if (hint) hint.textContent = '模範解答を入力';
+      return;
+    }
+    if (written) written.style.display = 'none';
+    wrap.style.display = '';
+    const choices = CS ? CS.buildChoices(rowChoiceConfig_(row)) : [];
+    let selected = selectedAnswersFromRow_(row).filter(function (a) { return choices.indexOf(a) >= 0; });
+    setRowAnswers_(row, selected);
+    wrap.innerHTML = choices.map(function (c) {
+      const on = selected.indexOf(c) >= 0;
+      return '<button type="button" class="live-poll-choice-btn' + (on ? ' is-selected' : '') + '" data-val="'
+        + escapeHtml_(c) + '">' + escapeHtml_(c) + '</button>';
+    }).join('');
+    if (hint) {
+      hint.textContent = choices.length
+        ? '正答をタップ（複数可）' + (selected.length ? '　選択中: ' + selected.join(' / ') : '')
+        : '選択肢を設定してください';
+    }
+    wrap.querySelectorAll('button[data-val]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const val = btn.getAttribute('data-val');
+        let sel = selectedAnswersFromRow_(row);
+        const i = sel.indexOf(val);
+        if (i >= 0) sel.splice(i, 1);
+        else sel.push(val);
+        setRowAnswers_(row, sel);
+        paintRowAnswerChips_(row);
+      });
+    });
+  }
+
   function syncEditorRowChoiceUi_(row) {
     const CS = choiceSets_();
     if (!CS || !row) return;
     const kindEl = row.querySelector('[data-field="choiceSet"]');
     const countEl = row.querySelector('[data-field="choiceCount"]');
     const customEl = row.querySelector('[data-field="customChoices"]');
-    const answerEl = row.querySelector('[data-field="answer"]');
     const kind = (kindEl && kindEl.value) || 'ABC';
     const showCount = CS.needsCount(kind);
     const showCustom = CS.needsCustom(kind);
-    const isWritten = CS.isWritten(kind);
     if (countEl) {
       countEl.style.display = showCount ? '' : 'none';
       if (showCount) {
         countEl.max = String(CS.maxCount(kind));
-        if (parseInt(countEl.value, 10) < 2) countEl.value = String(CS.defaultCount(kind));
+        const n = parseInt(countEl.value, 10);
+        if (isNaN(n) || n < 2) countEl.value = String(CS.defaultCount(kind));
+        if (n > CS.maxCount(kind)) countEl.value = String(CS.maxCount(kind));
       }
     }
     if (customEl) customEl.style.display = showCustom ? '' : 'none';
-    if (answerEl) answerEl.placeholder = isWritten ? '模範解答' : '正答';
+    paintRowAnswerChips_(row);
   }
 
   function bindEditorRowChoiceUi_(wrap) {
@@ -477,6 +563,13 @@ const LivePollModule = (function () {
     });
   }
 
+  function persistEditorToModel_() {
+    if (!editingPreset_ || !el_('live-poll-editor-sections')) return editingPreset_;
+    if (!el_('live-poll-editor-sections').querySelector('.live-poll-editor-section')) return editingPreset_;
+    editingPreset_ = readPresetFromEditor_();
+    return editingPreset_;
+  }
+
   function renderPresetEditor_() {
     const wrap = el_('live-poll-editor-sections');
     const nameEl = el_('live-poll-editor-name');
@@ -488,16 +581,26 @@ const LivePollModule = (function () {
       let qRows = (sec.questions || []).map(function (q, qi) {
         const CS = choiceSets_();
         const kind = CS ? CS.normalizeKind(q.choiceSet || 'ABC') : (q.choiceSet || 'ABC');
-        const count = q.choiceCount || (CS ? CS.defaultCount(kind) : 3);
-        return '<div class="live-poll-q-editor-row" data-sec="' + si + '" data-q="' + qi + '">'
+        const count = (parseInt(q.choiceCount, 10) > 0)
+          ? parseInt(q.choiceCount, 10)
+          : (CS ? CS.defaultCount(kind) : 3);
+        const answers = parseAnswerList_(q.answers != null ? q.answers : q.answer);
+        return '<div class="live-poll-q-editor-row" data-sec="' + si + '" data-q="' + qi + '" data-answers="'
+          + escapeHtml_(JSON.stringify(answers)) + '">'
+          + '<div class="live-poll-q-editor-top">'
           + '<input type="text" class="live-poll-written-input" data-field="label" value="' + escapeHtml_(q.label || '') + '" placeholder="Q1.">'
           + '<select data-field="choiceSet">' + choiceSetOptionsHtml_(kind) + '</select>'
           + '<input type="number" class="live-poll-written-input" data-field="choiceCount" min="2" max="26" value="'
           + escapeHtml_(count) + '" aria-label="選択肢の数">'
           + '<input type="text" class="live-poll-written-input" data-field="customChoices" value="'
           + escapeHtml_(q.customChoices || '') + '" placeholder="独自（,区切り）" aria-label="独自の選択肢">'
-          + '<input type="text" class="live-poll-written-input" data-field="answer" value="' + escapeHtml_(q.answer || '') + '" placeholder="正答">'
-          + '<button type="button" class="btn-secondary" data-action="remove-q">削除</button></div>';
+          + '<button type="button" class="btn-secondary" data-action="remove-q">削除</button>'
+          + '</div>'
+          + '<div class="live-poll-q-editor-choices" data-field="answer-picks"></div>'
+          + '<input type="text" class="live-poll-written-input" data-field="answer" value="'
+          + escapeHtml_(kind === 'WRITTEN' ? (q.answer || '') : '') + '" placeholder="模範解答" style="margin-top:8px;display:none;">'
+          + '<p class="live-poll-q-editor-hint" data-field="answer-hint"></p>'
+          + '</div>';
       }).join('');
       return '<div class="live-poll-editor-section" data-sec-index="' + si + '">'
         + '<div class="form-group"><label>セクション名</label>'
@@ -514,6 +617,7 @@ const LivePollModule = (function () {
     }).join('');
     wrap.querySelectorAll('[data-action="add-q"]').forEach(function (btn) {
       btn.addEventListener('click', function () {
+        persistEditorToModel_();
         const secEl = btn.closest('.live-poll-editor-section');
         const si = parseInt(secEl.getAttribute('data-sec-index'), 10);
         editingPreset_.sections[si].questions.push({
@@ -521,14 +625,15 @@ const LivePollModule = (function () {
           choiceSet: 'ABC',
           choiceCount: 3,
           customChoices: '',
+          answers: [],
           answer: ''
         });
         renderPresetEditor_();
       });
     });
-    bindEditorRowChoiceUi_(wrap);
     wrap.querySelectorAll('[data-action="remove-q"]').forEach(function (btn) {
       btn.addEventListener('click', function () {
+        persistEditorToModel_();
         const row = btn.closest('.live-poll-q-editor-row');
         const si = parseInt(row.getAttribute('data-sec'), 10);
         const qi = parseInt(row.getAttribute('data-q'), 10);
@@ -538,6 +643,7 @@ const LivePollModule = (function () {
     });
     wrap.querySelectorAll('[data-action="remove-sec"]').forEach(function (btn) {
       btn.addEventListener('click', function () {
+        persistEditorToModel_();
         const secEl = btn.closest('.live-poll-editor-section');
         const si = parseInt(secEl.getAttribute('data-sec-index'), 10);
         if ((editingPreset_.sections || []).length <= 1) {
@@ -564,12 +670,18 @@ const LivePollModule = (function () {
       const secId = 'live-poll-sec-sec-' + si;
       const questions = [];
       secEl.querySelectorAll('.live-poll-q-editor-row').forEach(function (row, qi) {
+        const kind = (row.querySelector('[data-field="choiceSet"]') || {}).value || 'ABC';
+        const isWritten = kind === 'WRITTEN';
+        const answers = isWritten
+          ? [(row.querySelector('[data-field="answer"]') || {}).value || '']
+          : selectedAnswersFromRow_(row);
         questions.push({
           label: (row.querySelector('[data-field="label"]') || {}).value || ('Q' + (qi + 1) + '.'),
-          choiceSet: (row.querySelector('[data-field="choiceSet"]') || {}).value || 'ABC',
-          choiceCount: parseInt((row.querySelector('[data-field="choiceCount"]') || {}).value, 10) || 3,
+          choiceSet: kind,
+          choiceCount: parseInt((row.querySelector('[data-field="choiceCount"]') || {}).value, 10) || 0,
           customChoices: (row.querySelector('[data-field="customChoices"]') || {}).value || '',
-          answer: (row.querySelector('[data-field="answer"]') || {}).value || ''
+          answers: isWritten ? [] : answers,
+          answer: isWritten ? (answers[0] || '') : answers.join(',')
         });
       });
       preset.sections.push({
@@ -779,7 +891,7 @@ const LivePollModule = (function () {
           };
         }
       } else if (q.type === 'written') {
-        const current = (pub.revealed && pub.revealed[q.id]) || '';
+        const current = formatAnswerList_(pub.revealed && pub.revealed[q.id]) || '';
         revealEl.innerHTML = '<label class="live-poll-model-label">模範解答</label>'
           + '<input type="text" id="live-poll-model-input" class="live-poll-model-input" value="'
           + escapeHtml_(current) + '" placeholder="スライドの正答">'
@@ -794,17 +906,34 @@ const LivePollModule = (function () {
           };
         }
       } else {
-        const revealed = pub.revealed && pub.revealed[q.id];
-        revealEl.innerHTML = '<p class="filter-axis-hint">正答の記号をタップ（ミスタップは「やりなおす」）</p>'
-          + '<div class="live-poll-choice-grid">' + (q.choices || []).map(function (c) {
-            const cls = revealed === c ? ' live-poll-choice-btn is-revealed' : ' live-poll-choice-btn';
-            return '<button type="button" class="btn-secondary' + cls + '" data-poll-answer="'
-              + escapeHtml_(c) + '">' + escapeHtml_(c) + '</button>';
-          }).join('') + '</div>';
+        const revealedList = parseAnswerList_(pub.revealed && pub.revealed[q.id]);
+        let html = '<p class="filter-axis-hint">正答の記号をタップ（複数可。もう一度タップで解除）</p>';
+        if (pub.runMode === 'preset') {
+          html += '<button type="button" class="btn-primary" id="live-poll-reveal-preset-choice-btn" style="margin-bottom:8px;">プリセットの正答を出す</button>';
+        }
+        html += '<div class="live-poll-choice-grid">' + (q.choices || []).map(function (c) {
+          const cls = revealedList.indexOf(c) >= 0 ? ' live-poll-choice-btn is-revealed' : ' live-poll-choice-btn';
+          return '<button type="button" class="btn-secondary' + cls + '" data-poll-answer="'
+            + escapeHtml_(c) + '">' + escapeHtml_(c) + '</button>';
+        }).join('') + '</div>';
+        revealEl.innerHTML = html;
+        const presetBtn = el_('live-poll-reveal-preset-choice-btn');
+        if (presetBtn) {
+          presetBtn.onclick = function () {
+            BusyButton.run(presetBtn, function () {
+              return control_('reveal', { questionId: q.id, fromPreset: true });
+            }, '提示中…').catch(function (e) { alert(e.message || e); });
+          };
+        }
         revealEl.querySelectorAll('[data-poll-answer]').forEach(function (btn) {
           btn.addEventListener('click', function () {
+            const val = btn.getAttribute('data-poll-answer');
+            const next = revealedList.slice();
+            const i = next.indexOf(val);
+            if (i >= 0) next.splice(i, 1);
+            else next.push(val);
             BusyButton.run(btn, function () {
-              return control_('reveal', { questionId: q.id, answer: btn.getAttribute('data-poll-answer') });
+              return control_('reveal', { questionId: q.id, answers: next });
             }, '提示中…').catch(function (e) { alert(e.message || e); });
           });
         });
@@ -1208,6 +1337,7 @@ const LivePollModule = (function () {
       return renderPresetList_();
     });
     bindClick_('live-poll-editor-save-btn', async function () {
+      persistEditorToModel_();
       const preset = readPresetFromEditor_();
       await LivePollPresetStore.savePreset(preset);
       selectedPresetId_ = preset.id;
@@ -1216,6 +1346,7 @@ const LivePollModule = (function () {
       await renderPresetList_();
     }, '保存中…');
     bindClick_('live-poll-editor-export-btn', function () {
+      persistEditorToModel_();
       const preset = readPresetFromEditor_();
       const blob = new Blob([LivePollPresetStore.exportJson(preset)], { type: 'application/json' });
       const a = document.createElement('a');
@@ -1236,11 +1367,12 @@ const LivePollModule = (function () {
     const addSec = el_('live-poll-editor-add-section-btn');
     if (addSec) {
       addSec.addEventListener('click', function () {
+        persistEditorToModel_();
         if (!editingPreset_) editingPreset_ = LivePollPresetStore.emptyPreset();
         editingPreset_.sections.push({
           name: 'セクション' + (editingPreset_.sections.length + 1),
           collectDurationSec: 120,
-          questions: [{ label: 'Q1.', choiceSet: 'ABC', choiceCount: 3, customChoices: '', answer: '' }]
+          questions: [{ label: 'Q1.', choiceSet: 'ABC', choiceCount: 3, customChoices: '', answers: [], answer: '' }]
         });
         renderPresetEditor_();
       });

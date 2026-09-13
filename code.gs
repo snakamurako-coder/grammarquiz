@@ -5614,8 +5614,39 @@ function buildLivePollChoices_(choiceSet, choiceCount, customChoices) {
   return [];
 }
 
-function livePollChoiceSet_(key) {
-  return buildLivePollChoices_(key, null, '');
+function parseLivePollAnswerList_(raw) {
+  if (raw == null || raw === '') return [];
+  if (Object.prototype.toString.call(raw) === '[object Array]') {
+    return raw.map(function (s) { return String(s == null ? '' : s).trim(); })
+      .filter(function (s) { return s.length > 0; });
+  }
+  const s = String(raw).trim();
+  if (!s) return [];
+  return [s];
+}
+
+function normalizeLivePollChoiceAnswers_(q, choices) {
+  q = q || {};
+  choices = choices || [];
+  let list = [];
+  if (Object.prototype.toString.call(q.answers) === '[object Array]' && q.answers.length) {
+    list = parseLivePollAnswerList_(q.answers);
+  } else if (Object.prototype.toString.call(q.answer) === '[object Array]') {
+    list = parseLivePollAnswerList_(q.answer);
+  } else {
+    const raw = String(q.answer == null ? '' : q.answer).trim();
+    if (raw) {
+      if (choices.indexOf(raw) >= 0) list = [raw];
+      else {
+        const parts = raw.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
+        if (parts.length && parts.every(function (p) { return choices.indexOf(p) >= 0; })) list = parts;
+      }
+    }
+  }
+  if (choices.length) {
+    list = list.filter(function (a) { return choices.indexOf(a) >= 0; });
+  }
+  return list;
 }
 
 function buildPublicPollQuestion_(q) {
@@ -5655,6 +5686,10 @@ function normalizePresetForSecrets_(preset) {
       const kind = livePollNormalizeKind_(choiceSet);
       let choiceCount = parseInt(q.choiceCount, 10);
       if (isNaN(choiceCount) || choiceCount <= 0) choiceCount = livePollDefaultCount_(kind);
+      const choices = isWritten ? [] : buildLivePollChoices_(kind, choiceCount, q.customChoices);
+      const answers = isWritten
+        ? [String(q.answer == null ? '' : q.answer).trim()].filter(function (s) { return s.length > 0; })
+        : normalizeLivePollChoiceAnswers_(q, choices);
       return {
         id: String(q.id || ('s' + si + 'q' + qi)).trim(),
         label: String(q.label || ('Q' + (qi + 1) + '.')).trim(),
@@ -5662,7 +5697,8 @@ function normalizePresetForSecrets_(preset) {
         choiceCount: isWritten ? 0 : choiceCount,
         customChoices: String(q.customChoices == null ? '' : q.customChoices),
         type: isWritten ? 'written' : 'choice',
-        answer: String(q.answer == null ? '' : q.answer).trim()
+        answers: isWritten ? [] : answers,
+        answer: isWritten ? String(q.answer == null ? '' : q.answer).trim() : answers.join(',')
       };
     });
     return {
@@ -5682,7 +5718,7 @@ function loadLivePollPresetIntoSecrets_(pin, pub, preset, ttlSec) {
   const answers = {};
   (preset.sections || []).forEach(function (sec) {
     (sec.questions || []).forEach(function (q) {
-      if (q.id) answers[q.id] = q.answer;
+      if (q.id) answers[q.id] = q.type === 'written' ? q.answer : (q.answers && q.answers.length ? q.answers : q.answer);
     });
   });
   putLivePollSecrets_(pin, { answers: answers, preset: preset }, ttlSec);
@@ -5925,31 +5961,66 @@ function apiLivePollControl_(requestData) {
       const qid = String(requestData.questionId || pub.reviewQuestionId || '');
       const q = (pub.questions || []).filter(function (item) { return item.id === qid; })[0];
       if (!q) return { status: 'error', message: '設問が見つかりません' };
-      let answer = String(requestData.answer == null ? '' : requestData.answer);
       if (q.type === 'choice') {
-        if ((q.choices || []).indexOf(answer) < 0) {
-          return { status: 'error', message: 'その選択肢はありません' };
-        }
-      } else if (!normalizeLivePollText_(answer)) {
-        if (pub.runMode === 'preset') {
+        let list = [];
+        if (requestData.fromPreset || (pub.runMode === 'preset' && requestData.answers == null && (requestData.answer == null || requestData.answer === ''))) {
           const secrets = getLivePollSecrets_(pin);
-          answer = (secrets.answers && secrets.answers[qid]) || '';
-          if (!normalizeLivePollText_(answer)) {
-            return { status: 'error', message: '模範解答がプリセットにありません' };
-          }
-        } else if (!normalizeLivePollText_(answer)) {
-          return { status: 'error', message: '模範解答を入力してください' };
+          const stored = secrets.answers && secrets.answers[qid];
+          list = normalizeLivePollChoiceAnswers_({
+            answers: Object.prototype.toString.call(stored) === '[object Array]' ? stored : null,
+            answer: stored
+          }, q.choices || []);
+        } else if (Object.prototype.toString.call(requestData.answers) === '[object Array]') {
+          list = parseLivePollAnswerList_(requestData.answers);
+        } else if (requestData.answer != null && String(requestData.answer) !== '') {
+          list = [String(requestData.answer)];
         }
+        const valid = [];
+        list.forEach(function (a) {
+          if ((q.choices || []).indexOf(a) >= 0 && valid.indexOf(a) < 0) valid.push(a);
+        });
+        if (!pub.revealed) pub.revealed = {};
+        if (!valid.length) {
+          if (requestData.fromPreset) {
+            return { status: 'error', message: 'プリセットに正答がありません。記号をタップするか、プリセットを編集してください' };
+          }
+          delete pub.revealed[qid];
+          pub.reviewQuestionId = qid;
+          pub.phase = 'results';
+        } else {
+          pub.revealed[qid] = valid;
+          if (pub.runMode !== 'preset') {
+            const secrets = getLivePollSecrets_(pin);
+            secrets.answers[qid] = valid;
+            putLivePollSecrets_(pin, secrets, ttlSec);
+          }
+          pub.reviewQuestionId = qid;
+          pub.phase = 'reveal';
+        }
+      } else {
+        let answer = String(requestData.answer == null ? '' : requestData.answer);
+        if (!normalizeLivePollText_(answer)) {
+          if (pub.runMode === 'preset') {
+            const secrets = getLivePollSecrets_(pin);
+            const stored = secrets.answers && secrets.answers[qid];
+            answer = Object.prototype.toString.call(stored) === '[object Array]' ? String(stored[0] || '') : String(stored || '');
+            if (!normalizeLivePollText_(answer)) {
+              return { status: 'error', message: '模範解答がプリセットにありません' };
+            }
+          } else {
+            return { status: 'error', message: '模範解答を入力してください' };
+          }
+        }
+        if (!pub.revealed) pub.revealed = {};
+        pub.revealed[qid] = String(answer).trim();
+        if (pub.runMode !== 'preset') {
+          const secrets = getLivePollSecrets_(pin);
+          secrets.answers[qid] = pub.revealed[qid];
+          putLivePollSecrets_(pin, secrets, ttlSec);
+        }
+        pub.reviewQuestionId = qid;
+        pub.phase = 'reveal';
       }
-      if (!pub.revealed) pub.revealed = {};
-      pub.revealed[qid] = q.type === 'written' ? String(answer).trim() : answer;
-      if (pub.runMode !== 'preset') {
-        const secrets = getLivePollSecrets_(pin);
-        secrets.answers[qid] = pub.revealed[qid];
-        putLivePollSecrets_(pin, secrets, ttlSec);
-      }
-      pub.reviewQuestionId = qid;
-      pub.phase = 'reveal';
     } else if (cmd === 'undoReveal') {
       const qid = String(requestData.questionId || pub.reviewQuestionId || '');
       if (pub.revealed && qid) delete pub.revealed[qid];

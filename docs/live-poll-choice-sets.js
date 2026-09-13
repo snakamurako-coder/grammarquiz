@@ -146,6 +146,49 @@ const LivePollChoiceSets = (function () {
     return (v.choices || buildChoices(v.config)).join(' ');
   }
 
+  function parseAnswerList(raw) {
+    if (raw == null || raw === '') return [];
+    if (Array.isArray(raw)) {
+      return raw.map(function (s) { return String(s == null ? '' : s).trim(); })
+        .filter(function (s) { return s.length > 0; });
+    }
+    if (typeof raw === 'string') {
+      const s = raw.trim();
+      if (!s) return [];
+      if (s.charAt(0) === '[') {
+        try {
+          const parsed = JSON.parse(s);
+          if (Array.isArray(parsed)) return parseAnswerList(parsed);
+        } catch (e) { /* treat as plain text */ }
+      }
+      return [s];
+    }
+    return [];
+  }
+
+  function formatAnswerList(raw) {
+    return parseAnswerList(raw).join(' / ');
+  }
+
+  function isCorrectAnswer(ownAnswer, revealed, type) {
+    if (type === 'written') {
+      const list = parseAnswerList(revealed);
+      const own = String(ownAnswer == null ? '' : ownAnswer);
+      if (!list.length || !String(own).trim()) return false;
+      const normOwn = own.replace(/[\uFF01-\uFF5E]/g, function (ch) {
+        return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+      }).replace(/\u3000/g, ' ').replace(/[ \t\r\n]+/g, ' ').trim();
+      return list.some(function (ans) {
+        const n = String(ans).replace(/[\uFF01-\uFF5E]/g, function (ch) {
+          return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+        }).replace(/\u3000/g, ' ').replace(/[ \t\r\n]+/g, ' ').trim();
+        return n === normOwn;
+      });
+    }
+    const list = parseAnswerList(revealed);
+    return list.indexOf(String(ownAnswer)) >= 0;
+  }
+
   return {
     KINDS: KINDS,
     normalizeKind: normalizeKind_,
@@ -158,7 +201,10 @@ const LivePollChoiceSets = (function () {
     buildChoices: buildChoices,
     validate: validate,
     kindOptionsHtml: kindOptionsHtml,
-    previewText: previewText
+    previewText: previewText,
+    parseAnswerList: parseAnswerList,
+    formatAnswerList: formatAnswerList,
+    isCorrectAnswer: isCorrectAnswer
   };
 })();
 
