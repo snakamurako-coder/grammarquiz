@@ -541,7 +541,8 @@ function doPost(e) {
     // 授業ライブは Cache + 認証のみ。毎回の Drive 初期化を挟むと作成・ボードがタイムアウトする
     if (action === 'liveCreate' || action === 'liveJoin' || action === 'liveSubmit'
         || action === 'liveBoard' || action === 'liveClose' || action === 'liveExport'
-        || action === 'liveConfig' || action === 'livePollControl') {
+        || action === 'liveConfig' || action === 'livePollControl'
+        || action === 'liveSwitchActivity') {
       return sendResponse(handleLiveApi_(action, requestData));
     }
 
@@ -4722,12 +4723,13 @@ const LIVE_INDEX_PREFIX = 'live_index_';
 const LIVE_POLL_SECRETS_PREFIX = 'live_pollsec_';
 const LIVE_PIN_MIN = 1000;
 const LIVE_PIN_MAX = 9999;
-const LIVE_POLL_CHOICE_SETS = {
-  ABC: ['A', 'B', 'C'],
-  AIUE: ['あ', 'い', 'う', 'え'],
-  CIRCLED10: ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'],
-  TF: ['True', 'False'],
-  KATAKANA5: ['ア', 'イ', 'ウ', 'エ', 'オ']
+const LIVE_POLL_HIRAGANA_POOL_ = 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろ'.split('');
+const LIVE_POLL_KATAKANA_POOL_ = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロ'.split('');
+const LIVE_POLL_ROMAN_POOL_ = ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ', 'Ⅴ', 'Ⅵ', 'Ⅶ', 'Ⅷ', 'Ⅸ', 'Ⅹ', 'Ⅺ', 'Ⅻ'];
+const LIVE_POLL_LEGACY_KINDS_ = {
+  CIRCLED10: { kind: 'CIRCLED', count: 10 },
+  KATAKANA5: { kind: 'KATAKANA', count: 5 },
+  AIUE: { kind: 'AIUE', count: 4 }
 };
 
 function liveCache_() {
@@ -5550,8 +5552,193 @@ function persistLivePollMeta_(pin, meta) {
   return ttlSec;
 }
 
+function livePollCircledChar_(n) {
+  if (n >= 1 && n <= 20) return String.fromCharCode(0x2460 + n - 1);
+  return String(n);
+}
+
+function livePollNormalizeKind_(kind) {
+  kind = String(kind || 'ABC').trim();
+  if (LIVE_POLL_LEGACY_KINDS_[kind]) return LIVE_POLL_LEGACY_KINDS_[kind].kind;
+  return kind;
+}
+
+function livePollDefaultCount_(kind) {
+  kind = livePollNormalizeKind_(kind);
+  if (kind === 'TF') return 2;
+  if (kind === 'WRITTEN' || kind === 'CUSTOM') return 0;
+  if (LIVE_POLL_LEGACY_KINDS_[kind]) return LIVE_POLL_LEGACY_KINDS_[kind].count;
+  return 3;
+}
+
+function livePollMaxCount_(kind) {
+  kind = livePollNormalizeKind_(kind);
+  if (kind === 'CIRCLED') return 20;
+  if (kind === 'ABC') return 26;
+  if (kind === 'AIUE') return LIVE_POLL_HIRAGANA_POOL_.length;
+  if (kind === 'KATAKANA') return LIVE_POLL_KATAKANA_POOL_.length;
+  if (kind === 'ROMAN') return LIVE_POLL_ROMAN_POOL_.length;
+  return 26;
+}
+
+function buildLivePollChoices_(choiceSet, choiceCount, customChoices) {
+  let kind = String(choiceSet || 'ABC').trim();
+  let count = parseInt(choiceCount, 10);
+  const custom = String(customChoices == null ? '' : customChoices);
+  if (LIVE_POLL_LEGACY_KINDS_[kind]) {
+    if (isNaN(count) || count <= 0) count = LIVE_POLL_LEGACY_KINDS_[kind].count;
+    kind = LIVE_POLL_LEGACY_KINDS_[kind].kind;
+  }
+  kind = livePollNormalizeKind_(kind);
+  if (kind === 'WRITTEN') return [];
+  if (kind === 'TF') return ['True', 'False'];
+  if (kind === 'CUSTOM') {
+    return custom.split(',').map(function (s) { return String(s).trim(); })
+      .filter(function (s) { return s.length > 0; });
+  }
+  if (isNaN(count) || count <= 0) count = livePollDefaultCount_(kind);
+  count = Math.min(livePollMaxCount_(kind), Math.max(1, count));
+  if (kind === 'CIRCLED') {
+    const out = [];
+    for (let i = 1; i <= count; i++) out.push(livePollCircledChar_(i));
+    return out;
+  }
+  if (kind === 'ABC') {
+    const out = [];
+    for (let i = 0; i < count; i++) out.push(String.fromCharCode(65 + i));
+    return out;
+  }
+  if (kind === 'AIUE') return LIVE_POLL_HIRAGANA_POOL_.slice(0, count);
+  if (kind === 'KATAKANA') return LIVE_POLL_KATAKANA_POOL_.slice(0, count);
+  if (kind === 'ROMAN') return LIVE_POLL_ROMAN_POOL_.slice(0, count);
+  return [];
+}
+
 function livePollChoiceSet_(key) {
-  return LIVE_POLL_CHOICE_SETS[String(key || '').trim()] || null;
+  return buildLivePollChoices_(key, null, '');
+}
+
+function buildPublicPollQuestion_(q) {
+  q = q || {};
+  const choiceSet = String(q.choiceSet || 'ABC').trim();
+  const isWritten = choiceSet === 'WRITTEN' || String(q.type || '') === 'written';
+  if (isWritten) {
+    return {
+      id: String(q.id || '').trim(),
+      label: String(q.label || '').trim(),
+      type: 'written',
+      choiceSet: 'WRITTEN',
+      choices: []
+    };
+  }
+  const choices = buildLivePollChoices_(choiceSet, q.choiceCount, q.customChoices);
+  if (!choices || !choices.length) return null;
+  return {
+    id: String(q.id || '').trim(),
+    label: String(q.label || '').trim(),
+    type: 'choice',
+    choiceSet: livePollNormalizeKind_(choiceSet),
+    choiceCount: parseInt(q.choiceCount, 10) || choices.length,
+    customChoices: String(q.customChoices == null ? '' : q.customChoices),
+    choices: choices.slice()
+  };
+}
+
+function normalizePresetForSecrets_(preset) {
+  preset = preset || {};
+  const sections = (preset.sections || []).map(function (sec, si) {
+    sec = sec || {};
+    const questions = (sec.questions || []).map(function (q, qi) {
+      q = q || {};
+      const choiceSet = String(q.choiceSet || 'ABC').trim();
+      const isWritten = choiceSet === 'WRITTEN' || String(q.type || '') === 'written';
+      const kind = livePollNormalizeKind_(choiceSet);
+      let choiceCount = parseInt(q.choiceCount, 10);
+      if (isNaN(choiceCount) || choiceCount <= 0) choiceCount = livePollDefaultCount_(kind);
+      return {
+        id: String(q.id || ('s' + si + 'q' + qi)).trim(),
+        label: String(q.label || ('Q' + (qi + 1) + '.')).trim(),
+        choiceSet: kind,
+        choiceCount: isWritten ? 0 : choiceCount,
+        customChoices: String(q.customChoices == null ? '' : q.customChoices),
+        type: isWritten ? 'written' : 'choice',
+        answer: String(q.answer == null ? '' : q.answer).trim()
+      };
+    });
+    return {
+      name: String(sec.name || ('セクション' + (si + 1))).trim(),
+      collectDurationSec: Math.max(0, parseInt(sec.collectDurationSec, 10) || 0),
+      questions: questions
+    };
+  });
+  return {
+    name: String(preset.name || '無題のプリセット').trim(),
+    sections: sections
+  };
+}
+
+function loadLivePollPresetIntoSecrets_(pin, pub, preset, ttlSec) {
+  preset = normalizePresetForSecrets_(preset);
+  const answers = {};
+  (preset.sections || []).forEach(function (sec) {
+    (sec.questions || []).forEach(function (q) {
+      if (q.id) answers[q.id] = q.answer;
+    });
+  });
+  putLivePollSecrets_(pin, { answers: answers, preset: preset }, ttlSec);
+  pub.runMode = 'preset';
+  pub.presetName = preset.name;
+  pub.phase = 'idle';
+  pub.sectionIndex = 0;
+  pub.sectionCount = preset.sections.length;
+  pub.sectionName = '';
+  pub.collectEndsAt = 0;
+  pub.collectDurationSec = 0;
+  pub.reviewQuestionId = '';
+  pub.visibleQuestionIds = [];
+  pub.questions = [];
+  pub.revealed = {};
+  pub.frozenTally = {};
+  pub.submittedCount = 0;
+}
+
+function startLivePollPresetSection_(pub, secrets, sectionIndex, durationSecOverride) {
+  const preset = secrets && secrets.preset;
+  if (!preset || !preset.sections || !preset.sections.length) {
+    return { ok: false, error: 'プリセットが読み込まれていません' };
+  }
+  let si = parseInt(sectionIndex, 10);
+  if (isNaN(si)) si = parseInt(pub.sectionIndex, 10) || 0;
+  if (si < 0 || si >= preset.sections.length) {
+    return { ok: false, error: 'セクションが見つかりません' };
+  }
+  const sec = preset.sections[si];
+  const publicQs = [];
+  (sec.questions || []).forEach(function (q) {
+    const pq = buildPublicPollQuestion_(q);
+    if (pq && pq.id) publicQs.push(pq);
+  });
+  if (!publicQs.length) return { ok: false, error: 'セクションに設問がありません' };
+  let durationSec = parseInt(durationSecOverride, 10);
+  if (isNaN(durationSec)) durationSec = parseInt(sec.collectDurationSec, 10) || 0;
+  if (durationSec > 0 && durationSec < 60 && durationSec % 5 !== 0) {
+    return { ok: false, error: '秒のタイマーは 5 の倍数にしてください' };
+  }
+  const round = (parseInt(pub.ballotRound, 10) || 0) + 1;
+  pub.runMode = 'preset';
+  pub.sectionIndex = si;
+  pub.sectionName = sec.name || '';
+  pub.questions = publicQs;
+  pub.visibleQuestionIds = publicQs.map(function (q) { return q.id; });
+  pub.reviewQuestionId = publicQs[0].id;
+  pub.ballotRound = round;
+  pub.phase = 'collecting';
+  pub.collectDurationSec = durationSec;
+  pub.collectEndsAt = durationSec > 0 ? (Date.now() + durationSec * 1000) : 0;
+  pub.revealed = {};
+  pub.frozenTally = {};
+  pub.submittedCount = 0;
+  return { ok: true };
 }
 
 function tallyLivePollAnswers_(questions, entries, round) {
@@ -5663,9 +5850,19 @@ function apiLivePollControl_(requestData) {
       if (isWritten) {
         question = { id: id, label: label, type: 'written', choiceSet: 'WRITTEN', choices: [] };
       } else {
-        const choices = livePollChoiceSet_(choiceSet);
-        if (!choices) return { status: 'error', message: '選択肢の種類が不正です' };
-        question = { id: id, label: label, type: 'choice', choiceSet: choiceSet, choices: choices.slice() };
+        const choices = buildLivePollChoices_(choiceSet, requestData.choiceCount, requestData.customChoices);
+        if (!choices || choices.length < 2) {
+          return { status: 'error', message: '選択肢が不正です（2つ以上必要）' };
+        }
+        question = {
+          id: id,
+          label: label,
+          type: 'choice',
+          choiceSet: livePollNormalizeKind_(choiceSet),
+          choiceCount: choices.length,
+          customChoices: String(requestData.customChoices == null ? '' : requestData.customChoices),
+          choices: choices.slice()
+        };
       }
       pub.runMode = 'improv';
       pub.phase = 'prompt';
@@ -5728,27 +5925,39 @@ function apiLivePollControl_(requestData) {
       const qid = String(requestData.questionId || pub.reviewQuestionId || '');
       const q = (pub.questions || []).filter(function (item) { return item.id === qid; })[0];
       if (!q) return { status: 'error', message: '設問が見つかりません' };
-      const answer = String(requestData.answer == null ? '' : requestData.answer);
+      let answer = String(requestData.answer == null ? '' : requestData.answer);
       if (q.type === 'choice') {
         if ((q.choices || []).indexOf(answer) < 0) {
           return { status: 'error', message: 'その選択肢はありません' };
         }
       } else if (!normalizeLivePollText_(answer)) {
-        return { status: 'error', message: '模範解答を入力してください' };
+        if (pub.runMode === 'preset') {
+          const secrets = getLivePollSecrets_(pin);
+          answer = (secrets.answers && secrets.answers[qid]) || '';
+          if (!normalizeLivePollText_(answer)) {
+            return { status: 'error', message: '模範解答がプリセットにありません' };
+          }
+        } else if (!normalizeLivePollText_(answer)) {
+          return { status: 'error', message: '模範解答を入力してください' };
+        }
       }
       if (!pub.revealed) pub.revealed = {};
       pub.revealed[qid] = q.type === 'written' ? String(answer).trim() : answer;
-      const secrets = getLivePollSecrets_(pin);
-      secrets.answers[qid] = pub.revealed[qid];
-      putLivePollSecrets_(pin, secrets, ttlSec);
+      if (pub.runMode !== 'preset') {
+        const secrets = getLivePollSecrets_(pin);
+        secrets.answers[qid] = pub.revealed[qid];
+        putLivePollSecrets_(pin, secrets, ttlSec);
+      }
       pub.reviewQuestionId = qid;
       pub.phase = 'reveal';
     } else if (cmd === 'undoReveal') {
       const qid = String(requestData.questionId || pub.reviewQuestionId || '');
       if (pub.revealed && qid) delete pub.revealed[qid];
-      const secrets = getLivePollSecrets_(pin);
-      if (secrets.answers && qid) delete secrets.answers[qid];
-      putLivePollSecrets_(pin, secrets, ttlSec);
+      if (pub.runMode !== 'preset') {
+        const secrets = getLivePollSecrets_(pin);
+        if (secrets.answers && qid) delete secrets.answers[qid];
+        putLivePollSecrets_(pin, secrets, ttlSec);
+      }
       pub.phase = 'results';
     } else if (cmd === 'resetQuestion') {
       pub.phase = 'idle';
@@ -5761,6 +5970,61 @@ function apiLivePollControl_(requestData) {
       pub.frozenTally = {};
       pub.submittedCount = 0;
       putLivePollSecrets_(pin, { answers: {} }, ttlSec);
+    } else if (cmd === 'loadPreset') {
+      if (pub.phase === 'collecting') {
+        return { status: 'error', message: '集約中です。先に打ち切ってください' };
+      }
+      const preset = requestData.preset;
+      if (!preset || !preset.sections || !preset.sections.length) {
+        return { status: 'error', message: 'プリセットの内容が不正です' };
+      }
+      loadLivePollPresetIntoSecrets_(pin, pub, preset, ttlSec);
+    } else if (cmd === 'startSection') {
+      if (pub.phase === 'collecting') {
+        return { status: 'error', message: 'すでに集約中です' };
+      }
+      const secrets = getLivePollSecrets_(pin);
+      const started = startLivePollPresetSection_(
+        pub,
+        secrets,
+        requestData.sectionIndex,
+        requestData.durationSec
+      );
+      if (!started.ok) return { status: 'error', message: started.error };
+    } else if (cmd === 'nextReview') {
+      if (pub.runMode !== 'preset') {
+        return { status: 'error', message: 'プリセット実施中のみ使えます' };
+      }
+      if (pub.phase !== 'reveal') {
+        return { status: 'error', message: '正答提示のあとで次へ進めます' };
+      }
+      const ids = pub.visibleQuestionIds || [];
+      const cur = String(pub.reviewQuestionId || '');
+      const idx = ids.indexOf(cur);
+      if (idx < 0) return { status: 'error', message: '設問が見つかりません' };
+      if (idx < ids.length - 1) {
+        pub.reviewQuestionId = ids[idx + 1];
+        pub.phase = 'results';
+      } else {
+        pub.phase = 'sectionWait';
+        pub.reviewQuestionId = '';
+      }
+    } else if (cmd === 'nextSection') {
+      if (pub.runMode !== 'preset') {
+        return { status: 'error', message: 'プリセット実施中のみ使えます' };
+      }
+      if (pub.phase !== 'sectionWait' && pub.phase !== 'idle') {
+        return { status: 'error', message: 'セクションの答え合わせが終わってから次へ進めます' };
+      }
+      const secrets = getLivePollSecrets_(pin);
+      const nextIndex = (parseInt(pub.sectionIndex, 10) || 0) + 1;
+      const started = startLivePollPresetSection_(
+        pub,
+        secrets,
+        nextIndex,
+        requestData.durationSec
+      );
+      if (!started.ok) return { status: 'error', message: started.error };
     } else {
       return { status: 'error', message: '未知の投票コマンド: ' + cmd };
     }
@@ -5780,6 +6044,74 @@ function apiLivePollControl_(requestData) {
   }
 }
 
+function apiLiveSwitchActivity_(requestData) {
+  const admin = requireAssignmentAdminFromRequest_(requestData || {});
+  if (!admin.ok) return { status: 'error', message: admin.error };
+  const pin = String(requestData.pin || '').trim();
+  const meta = getLiveMeta_(pin);
+  if (!meta) return { status: 'error', message: '部屋が見つかりません' };
+  if (!meta.continueAcrossModes) {
+    return { status: 'error', message: 'この部屋はモード継続が無効です。部屋を閉じてから新しく開いてください' };
+  }
+  const activity = String(requestData.activity || '').trim();
+  if (activity !== 'poll' && activity !== 'vocab' && activity !== 'word-link') {
+    return { status: 'error', message: 'activity は poll / vocab / word-link が必要です' };
+  }
+  if (activity === 'poll') {
+    if (!isFirebaseServerConfigured_()) {
+      return { status: 'error', message: '投票は Firebase β が必要です' };
+    }
+    if (normalizeLiveBackend_(meta.backend) !== 'firebase') {
+      return { status: 'error', message: '投票への切替は Firebase β で開いた部屋のみ可能です' };
+    }
+    meta.backend = 'firebase';
+    if (!meta.pollPublic) meta.pollPublic = emptyLivePollPublic_();
+  }
+  if (activity === 'vocab' || activity === 'word-link') {
+    const launchOptions = requestData.launchOptions || meta.launchOptions || {};
+    if (!launchOptions.bookName || !launchOptions.sheetName) {
+      return { status: 'error', message: 'ブックと教材（シート）が必要です' };
+    }
+    if (activity === 'word-link') {
+      const linkMode = String(launchOptions.linkMode || '').trim();
+      if (!LIVE_WORD_LINK_MODE_LABELS[linkMode]) {
+        return { status: 'error', message: 'Word Link の形式（英和 / 和英 / Audio）を選んでください' };
+      }
+      launchOptions.linkMode = linkMode;
+    }
+    meta.launchOptions = launchOptions;
+  }
+  meta.activity = activity;
+  const ttlSec = activity === 'poll' ? livePollTtlSec_(meta) : computeLiveRoomTtlSec_(meta.timeLimitSec);
+  putLiveMeta_(pin, meta, ttlSec);
+  if (isLiveFirebaseBackend_(meta)) {
+    const patch = {
+      activity: meta.activity,
+      backend: meta.backend,
+      launchOptions: meta.launchOptions || {}
+    };
+    if (activity === 'poll') patch.pollPublic = meta.pollPublic || emptyLivePollPublic_();
+    firebasePatchLiveRoom_(pin, patch);
+  }
+  return {
+    status: 'success',
+    data: {
+      pin: pin,
+      backend: meta.backend,
+      title: meta.title,
+      mode: meta.mode,
+      activity: meta.activity,
+      pollPublic: meta.pollPublic || null,
+      launchOptions: meta.launchOptions || null,
+      timeLimitSec: meta.timeLimitSec || 0,
+      autoSubmitOnTimeout: meta.autoSubmitOnTimeout !== false,
+      closesAt: meta.closesAt || 0,
+      rosterCount: (meta.roster && meta.roster.length) || 0,
+      continueAcrossModes: meta.continueAcrossModes !== false
+    }
+  };
+}
+
 function handleLiveApi_(action, requestData) {
   try {
     if (action === 'liveConfig') return apiLiveConfig_(requestData);
@@ -5790,6 +6122,7 @@ function handleLiveApi_(action, requestData) {
     if (action === 'liveExport') return apiLiveExport_(requestData);
     if (action === 'liveClose') return apiLiveClose_(requestData);
     if (action === 'livePollControl') return apiLivePollControl_(requestData);
+    if (action === 'liveSwitchActivity') return apiLiveSwitchActivity_(requestData);
     return { status: 'error', message: '未知のライブAPI: ' + action };
   } catch (e) {
     return { status: 'error', message: e.toString() };
@@ -5829,7 +6162,8 @@ function apiLiveCreate_(requestData) {
       closesAt: 0,
       createdBy: String(admin.email || '').trim().toLowerCase(),
       roster: roster,
-      pollPublic: pollPublic
+      pollPublic: pollPublic,
+      continueAcrossModes: requestData.continueAcrossModes !== false
     };
     putLiveMeta_(pin, meta, ttlSec);
     putLivePollSecrets_(pin, { answers: {} }, ttlSec);
@@ -5849,7 +6183,8 @@ function apiLiveCreate_(requestData) {
         rosterCount: roster.length,
         ttlSec: ttlSec,
         launchOptions: {},
-        pollPublic: pollPublic
+        pollPublic: pollPublic,
+        continueAcrossModes: meta.continueAcrossModes
       }
     };
   }
@@ -5888,7 +6223,8 @@ function apiLiveCreate_(requestData) {
     createdAt: nowMs,
     closesAt: timeLimitSec > 0 ? (nowMs + timeLimitSec * 1000) : 0,
     createdBy: String(admin.email || '').trim().toLowerCase(),
-    roster: roster
+    roster: roster,
+    continueAcrossModes: requestData.continueAcrossModes !== false
   };
   putLiveMeta_(pin, meta, ttlSec);
   if (backend === 'firebase') {
@@ -5907,7 +6243,9 @@ function apiLiveCreate_(requestData) {
       closesAt: meta.closesAt,
       rosterCount: roster.length,
       ttlSec: ttlSec,
-      launchOptions: launchOptions
+      launchOptions: launchOptions,
+      activity: meta.activity || mode,
+      continueAcrossModes: meta.continueAcrossModes !== false
     }
   };
 }
@@ -5969,6 +6307,7 @@ function apiLiveJoin_(requestData) {
       autoSubmitOnTimeout: meta.autoSubmitOnTimeout !== false,
       closesAt: meta.closesAt,
       launchOptions: meta.launchOptions,
+      continueAcrossModes: meta.continueAcrossModes !== false,
       entry: entry
     }
   };
@@ -5980,8 +6319,12 @@ function apiLiveSubmit_(requestData) {
   const pin = String(requestData.pin || '').trim();
   const meta = getLiveMeta_(pin);
   if (!meta) return { status: 'error', message: '部屋が見つかりません' };
-  if (meta.mode === 'poll' || meta.activity === 'poll') {
+  const activity = meta.activity || meta.mode;
+  if (activity === 'poll') {
     return { status: 'error', message: '投票ライブの回答は Firebase 経由で送信してください' };
+  }
+  if (activity !== 'vocab' && activity !== 'word-link') {
+    return { status: 'error', message: 'いまはクイズ提出を受け付けていません' };
   }
   if (isLiveFirebaseBackend_(meta)) {
     return {

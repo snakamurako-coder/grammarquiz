@@ -1270,14 +1270,94 @@ body.live-poll-student-active #live-room-board-screen { display: none !important
   padding: 14px;
   margin-bottom: 12px;
 }
-.live-poll-choice-set { display: flex; flex-wrap: wrap; gap: 8px; }
-.live-poll-choice-set label {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 10px; border: 1px solid #cfd8dc; border-radius: 8px; background: #fafafa;
+.live-poll-choice-config { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.live-poll-choice-config label {
+  display: flex; flex-direction: column; gap: 4px; font-size: 0.82em; font-weight: 600; color: #546e7a;
 }
-.live-poll-timer-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.live-poll-timer-row input,
-.live-poll-timer-row select { min-height: 40px; }
+.live-poll-choice-config select,
+.live-poll-choice-config input[type="number"],
+.live-poll-choice-config input[type="text"] {
+  box-sizing: border-box; min-height: 40px; font-size: 1em;
+  border: 1px solid #ccc; border-radius: 8px; padding: 0 8px;
+}
+.live-poll-choice-config select { min-width: 10em; }
+.live-poll-choice-config input[type="number"] { width: 4.5em; text-align: center; }
+.live-poll-choice-config input[type="text"] { min-width: 220px; }
+.live-poll-choice-preview { margin: 6px 0 0; font-size: 0.88em; color: #455a64; }
+.live-poll-timer-block { margin-top: 12px; }
+.live-poll-timer-block > .live-poll-timer-label {
+  display: block; font-weight: 700; margin-bottom: 8px; color: #37474f;
+}
+.live-poll-timer-fields {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+}
+.live-poll-timer-unit {
+  display: flex; flex-direction: column; gap: 4px; min-width: 4.5em;
+}
+.live-poll-timer-unit > span {
+  font-size: 0.82em; color: #546e7a; font-weight: 600;
+}
+.live-poll-timer-input {
+  box-sizing: border-box;
+  width: 4.5em; min-width: 4.5em; height: 40px;
+  font-size: 1em; border: 1px solid #ccc; border-radius: 8px;
+  padding: 0 8px; text-align: center;
+}
+.live-poll-timer-hint { font-size: 0.82em; color: #666; margin: 6px 0 0; }
+body.live-poll-setup-active,
+body.live-poll-host-active,
+body.live-poll-student-active {
+  max-width: none;
+  padding: 0;
+  overflow: hidden;
+}
+body.live-poll-setup-active #settings-screen,
+body.live-poll-setup-active #game-screen,
+body.live-poll-setup-active #result-screen,
+body.live-poll-setup-active #vocab-card-screen,
+body.live-poll-setup-active #vocab-link-screen,
+body.live-poll-setup-active #reading-screen,
+body.live-poll-setup-active #login-screen,
+body.live-poll-setup-active #live-room-board-screen,
+body.live-poll-setup-active #live-poll-host-screen,
+body.live-poll-setup-active #live-poll-student-screen { display: none !important; }
+body.live-poll-setup-active #live-poll-setup-screen { display: flex !important; }
+#live-poll-setup-screen {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 12005;
+  background: #f4f7fb;
+  color: #1a237e;
+  flex-direction: column;
+  overflow: auto;
+  width: 100vw;
+  height: 100dvh;
+  box-sizing: border-box;
+}
+.live-poll-setup-body { padding: 16px; max-width: 900px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+.live-poll-preset-list { list-style: none; margin: 0; padding: 0; }
+.live-poll-preset-list li {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 10px 0; border-bottom: 1px solid #e0e0e0;
+}
+.live-poll-editor-section {
+  border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fff;
+}
+.live-poll-q-editor-row {
+  display: grid; grid-template-columns: 1fr 9em 4.5em 1fr 1fr auto;
+  gap: 8px; align-items: center; margin-bottom: 8px;
+}
+@media (max-width: 640px) {
+  .live-poll-q-editor-row { grid-template-columns: 1fr 1fr; }
+}
+.live-poll-continue-row {
+  margin: 10px 0; padding: 10px 12px; background: #e8f5e9; border-radius: 8px;
+  border: 1px solid #a5d6a7;
+}
+.live-poll-host-preset-panel { display: none; }
+.live-poll-host-improv-panel.is-hidden { display: none; }
+.live-poll-host-preset-panel.is-open { display: block; }
 .live-poll-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .live-poll-actions .btn-primary,
 .live-poll-actions .btn-secondary { width: auto; min-width: 140px; }
@@ -2803,8 +2883,13 @@ body.live-room-board-active #login-screen { display: none !important; }
               <button type="button" id="live-board-font-plus" aria-label="文字サイズを大きく">+</button>
               pt
             </label>
+            <label class="live-poll-continue-row" id="live-board-continue-wrap" style="margin:0 0 8px;">
+              <input type="checkbox" id="live-board-continue-modes" checked>
+              <span>違うモードで LIVE を継続（PIN・入室を維持）</span>
+            </label>
             <div class="live-board-actions">
               <button type="button" class="btn-secondary" id="live-board-export-btn">結果を保存</button>
+              <button type="button" class="btn-secondary" id="live-board-switch-poll-btn">投票へ切替</button>
               <button type="button" class="btn-secondary" id="live-board-back-btn">学習画面</button>
               <button type="button" class="btn-secondary" id="live-board-close-btn">部屋を閉じる</button>
             </div>
@@ -2828,6 +2913,55 @@ body.live-room-board-active #login-screen { display: none !important; }
     </div>
   </div>
 
+  <div id="live-poll-setup-screen" aria-hidden="true">
+    <div class="live-poll-top">
+      <div class="live-poll-top-row">
+        <div>
+          <div class="subsection-title" style="margin:0;">LIVE VOTE 準備</div>
+          <div class="live-poll-meta" id="live-poll-setup-room-info">部屋を開いてから実施できます</div>
+        </div>
+        <div class="live-poll-top-actions">
+          <button type="button" class="btn-secondary" id="live-poll-setup-back-btn">学習画面</button>
+        </div>
+      </div>
+      <label class="live-poll-continue-row" id="live-poll-setup-continue-wrap">
+        <input type="checkbox" id="live-poll-setup-continue-modes" checked>
+        <span>違うモードで LIVE を継続（PIN・入室を維持）</span>
+      </label>
+    </div>
+    <div class="live-poll-setup-body">
+      <div id="live-poll-setup-list-view">
+        <div class="subsection-title">プリセット一覧</div>
+        <ul class="live-poll-preset-list" id="live-poll-preset-list"></ul>
+        <div class="live-poll-actions" style="margin:12px 0;">
+          <button type="button" class="btn-secondary" id="live-poll-preset-new-btn">新規プリセット</button>
+          <button type="button" class="btn-secondary" id="live-poll-preset-import-btn">JSON 読み込み</button>
+          <input type="file" id="live-poll-preset-import-file" accept="application/json,.json" hidden>
+        </div>
+        <div class="subsection-title">実施</div>
+        <div class="live-poll-actions">
+          <button type="button" class="btn-primary" id="live-poll-run-preset-btn" disabled>プリセットで実施</button>
+          <button type="button" class="btn-primary" id="live-poll-run-improv-btn">即興で実施</button>
+        </div>
+        <p class="filter-axis-hint">正答の編集はプリセット編集画面のみ。実施中はホストに正答を表示しません。</p>
+      </div>
+      <div id="live-poll-setup-editor-view" style="display:none;">
+        <div class="live-poll-actions" style="margin-bottom:12px;">
+          <button type="button" class="btn-secondary" id="live-poll-editor-back-btn">一覧に戻る</button>
+          <button type="button" class="btn-primary" id="live-poll-editor-save-btn">保存</button>
+          <button type="button" class="btn-secondary" id="live-poll-editor-export-btn">JSON 書き出し</button>
+          <button type="button" class="btn-secondary" id="live-poll-editor-delete-btn">削除</button>
+        </div>
+        <div class="form-group">
+          <label>プリセット名</label>
+          <input type="text" id="live-poll-editor-name" class="live-poll-written-input">
+        </div>
+        <div id="live-poll-editor-sections"></div>
+        <button type="button" class="btn-secondary" id="live-poll-editor-add-section-btn">セクションを追加</button>
+      </div>
+    </div>
+  </div>
+
   <div id="live-poll-host-screen" aria-hidden="true">
     <div class="live-poll-top">
       <div class="live-poll-top-row">
@@ -2839,43 +2973,71 @@ body.live-room-board-active #login-screen { display: none !important; }
           <div class="live-poll-meta" id="live-poll-host-timer" hidden></div>
         </div>
         <div class="live-poll-top-actions">
-          <button type="button" class="btn-secondary" id="live-poll-host-back-btn">学習画面</button>
+          <button type="button" class="btn-secondary" id="live-poll-host-back-btn">準備画面</button>
           <button type="button" class="btn-secondary" id="live-poll-host-close-btn">部屋を閉じる</button>
         </div>
       </div>
+      <label class="live-poll-continue-row" id="live-poll-host-continue-wrap" style="display:none;margin:8px 16px 0;">
+        <input type="checkbox" id="live-poll-continue-modes" checked>
+        <span>違うモードで LIVE を継続（PIN・入室を維持）</span>
+      </label>
     </div>
     <div class="live-poll-body">
-      <div class="live-poll-panel">
+      <div class="live-poll-panel live-poll-host-preset-panel" id="live-poll-host-preset-panel">
+        <div class="subsection-title">プリセット実施</div>
+        <p class="filter-axis-hint" id="live-poll-preset-run-name"></p>
+        <p class="filter-axis-hint" id="live-poll-preset-run-section"></p>
+        <div class="live-poll-actions">
+          <button type="button" class="btn-primary" id="live-poll-start-section-btn">このセクションを出す</button>
+          <button type="button" class="btn-primary" id="live-poll-preset-start-collect-btn" style="display:none;">集約開始</button>
+          <button type="button" class="btn-secondary" id="live-poll-preset-end-collect-btn">集約終了</button>
+          <button type="button" class="btn-secondary" id="live-poll-preset-show-results-btn">集計を表示</button>
+          <button type="button" class="btn-secondary" id="live-poll-preset-next-review-btn">次の問へ</button>
+          <button type="button" class="btn-secondary" id="live-poll-preset-next-section-btn">次のセクションへ</button>
+          <button type="button" class="btn-secondary" id="live-poll-preset-undo-reveal-btn">やりなおす</button>
+        </div>
+      </div>
+      <div class="live-poll-panel live-poll-host-improv-panel" id="live-poll-host-improv-panel">
         <div class="subsection-title">即興で1問出す</div>
         <p class="filter-axis-hint">問題文はスライドに出します。生徒端末には記号ボタンまたは記述欄だけが現れます。</p>
-        <div class="live-poll-choice-set">
-          <label><input type="radio" name="live-poll-choice-set" value="ABC" checked> A B C</label>
-          <label><input type="radio" name="live-poll-choice-set" value="AIUE"> あ い う え</label>
-          <label><input type="radio" name="live-poll-choice-set" value="CIRCLED10"> ①〜⑩</label>
-          <label><input type="radio" name="live-poll-choice-set" value="TF"> True False</label>
-          <label><input type="radio" name="live-poll-choice-set" value="KATAKANA5"> ア イ ウ エ オ</label>
-          <label><input type="radio" name="live-poll-choice-set" value="WRITTEN"> 記述</label>
-        </div>
-        <div class="live-poll-timer-row" style="margin-top:12px;">
-          <span>集約タイマー</span>
-          <label>分 <input type="number" id="live-poll-timer-min" min="0" max="30" value="0" inputmode="numeric" style="width:4.5em;"></label>
-          <label>秒
-            <select id="live-poll-timer-sec">
-              <option value="0" selected>0</option>
-              <option value="5">5</option>
-              <option value="10">10</option>
-              <option value="15">15</option>
-              <option value="20">20</option>
-              <option value="25">25</option>
-              <option value="30">30</option>
-              <option value="35">35</option>
-              <option value="40">40</option>
-              <option value="45">45</option>
-              <option value="50">50</option>
-              <option value="55">55</option>
-            </select>
+        <div class="live-poll-choice-config" id="live-poll-improv-choice-config">
+          <label>選択肢の種類
+            <select id="live-poll-choice-kind" aria-label="選択肢の種類"></select>
           </label>
-          <span class="filter-axis-hint" style="margin:0;">0分0秒は手動打ち切り</span>
+          <label id="live-poll-choice-count-wrap">選択肢の数
+            <input type="number" id="live-poll-choice-count" min="2" max="26" value="3" inputmode="numeric" aria-label="選択肢の数">
+          </label>
+          <label id="live-poll-custom-choices-wrap" style="display:none;">独自の選択肢（,区切り）
+            <input type="text" id="live-poll-custom-choices" placeholder="例: 東京,大阪,名古屋,福岡" aria-label="独自の選択肢">
+          </label>
+        </div>
+        <p class="live-poll-choice-preview" id="live-poll-choice-preview"></p>
+        <div class="live-poll-timer-block" id="live-poll-host-timer-block">
+          <span class="live-poll-timer-label">集約タイマー</span>
+          <div class="live-poll-timer-fields">
+            <label class="live-poll-timer-unit">
+              <span>分</span>
+              <input type="number" class="live-poll-timer-input" id="live-poll-timer-min" min="0" max="30" value="0" inputmode="numeric" aria-label="分">
+            </label>
+            <label class="live-poll-timer-unit">
+              <span>秒</span>
+              <select class="live-poll-timer-input" id="live-poll-timer-sec" aria-label="秒">
+                <option value="0" selected>0</option>
+                <option value="5">5</option>
+                <option value="10">10</option>
+                <option value="15">15</option>
+                <option value="20">20</option>
+                <option value="25">25</option>
+                <option value="30">30</option>
+                <option value="35">35</option>
+                <option value="40">40</option>
+                <option value="45">45</option>
+                <option value="50">50</option>
+                <option value="55">55</option>
+              </select>
+            </label>
+          </div>
+          <p class="live-poll-timer-hint">0分0秒は手動打ち切り</p>
         </div>
         <div class="live-poll-actions" style="margin-top:12px;">
           <button type="button" class="btn-primary" id="live-poll-start-improv-btn">この1問を出す</button>
@@ -3028,6 +3190,8 @@ body.live-room-board-active #login-screen { display: none !important; }
 <script src="vocab-card-module.js"></script>
 <script src="vocab-link-module.js"></script>
 <script src="live-firebase.js"></script>
+<script src="live-poll-preset-store.js"></script>
+<script src="live-poll-choice-sets.js"></script>
 <script src="live-room-module.js"></script>
 <script src="live-poll-module.js"></script>
 <script>

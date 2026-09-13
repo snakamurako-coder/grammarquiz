@@ -1,26 +1,21 @@
 /**
- * 授業ライブ — リアルタイム投票（即興 v1）
- * ホスト操作は管理者のみ。生徒は PIN 参加後に投票画面へ。
+ * 授業ライブ — リアルタイム投票（即興 + プリセット + 準備画面）
  */
 const LivePollModule = (function () {
-  const CHOICE_SETS = {
-    ABC: { label: 'A B C', choices: ['A', 'B', 'C'] },
-    AIUE: { label: 'あ い う え', choices: ['あ', 'い', 'う', 'え'] },
-    CIRCLED10: { label: '①〜⑩', choices: ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'] },
-    TF: { label: 'True False', choices: ['True', 'False'] },
-    KATAKANA5: { label: 'ア イ ウ エ オ', choices: ['ア', 'イ', 'ウ', 'エ', 'オ'] },
-    WRITTEN: { label: '記述', choices: [] }
-  };
   const PIE_COLORS = ['#1976d2', '#fb8c00', '#43a047', '#e53935', '#8e24aa', '#00838f', '#f9a825', '#5d4037', '#546e7a', '#c2185b'];
+  const SEC_OPTIONS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
 
   let hostOpen_ = false;
   let studentOpen_ = false;
+  let setupOpen_ = false;
   let lastHostSnap_ = null;
   let localAnswers_ = {};
   let localRound_ = 0;
   let collectTimerId_ = null;
   let hostEndedForRound_ = 0;
   let studentSig_ = '';
+  let selectedPresetId_ = '';
+  let editingPreset_ = null;
 
   function el_(id) {
     return document.getElementById(id);
@@ -60,7 +55,8 @@ const LivePollModule = (function () {
       collecting: '集約中',
       waiting: '打ち切り（回答ロック）',
       results: '集計表示',
-      reveal: '正答提示'
+      reveal: '正答提示',
+      sectionWait: 'セクション間待機'
     };
     return map[phase] || phase || '—';
   }
@@ -91,17 +87,116 @@ const LivePollModule = (function () {
     return String(r) + '秒';
   }
 
-  function collectDurationFromUi_() {
-    const minEl = el_('live-poll-timer-min');
-    const secEl = el_('live-poll-timer-sec');
+  function durationToMinSec_(totalSec) {
+    const s = Math.max(0, parseInt(totalSec, 10) || 0);
+    return { min: Math.floor(s / 60), sec: s % 60 };
+  }
+
+  function timerSecSelectHtml_(selectedSec, id) {
+    let html = '<select class="live-poll-timer-input" id="' + escapeHtml_(id) + '" aria-label="秒">';
+    SEC_OPTIONS.forEach(function (v) {
+      html += '<option value="' + v + '"' + (v === selectedSec ? ' selected' : '') + '>' + v + '</option>';
+    });
+    html += '</select>';
+    return html;
+  }
+
+  function timerBlockHtml_(opts) {
+    opts = opts || {};
+    const minId = opts.minId || 'live-poll-timer-min';
+    const secId = opts.secId || 'live-poll-timer-sec';
+    const ds = durationToMinSec_(opts.durationSec || 0);
+    const snapSec = SEC_OPTIONS.indexOf(ds.sec) >= 0 ? ds.sec : 0;
+    return '<div class="live-poll-timer-block">'
+      + '<span class="live-poll-timer-label">' + escapeHtml_(opts.label || '集約タイマー') + '</span>'
+      + '<div class="live-poll-timer-fields">'
+      + '<label class="live-poll-timer-unit"><span>分</span>'
+      + '<input type="number" class="live-poll-timer-input" id="' + escapeHtml_(minId) + '" min="0" max="30" value="'
+      + ds.min + '" inputmode="numeric" aria-label="分"></label>'
+      + '<label class="live-poll-timer-unit"><span>秒</span>'
+      + timerSecSelectHtml_(snapSec, secId) + '</label>'
+      + '</div>'
+      + '<p class="live-poll-timer-hint">0分0秒は手動打ち切り</p></div>';
+  }
+
+  function readTimerDuration_(minId, secId) {
+    const minEl = el_(minId);
+    const secEl = el_(secId);
     const mins = Math.max(0, parseInt(minEl && minEl.value, 10) || 0);
     const secs = Math.max(0, parseInt(secEl && secEl.value, 10) || 0);
     return mins * 60 + secs;
   }
 
-  function selectedChoiceSet_() {
-    const checked = document.querySelector('input[name="live-poll-choice-set"]:checked');
-    return (checked && checked.value) || 'ABC';
+  function collectDurationFromUi_() {
+    return readTimerDuration_('live-poll-timer-min', 'live-poll-timer-sec');
+  }
+
+  function choiceSets_() {
+    return window.LivePollChoiceSets;
+  }
+
+  function readImprovChoiceConfig_() {
+    const CS = choiceSets_();
+    const kindEl = el_('live-poll-choice-kind');
+    const countEl = el_('live-poll-choice-count');
+    const customEl = el_('live-poll-custom-choices');
+    const kind = (kindEl && kindEl.value) || 'ABC';
+    return {
+      choiceSet: kind,
+      choiceCount: parseInt(countEl && countEl.value, 10) || (CS ? CS.defaultCount(kind) : 3),
+      customChoices: (customEl && customEl.value) || ''
+    };
+  }
+
+  function syncImprovChoiceUi_() {
+    const CS = choiceSets_();
+    if (!CS) return;
+    const kindEl = el_('live-poll-choice-kind');
+    const countWrap = el_('live-poll-choice-count-wrap');
+    const countEl = el_('live-poll-choice-count');
+    const customWrap = el_('live-poll-custom-choices-wrap');
+    const previewEl = el_('live-poll-choice-preview');
+    const kind = (kindEl && kindEl.value) || 'ABC';
+    const showCount = CS.needsCount(kind);
+    const showCustom = CS.needsCustom(kind);
+    if (countWrap) countWrap.style.display = showCount ? '' : 'none';
+    if (customWrap) customWrap.style.display = showCustom ? '' : 'none';
+    if (countEl && showCount) {
+      countEl.max = String(CS.maxCount(kind));
+      if (parseInt(countEl.value, 10) > CS.maxCount(kind)) countEl.value = String(CS.maxCount(kind));
+      if (parseInt(countEl.value, 10) < 2) countEl.value = String(CS.defaultCount(kind));
+    }
+    if (previewEl) previewEl.textContent = CS.previewText(readImprovChoiceConfig_());
+  }
+
+  function initImprovChoiceUi_() {
+    const CS = choiceSets_();
+    const kindEl = el_('live-poll-choice-kind');
+    if (!CS || !kindEl) return;
+    if (!kindEl.options.length) {
+      kindEl.innerHTML = CS.kindOptionsHtml('ABC');
+    }
+    kindEl.addEventListener('change', syncImprovChoiceUi_);
+    const countEl = el_('live-poll-choice-count');
+    const customEl = el_('live-poll-custom-choices');
+    if (countEl) countEl.addEventListener('input', syncImprovChoiceUi_);
+    if (customEl) customEl.addEventListener('input', syncImprovChoiceUi_);
+    syncImprovChoiceUi_();
+  }
+
+  function validateImprovChoice_() {
+    const CS = choiceSets_();
+    if (!CS) return { ok: true, config: readImprovChoiceConfig_() };
+    return CS.validate(readImprovChoiceConfig_());
+  }
+
+  function getContinueChecked_() {
+    const hostCb = el_('live-poll-continue-modes');
+    const setupCb = el_('live-poll-setup-continue-modes');
+    if (setupOpen_ && setupCb) return !!setupCb.checked;
+    if (hostOpen_ && hostCb) return !!hostCb.checked;
+    if (setupCb) return !!setupCb.checked;
+    return true;
   }
 
   function pieHtml_(choiceCounts, choices, ownAnswer, totalOverride) {
@@ -242,7 +337,23 @@ const LivePollModule = (function () {
     if (!room || !room.isTeacher) throw new Error('ホストのみ操作できます');
     const payload = Object.assign({ action: 'livePollControl', pin: room.pin, cmd: cmd }, extra || {});
     const res = await LiveRoomModule.apiPost(payload);
-    return (res && res.data) || {};
+    const data = (res && res.data) || {};
+    if (data.pollPublic && room) {
+      room.pollPublic = data.pollPublic;
+      if (data.activity) room.activity = data.activity;
+      LiveRoomModule.touchActiveRoom(room);
+    }
+    return data;
+  }
+
+  function setSetupOpen_(open) {
+    setupOpen_ = !!open;
+    const screen = el_('live-poll-setup-screen');
+    if (screen) {
+      screen.style.display = open ? 'flex' : 'none';
+      screen.setAttribute('aria-hidden', open ? 'false' : 'true');
+    }
+    document.body.classList.toggle('live-poll-setup-active', !!open);
   }
 
   function setHostOpen_(open) {
@@ -270,6 +381,240 @@ const LivePollModule = (function () {
     }
   }
 
+  function paintSetupRoomInfo_() {
+    const info = el_('live-poll-setup-room-info');
+    const room = window.LiveRoomModule && LiveRoomModule.getActiveRoom();
+    if (!info) return;
+    if (room && room.isTeacher) {
+      info.textContent = '開催中 PIN ' + room.pin + ' — ' + (room.title || 'リアルタイム投票');
+    } else {
+      info.textContent = '実施開始時に PIN 部屋を開きます（継続チェック時は既存 PIN を利用）';
+    }
+  }
+
+  async function renderPresetList_() {
+    const listEl = el_('live-poll-preset-list');
+    const runBtn = el_('live-poll-run-preset-btn');
+    if (!listEl || !window.LivePollPresetStore) return;
+    const rows = await LivePollPresetStore.listPresets();
+    if (!rows.length) {
+      listEl.innerHTML = '<li><span class="filter-axis-hint">プリセットがありません。「新規プリセット」で作成してください。</span></li>';
+      if (runBtn) runBtn.disabled = true;
+      selectedPresetId_ = '';
+      return;
+    }
+    listEl.innerHTML = rows.map(function (p) {
+      const secN = (p.sections || []).length;
+      const qN = (p.sections || []).reduce(function (n, s) {
+        return n + ((s.questions || []).length);
+      }, 0);
+      const checked = p.id === selectedPresetId_ ? ' checked' : '';
+      return '<li><label><input type="radio" name="live-poll-preset-pick" value="' + escapeHtml_(p.id) + '"' + checked + '>'
+        + escapeHtml_(p.name) + '</label>'
+        + '<span class="filter-axis-hint">' + secN + ' セクション / ' + qN + ' 問</span>'
+        + '<button type="button" class="btn-secondary live-poll-preset-edit-btn" data-preset-id="' + escapeHtml_(p.id) + '">編集</button></li>';
+    }).join('');
+    if (!selectedPresetId_ && rows[0]) selectedPresetId_ = rows[0].id;
+    const picked = listEl.querySelector('input[name="live-poll-preset-pick"]:checked');
+    if (picked) selectedPresetId_ = picked.value;
+    if (runBtn) runBtn.disabled = !selectedPresetId_;
+    listEl.querySelectorAll('input[name="live-poll-preset-pick"]').forEach(function (radio) {
+      radio.addEventListener('change', function () {
+        selectedPresetId_ = radio.value;
+        if (runBtn) runBtn.disabled = !selectedPresetId_;
+      });
+    });
+    listEl.querySelectorAll('.live-poll-preset-edit-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        openPresetEditor_(btn.getAttribute('data-preset-id'));
+      });
+    });
+  }
+
+  function showEditorView_(on) {
+    const listView = el_('live-poll-setup-list-view');
+    const editorView = el_('live-poll-setup-editor-view');
+    if (listView) listView.style.display = on ? 'none' : '';
+    if (editorView) editorView.style.display = on ? '' : 'none';
+  }
+
+  function choiceSetOptionsHtml_(selected) {
+    const CS = choiceSets_();
+    if (CS) return CS.kindOptionsHtml(selected);
+    return '<option value="ABC">ABC</option>';
+  }
+
+  function syncEditorRowChoiceUi_(row) {
+    const CS = choiceSets_();
+    if (!CS || !row) return;
+    const kindEl = row.querySelector('[data-field="choiceSet"]');
+    const countEl = row.querySelector('[data-field="choiceCount"]');
+    const customEl = row.querySelector('[data-field="customChoices"]');
+    const answerEl = row.querySelector('[data-field="answer"]');
+    const kind = (kindEl && kindEl.value) || 'ABC';
+    const showCount = CS.needsCount(kind);
+    const showCustom = CS.needsCustom(kind);
+    const isWritten = CS.isWritten(kind);
+    if (countEl) {
+      countEl.style.display = showCount ? '' : 'none';
+      if (showCount) {
+        countEl.max = String(CS.maxCount(kind));
+        if (parseInt(countEl.value, 10) < 2) countEl.value = String(CS.defaultCount(kind));
+      }
+    }
+    if (customEl) customEl.style.display = showCustom ? '' : 'none';
+    if (answerEl) answerEl.placeholder = isWritten ? '模範解答' : '正答';
+  }
+
+  function bindEditorRowChoiceUi_(wrap) {
+    if (!wrap) return;
+    wrap.querySelectorAll('.live-poll-q-editor-row').forEach(function (row) {
+      syncEditorRowChoiceUi_(row);
+      row.querySelectorAll('[data-field="choiceSet"], [data-field="choiceCount"], [data-field="customChoices"]').forEach(function (input) {
+        input.addEventListener('change', function () { syncEditorRowChoiceUi_(row); });
+        input.addEventListener('input', function () { syncEditorRowChoiceUi_(row); });
+      });
+    });
+  }
+
+  function renderPresetEditor_() {
+    const wrap = el_('live-poll-editor-sections');
+    const nameEl = el_('live-poll-editor-name');
+    if (!wrap || !editingPreset_) return;
+    if (nameEl) nameEl.value = editingPreset_.name || '';
+    wrap.innerHTML = (editingPreset_.sections || []).map(function (sec, si) {
+      const tMinId = 'live-poll-sec-min-' + si;
+      const tSecId = 'live-poll-sec-sec-' + si;
+      let qRows = (sec.questions || []).map(function (q, qi) {
+        const CS = choiceSets_();
+        const kind = CS ? CS.normalizeKind(q.choiceSet || 'ABC') : (q.choiceSet || 'ABC');
+        const count = q.choiceCount || (CS ? CS.defaultCount(kind) : 3);
+        return '<div class="live-poll-q-editor-row" data-sec="' + si + '" data-q="' + qi + '">'
+          + '<input type="text" class="live-poll-written-input" data-field="label" value="' + escapeHtml_(q.label || '') + '" placeholder="Q1.">'
+          + '<select data-field="choiceSet">' + choiceSetOptionsHtml_(kind) + '</select>'
+          + '<input type="number" class="live-poll-written-input" data-field="choiceCount" min="2" max="26" value="'
+          + escapeHtml_(count) + '" aria-label="選択肢の数">'
+          + '<input type="text" class="live-poll-written-input" data-field="customChoices" value="'
+          + escapeHtml_(q.customChoices || '') + '" placeholder="独自（,区切り）" aria-label="独自の選択肢">'
+          + '<input type="text" class="live-poll-written-input" data-field="answer" value="' + escapeHtml_(q.answer || '') + '" placeholder="正答">'
+          + '<button type="button" class="btn-secondary" data-action="remove-q">削除</button></div>';
+      }).join('');
+      return '<div class="live-poll-editor-section" data-sec-index="' + si + '">'
+        + '<div class="form-group"><label>セクション名</label>'
+        + '<input type="text" class="live-poll-written-input" data-field="sec-name" value="' + escapeHtml_(sec.name || '') + '"></div>'
+        + timerBlockHtml_({
+          label: '集約タイマー（このセクション）',
+          minId: tMinId,
+          secId: tSecId,
+          durationSec: sec.collectDurationSec || 0
+        })
+        + '<div class="subsection-title">設問</div>' + qRows
+        + '<button type="button" class="btn-secondary" data-action="add-q">設問を追加</button>'
+        + '<button type="button" class="btn-secondary" data-action="remove-sec">セクション削除</button></div>';
+    }).join('');
+    wrap.querySelectorAll('[data-action="add-q"]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const secEl = btn.closest('.live-poll-editor-section');
+        const si = parseInt(secEl.getAttribute('data-sec-index'), 10);
+        editingPreset_.sections[si].questions.push({
+          label: 'Q' + (editingPreset_.sections[si].questions.length + 1) + '.',
+          choiceSet: 'ABC',
+          choiceCount: 3,
+          customChoices: '',
+          answer: ''
+        });
+        renderPresetEditor_();
+      });
+    });
+    bindEditorRowChoiceUi_(wrap);
+    wrap.querySelectorAll('[data-action="remove-q"]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const row = btn.closest('.live-poll-q-editor-row');
+        const si = parseInt(row.getAttribute('data-sec'), 10);
+        const qi = parseInt(row.getAttribute('data-q'), 10);
+        editingPreset_.sections[si].questions.splice(qi, 1);
+        renderPresetEditor_();
+      });
+    });
+    wrap.querySelectorAll('[data-action="remove-sec"]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const secEl = btn.closest('.live-poll-editor-section');
+        const si = parseInt(secEl.getAttribute('data-sec-index'), 10);
+        if ((editingPreset_.sections || []).length <= 1) {
+          alert('最低1セクション必要です');
+          return;
+        }
+        editingPreset_.sections.splice(si, 1);
+        renderPresetEditor_();
+      });
+    });
+    bindEditorRowChoiceUi_(wrap);
+  }
+
+  function readPresetFromEditor_() {
+    const nameEl = el_('live-poll-editor-name');
+    const wrap = el_('live-poll-editor-sections');
+    const preset = Object.assign({}, editingPreset_, {
+      name: (nameEl && nameEl.value) || editingPreset_.name || '',
+      sections: []
+    });
+    wrap.querySelectorAll('.live-poll-editor-section').forEach(function (secEl, si) {
+      const nameInput = secEl.querySelector('[data-field="sec-name"]');
+      const minId = 'live-poll-sec-min-' + si;
+      const secId = 'live-poll-sec-sec-' + si;
+      const questions = [];
+      secEl.querySelectorAll('.live-poll-q-editor-row').forEach(function (row, qi) {
+        questions.push({
+          label: (row.querySelector('[data-field="label"]') || {}).value || ('Q' + (qi + 1) + '.'),
+          choiceSet: (row.querySelector('[data-field="choiceSet"]') || {}).value || 'ABC',
+          choiceCount: parseInt((row.querySelector('[data-field="choiceCount"]') || {}).value, 10) || 3,
+          customChoices: (row.querySelector('[data-field="customChoices"]') || {}).value || '',
+          answer: (row.querySelector('[data-field="answer"]') || {}).value || ''
+        });
+      });
+      preset.sections.push({
+        name: (nameInput && nameInput.value) || ('セクション' + (si + 1)),
+        collectDurationSec: readTimerDuration_(minId, secId),
+        questions: questions
+      });
+    });
+    return window.LivePollPresetStore.normalizePreset(preset);
+  }
+
+  async function openPresetEditor_(id) {
+    if (!window.LivePollPresetStore) throw new Error('プリセットストアがありません');
+    if (id) {
+      editingPreset_ = await LivePollPresetStore.getPreset(id);
+      if (!editingPreset_) throw new Error('プリセットが見つかりません');
+    } else {
+      editingPreset_ = LivePollPresetStore.emptyPreset();
+    }
+    showEditorView_(true);
+    renderPresetEditor_();
+  }
+
+  async function ensurePollRoom_() {
+    if (!window.LiveRoomModule) throw new Error('授業ライブモジュールが未初期化です');
+    const room = LiveRoomModule.getActiveRoom();
+    if (room && room.isTeacher) {
+      if (room.continueAcrossModes && room.activity !== 'poll') {
+        return LiveRoomModule.switchActivity('poll', { continueAcrossModes: getContinueChecked_() });
+      }
+      if (isPollRoom_(room)) return room;
+    }
+    if (room && room.isTeacher && !room.continueAcrossModes) {
+      throw new Error('先に開催中の授業ライブを閉じてください');
+    }
+    const targetClass = window.prompt('名簿に出すクラス（空欄可）', '') || '';
+    const title = window.prompt('表示名（空欄＝リアルタイム投票）', '') || '';
+    return LiveRoomModule.createPollRoom({
+      targetClass: String(targetClass).trim(),
+      title: String(title).trim(),
+      continueAcrossModes: getContinueChecked_(),
+      skipOpenHost: true
+    });
+  }
+
   function paintTimer_(endsAt) {
     const hostEl = el_('live-poll-host-timer');
     const stuEl = el_('live-poll-student-timer');
@@ -280,11 +625,11 @@ const LivePollModule = (function () {
       text = left > 0 ? ('残り ' + formatLimit_(left)) : '終了';
       urgent = left > 0 && left <= 10;
     }
-    [hostEl, stuEl].forEach(function (el) {
-      if (!el) return;
-      el.textContent = text;
-      el.classList.toggle('is-urgent', urgent);
-      el.hidden = !text;
+    [hostEl, stuEl].forEach(function (node) {
+      if (!node) return;
+      node.textContent = text;
+      node.classList.toggle('is-urgent', urgent);
+      node.hidden = !text;
     });
   }
 
@@ -322,10 +667,37 @@ const LivePollModule = (function () {
     collectTimerId_ = setInterval(tick, 250);
   }
 
+  function setBtnEnabled_(id, on) {
+    const btn = el_(id);
+    if (!btn) return;
+    btn.disabled = !on;
+  }
+
+  function updateHostPanels_(pub) {
+    const isPreset = pub.runMode === 'preset';
+    const presetPanel = el_('live-poll-host-preset-panel');
+    const improvPanel = el_('live-poll-host-improv-panel');
+    if (presetPanel) presetPanel.classList.toggle('is-open', isPreset);
+    if (improvPanel) improvPanel.classList.toggle('is-hidden', isPreset);
+    const nameEl = el_('live-poll-preset-run-name');
+    const secEl = el_('live-poll-preset-run-section');
+    if (nameEl) nameEl.textContent = isPreset ? ('プリセット: ' + (pub.presetName || '—')) : '';
+    if (secEl) {
+      secEl.textContent = isPreset
+        ? ('セクション ' + ((parseInt(pub.sectionIndex, 10) || 0) + 1) + ' / ' + (pub.sectionCount || '?')
+          + (pub.sectionName ? (' — ' + pub.sectionName) : ''))
+        : '';
+    }
+    const contWrap = el_('live-poll-host-continue-wrap');
+    const room = window.LiveRoomModule && LiveRoomModule.getActiveRoom();
+    if (contWrap) contWrap.style.display = (room && room.continueAcrossModes) ? '' : 'none';
+  }
+
   function renderHost_(snap) {
     lastHostSnap_ = snap;
     const room = window.LiveRoomModule && LiveRoomModule.getActiveRoom();
     const pub = pub_(snap);
+    updateHostPanels_(pub);
     const pinEl = el_('live-poll-host-pin');
     const titleEl = el_('live-poll-host-title');
     const phaseEl = el_('live-poll-host-phase');
@@ -347,9 +719,24 @@ const LivePollModule = (function () {
     }
 
     const q = currentQuestion_(pub);
+    const visibleQs = visibleQuestions_(pub);
     if (qEl) {
-      if (!q) qEl.innerHTML = '<p class="filter-axis-hint">記号セットを選んで「この1問を出す」を押してください。問題文はスライド側に出します。</p>';
-      else {
+      if (!visibleQs.length) {
+        qEl.innerHTML = pub.runMode === 'preset'
+          ? '<p class="filter-axis-hint">「このセクションを出す」で設問をまとめて提示します。問題文はスライド側に出してください。</p>'
+          : '<p class="filter-axis-hint">記号セットを選んで「この1問を出す」を押してください。問題文はスライド側に出します。</p>';
+      } else if (pub.runMode === 'preset' && (pub.phase === 'collecting' || pub.phase === 'waiting')) {
+        qEl.innerHTML = visibleQs.map(function (item) {
+          return '<div class="live-poll-q-label">' + escapeHtml_(item.label) + '</div>'
+            + (item.type === 'written'
+              ? '<p class="filter-axis-hint">記述</p>'
+              : '<div class="live-poll-choice-row">' + (item.choices || []).map(function (c) {
+                return '<span class="live-poll-chip">' + escapeHtml_(c) + '</span>';
+              }).join('') + '</div>');
+        }).join('');
+      } else if (!q) {
+        qEl.innerHTML = '';
+      } else {
         qEl.innerHTML = '<div class="live-poll-q-label">' + escapeHtml_(q.label) + '</div>'
           + (q.type === 'written'
             ? '<p class="filter-axis-hint">記述欄</p>'
@@ -363,8 +750,10 @@ const LivePollModule = (function () {
       ? tallyFromEntries_(pub, snap.entries)
       : (pub.frozenTally || {});
     if (tallyEl) {
-      if (!q || pub.phase === 'idle' || pub.phase === 'prompt') {
+      if (!q || pub.phase === 'idle' || pub.phase === 'prompt' || pub.phase === 'sectionWait') {
         tallyEl.innerHTML = '';
+      } else if (pub.runMode === 'preset' && pub.phase === 'waiting') {
+        tallyEl.innerHTML = '<p class="filter-axis-hint">打ち切り済み。問ごとに「集計を表示」へ進んでください。</p>';
       } else {
         const t = tallySource[q.id] || { total: 0, choiceCounts: {}, writtenGroups: [] };
         if (q.type === 'written') tallyEl.innerHTML = writtenListHtml_(t.writtenGroups, null, pub.revealed && pub.revealed[q.id]);
@@ -375,9 +764,20 @@ const LivePollModule = (function () {
     if (revealEl) {
       const typingModel = document.activeElement && document.activeElement.id === 'live-poll-model-input';
       if (typingModel) {
-        /* keep the input focused */
+        /* keep focus */
       } else if (!q || (pub.phase !== 'results' && pub.phase !== 'reveal')) {
         revealEl.innerHTML = '';
+      } else if (q.type === 'written' && pub.runMode === 'preset') {
+        revealEl.innerHTML = '<p class="filter-axis-hint">模範解答はプリセットに保存されています（ホストには非表示）</p>'
+          + '<button type="button" class="btn-primary" id="live-poll-reveal-written-btn">模範解答を出す</button>';
+        const btn = el_('live-poll-reveal-written-btn');
+        if (btn) {
+          btn.onclick = function () {
+            BusyButton.run(btn, function () {
+              return control_('reveal', { questionId: q.id });
+            }, '提示中…').catch(function (e) { alert(e.message || e); });
+          };
+        }
       } else if (q.type === 'written') {
         const current = (pub.revealed && pub.revealed[q.id]) || '';
         revealEl.innerHTML = '<label class="live-poll-model-label">模範解答</label>'
@@ -413,12 +813,22 @@ const LivePollModule = (function () {
 
     const collecting = pub.phase === 'collecting';
     const hasQ = !!(pub.questions && pub.questions.length);
-    setBtnEnabled_('live-poll-start-improv-btn', pub.phase !== 'collecting');
-    setBtnEnabled_('live-poll-start-collect-btn', hasQ && pub.phase !== 'collecting');
-    setBtnEnabled_('live-poll-end-collect-btn', collecting);
-    setBtnEnabled_('live-poll-show-results-btn', hasQ && pub.phase !== 'idle' && pub.phase !== 'prompt');
-    setBtnEnabled_('live-poll-undo-reveal-btn', pub.phase === 'reveal');
-    setBtnEnabled_('live-poll-reset-btn', pub.phase !== 'collecting');
+    const isPreset = pub.runMode === 'preset';
+
+    setBtnEnabled_('live-poll-start-improv-btn', !isPreset && pub.phase !== 'collecting');
+    setBtnEnabled_('live-poll-start-collect-btn', !isPreset && hasQ && pub.phase !== 'collecting');
+    setBtnEnabled_('live-poll-end-collect-btn', !isPreset && collecting);
+    setBtnEnabled_('live-poll-show-results-btn', !isPreset && hasQ && pub.phase !== 'idle' && pub.phase !== 'prompt');
+    setBtnEnabled_('live-poll-undo-reveal-btn', !isPreset && pub.phase === 'reveal');
+    setBtnEnabled_('live-poll-reset-btn', !isPreset && pub.phase !== 'collecting');
+
+    setBtnEnabled_('live-poll-start-section-btn', isPreset && (pub.phase === 'idle' || pub.phase === 'sectionWait'));
+    setBtnEnabled_('live-poll-preset-end-collect-btn', isPreset && collecting);
+    setBtnEnabled_('live-poll-preset-show-results-btn', isPreset && hasQ && (pub.phase === 'waiting' || pub.phase === 'results' || pub.phase === 'reveal'));
+    setBtnEnabled_('live-poll-preset-next-review-btn', isPreset && pub.phase === 'reveal');
+    setBtnEnabled_('live-poll-preset-next-section-btn', isPreset && pub.phase === 'sectionWait'
+      && (parseInt(pub.sectionIndex, 10) || 0) + 1 < (parseInt(pub.sectionCount, 10) || 0));
+    setBtnEnabled_('live-poll-preset-undo-reveal-btn', isPreset && pub.phase === 'reveal');
 
     if (collecting && pub.collectEndsAt) startCollectTimer_(pub.collectEndsAt, true);
     else if (collecting) paintTimer_(0);
@@ -426,12 +836,6 @@ const LivePollModule = (function () {
       stopCollectTimer_();
       paintTimer_(0);
     }
-  }
-
-  function setBtnEnabled_(id, on) {
-    const btn = el_(id);
-    if (!btn) return;
-    btn.disabled = !on;
   }
 
   function studentOwnAnswer_(q) {
@@ -458,7 +862,7 @@ const LivePollModule = (function () {
     const qs = visibleQuestions_(pub);
     const reviewQ = currentQuestion_(pub);
     const collecting = pub.phase === 'collecting';
-    const locked = pub.phase === 'waiting' || pub.phase === 'results' || pub.phase === 'reveal';
+    const locked = pub.phase === 'waiting' || pub.phase === 'results' || pub.phase === 'reveal' || pub.phase === 'sectionWait';
     const showResults = pub.phase === 'results' || pub.phase === 'reveal';
 
     if (pub.phase === 'collecting' && pub.collectEndsAt) startCollectTimer_(pub.collectEndsAt, false);
@@ -476,6 +880,11 @@ const LivePollModule = (function () {
     studentSig_ = sig;
     if (!body) return;
 
+    if (pub.phase === 'sectionWait') {
+      body.innerHTML = '<p class="live-poll-wait-msg">このセクションの答え合わせが終わりました。次のセクションを待っています。</p>';
+      return;
+    }
+
     if (!qs.length || pub.phase === 'idle') {
       body.innerHTML = '<p class="live-poll-wait-msg">まもなく出題されます。問題はスライドを見てください。</p>';
       return;
@@ -483,19 +892,19 @@ const LivePollModule = (function () {
 
     if (pub.phase === 'prompt') {
       body.innerHTML = '<p class="live-poll-wait-msg">設問が出ています。集約開始を待ってください。</p>'
-        + qs.map(function (q) { return questionBlockHtml_(q, false, false); }).join('');
+        + qs.map(function (item) { return questionBlockHtml_(item, false, false); }).join('');
       return;
     }
 
     if (collecting) {
-      body.innerHTML = qs.map(function (q) { return questionBlockHtml_(q, true, false); }).join('');
+      body.innerHTML = qs.map(function (item) { return questionBlockHtml_(item, true, false); }).join('');
       bindStudentInputs_(qs);
       return;
     }
 
     if (locked && !showResults) {
       body.innerHTML = '<p class="live-poll-wait-msg">回答を受け付けました。変更できません。</p>'
-        + qs.map(function (q) { return questionBlockHtml_(q, false, true); }).join('');
+        + qs.map(function (item) { return questionBlockHtml_(item, false, true); }).join('');
       return;
     }
 
@@ -511,7 +920,7 @@ const LivePollModule = (function () {
       return;
     }
 
-    body.innerHTML = qs.map(function (q) { return questionBlockHtml_(q, false, true); }).join('');
+    body.innerHTML = qs.map(function (item) { return questionBlockHtml_(item, false, true); }).join('');
   }
 
   function questionBlockHtml_(q, enabled, showOwn) {
@@ -625,6 +1034,23 @@ const LivePollModule = (function () {
     }
   }
 
+  async function openSetup() {
+    if (!window.LiveRoomModule || !LiveRoomModule.isAdminUser_()) {
+      throw new Error('管理者のみ投票を開催できます');
+    }
+    setHostOpen_(false);
+    setStudentOpen_(false);
+    setSetupOpen_(true);
+    paintSetupRoomInfo_();
+    await renderPresetList_();
+  }
+
+  function closeSetup() {
+    setSetupOpen_(false);
+    showEditorView_(false);
+    editingPreset_ = null;
+  }
+
   async function openHost() {
     if (!window.LiveRoomModule || !LiveRoomModule.isAdminUser_()) {
       throw new Error('管理者のみ投票を開催できます');
@@ -633,8 +1059,10 @@ const LivePollModule = (function () {
     if (!isPollRoom_(room) || !room.isTeacher) {
       throw new Error('投票ライブの部屋がありません');
     }
+    closeSetup();
     setStudentOpen_(false);
     setHostOpen_(true);
+    initImprovChoiceUi_();
     renderHost_({
       pin: room.pin,
       title: room.title,
@@ -646,12 +1074,27 @@ const LivePollModule = (function () {
     await subscribeHost_();
   }
 
+  async function runImprov_() {
+    await ensurePollRoom_();
+    await openHost();
+  }
+
+  async function runPreset_() {
+    if (!selectedPresetId_ || !window.LivePollPresetStore) throw new Error('プリセットを選んでください');
+    const preset = await LivePollPresetStore.getPreset(selectedPresetId_);
+    if (!preset) throw new Error('プリセットが見つかりません');
+    await ensurePollRoom_();
+    await control_('loadPreset', { preset: preset });
+    await openHost();
+  }
+
   async function openStudent() {
     const room = window.LiveRoomModule && LiveRoomModule.getActiveRoom();
     if (!isPollRoom_(room) || room.isTeacher) {
       throw new Error('投票ライブに参加してから開いてください');
     }
     setHostOpen_(false);
+    closeSetup();
     setStudentOpen_(true);
     localRound_ = (room.pollPublic && room.pollPublic.ballotRound) || 0;
     renderStudent_({
@@ -665,65 +1108,42 @@ const LivePollModule = (function () {
   function closeScreens() {
     setHostOpen_(false);
     setStudentOpen_(false);
+    closeSetup();
     unsubscribe_();
     lastHostSnap_ = null;
   }
 
   function bindHostButtons_() {
-    const improv = el_('live-poll-start-improv-btn');
-    if (improv) {
-      improv.addEventListener('click', function () {
-        BusyButton.run(improv, function () {
-          return control_('startImprov', { choiceSet: selectedChoiceSet_() });
-        }, '出題中…').catch(function (e) { alert(e.message || e); });
+    bindClick_('live-poll-start-improv-btn', function () {
+      const v = validateImprovChoice_();
+      if (!v.ok) throw new Error(v.error || '選択肢が不正です');
+      const cfg = v.config || readImprovChoiceConfig_();
+      return control_('startImprov', {
+        choiceSet: cfg.kind || cfg.choiceSet,
+        choiceCount: cfg.count != null ? cfg.count : cfg.choiceCount,
+        customChoices: cfg.customChoices || ''
       });
-    }
-    const startC = el_('live-poll-start-collect-btn');
-    if (startC) {
-      startC.addEventListener('click', function () {
-        BusyButton.run(startC, function () {
-          return control_('startCollect', { durationSec: collectDurationFromUi_() });
-        }, '開始中…').catch(function (e) { alert(e.message || e); });
-      });
-    }
-    const endC = el_('live-poll-end-collect-btn');
-    if (endC) {
-      endC.addEventListener('click', function () {
-        BusyButton.run(endC, function () {
-          return control_('endCollect');
-        }, '打ち切り中…').catch(function (e) { alert(e.message || e); });
-      });
-    }
-    const showR = el_('live-poll-show-results-btn');
-    if (showR) {
-      showR.addEventListener('click', function () {
-        BusyButton.run(showR, function () {
-          return control_('showResults');
-        }, '表示中…').catch(function (e) { alert(e.message || e); });
-      });
-    }
-    const undo = el_('live-poll-undo-reveal-btn');
-    if (undo) {
-      undo.addEventListener('click', function () {
-        BusyButton.run(undo, function () {
-          return control_('undoReveal');
-        }, '取消中…').catch(function (e) { alert(e.message || e); });
-      });
-    }
-    const reset = el_('live-poll-reset-btn');
-    if (reset) {
-      reset.addEventListener('click', function () {
-        BusyButton.run(reset, function () {
-          return control_('resetQuestion');
-        }, '切替中…').catch(function (e) { alert(e.message || e); });
-      });
-    }
+    }, '出題中…');
+    bindClick_('live-poll-start-collect-btn', function () {
+      return control_('startCollect', { durationSec: collectDurationFromUi_() });
+    }, '開始中…');
+    bindClick_('live-poll-end-collect-btn', function () { return control_('endCollect'); }, '打ち切り中…');
+    bindClick_('live-poll-show-results-btn', function () { return control_('showResults'); }, '表示中…');
+    bindClick_('live-poll-undo-reveal-btn', function () { return control_('undoReveal'); }, '取消中…');
+    bindClick_('live-poll-reset-btn', function () { return control_('resetQuestion'); }, '切替中…');
+    bindClick_('live-poll-start-section-btn', function () { return control_('startSection'); }, '出題中…');
+    bindClick_('live-poll-preset-end-collect-btn', function () { return control_('endCollect'); }, '打ち切り中…');
+    bindClick_('live-poll-preset-show-results-btn', function () { return control_('showResults'); }, '表示中…');
+    bindClick_('live-poll-preset-next-review-btn', function () { return control_('nextReview'); }, '進行中…');
+    bindClick_('live-poll-preset-next-section-btn', function () { return control_('nextSection'); }, '開始中…');
+    bindClick_('live-poll-preset-undo-reveal-btn', function () { return control_('undoReveal'); }, '取消中…');
+
     const back = el_('live-poll-host-back-btn');
     if (back) {
       back.addEventListener('click', function () {
         setHostOpen_(false);
         unsubscribe_();
-        if (window.LiveRoomModule && LiveRoomModule.refreshUi_) LiveRoomModule.refreshUi_();
+        openSetup().catch(function (e) { alert(e.message || e); });
       });
     }
     const closeBtn = el_('live-poll-host-close-btn');
@@ -745,18 +1165,105 @@ const LivePollModule = (function () {
     }
   }
 
+  function bindClick_(id, fn, busyLabel) {
+    const btn = el_(id);
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      BusyButton.run(btn, fn, busyLabel || '処理中…').catch(function (e) { alert(e.message || e); });
+    });
+  }
+
+  function bindSetupButtons_() {
+    bindClick_('live-poll-setup-back-btn', function () {
+      closeSetup();
+      if (window.LiveRoomModule && LiveRoomModule.refreshUi_) LiveRoomModule.refreshUi_();
+    });
+    bindClick_('live-poll-run-improv-btn', runImprov_, '開いています…');
+    bindClick_('live-poll-run-preset-btn', runPreset_, '読み込み中…');
+    bindClick_('live-poll-preset-new-btn', function () { return openPresetEditor_(null); });
+    const importBtn = el_('live-poll-preset-import-btn');
+    const importFile = el_('live-poll-preset-import-file');
+    if (importBtn && importFile) {
+      importBtn.addEventListener('click', function () { importFile.click(); });
+      importFile.addEventListener('change', function () {
+        const file = importFile.files && importFile.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function () {
+          try {
+            editingPreset_ = LivePollPresetStore.importJson(String(reader.result || ''));
+            showEditorView_(true);
+            renderPresetEditor_();
+          } catch (e) {
+            alert(e.message || e);
+          }
+          importFile.value = '';
+        };
+        reader.readAsText(file, 'utf-8');
+      });
+    }
+    bindClick_('live-poll-editor-back-btn', function () {
+      showEditorView_(false);
+      editingPreset_ = null;
+      return renderPresetList_();
+    });
+    bindClick_('live-poll-editor-save-btn', async function () {
+      const preset = readPresetFromEditor_();
+      await LivePollPresetStore.savePreset(preset);
+      selectedPresetId_ = preset.id;
+      showEditorView_(false);
+      editingPreset_ = null;
+      await renderPresetList_();
+    }, '保存中…');
+    bindClick_('live-poll-editor-export-btn', function () {
+      const preset = readPresetFromEditor_();
+      const blob = new Blob([LivePollPresetStore.exportJson(preset)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (preset.name || 'poll-preset') + '.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+    bindClick_('live-poll-editor-delete-btn', async function () {
+      if (!editingPreset_ || !editingPreset_.id) return;
+      if (!window.confirm('このプリセットを削除しますか？')) return;
+      await LivePollPresetStore.deletePreset(editingPreset_.id);
+      showEditorView_(false);
+      editingPreset_ = null;
+      selectedPresetId_ = '';
+      await renderPresetList_();
+    }, '削除中…');
+    const addSec = el_('live-poll-editor-add-section-btn');
+    if (addSec) {
+      addSec.addEventListener('click', function () {
+        if (!editingPreset_) editingPreset_ = LivePollPresetStore.emptyPreset();
+        editingPreset_.sections.push({
+          name: 'セクション' + (editingPreset_.sections.length + 1),
+          collectDurationSec: 120,
+          questions: [{ label: 'Q1.', choiceSet: 'ABC', choiceCount: 3, customChoices: '', answer: '' }]
+        });
+        renderPresetEditor_();
+      });
+    }
+  }
+
   function init() {
+    initImprovChoiceUi_();
     bindHostButtons_();
+    bindSetupButtons_();
   }
 
   return {
     init: init,
+    openSetup: openSetup,
+    closeSetup: closeSetup,
     openHost: openHost,
     openStudent: openStudent,
     closeScreens: closeScreens,
     isPollRoom: isPollRoom_,
     isHostOpen: function () { return hostOpen_; },
-    isStudentOpen: function () { return studentOpen_; }
+    isStudentOpen: function () { return studentOpen_; },
+    isSetupOpen: function () { return setupOpen_; }
   };
 })();
 

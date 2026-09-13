@@ -229,6 +229,37 @@ const LiveFirebase = (function () {
   }
 
   let pollUnsub_ = null;
+  let roomMetaUnsub_ = null;
+
+  function unsubscribeRoomMeta_() {
+    if (roomMetaUnsub_) {
+      roomMetaUnsub_();
+      roomMetaUnsub_ = null;
+    }
+  }
+
+  async function subscribeRoomMeta_(pin, roomMeta, onChange, onError) {
+    unsubscribeRoomMeta_();
+    const db = await ensureDb_();
+    const { doc, onSnapshot } = await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js');
+    const roomRef = doc(db, 'liveRooms', pin);
+    let meta = Object.assign({}, roomMeta || {});
+    roomMetaUnsub_ = onSnapshot(roomRef, function (snap) {
+      if (!snap.exists()) return;
+      meta = Object.assign(meta, snap.data() || {});
+      onChange({
+        pin: pin,
+        activity: meta.activity || meta.mode,
+        mode: meta.mode,
+        pollPublic: meta.pollPublic || null,
+        launchOptions: meta.launchOptions || null,
+        title: meta.title
+      });
+    }, function (err) {
+      if (onError) onError(err);
+    });
+    return roomMetaUnsub_;
+  }
 
   function unsubscribePoll_() {
     if (pollUnsub_) {
@@ -353,6 +384,8 @@ const LiveFirebase = (function () {
     unsubscribeBoard: unsubscribeBoard_,
     subscribePoll: subscribePoll_,
     unsubscribePoll: unsubscribePoll_,
+    subscribeRoomMeta: subscribeRoomMeta_,
+    unsubscribeRoomMeta: unsubscribeRoomMeta_,
     submitPollAnswers: submitPollAnswers_,
     applyBackendUi: applyBackendUi_,
     getSelectedBackend: getSelectedBackend_,
