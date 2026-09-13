@@ -541,7 +541,7 @@ function doPost(e) {
     // 授業ライブは Cache + 認証のみ。毎回の Drive 初期化を挟むと作成・ボードがタイムアウトする
     if (action === 'liveCreate' || action === 'liveJoin' || action === 'liveSubmit'
         || action === 'liveBoard' || action === 'liveClose' || action === 'liveExport'
-        || action === 'liveConfig') {
+        || action === 'liveConfig' || action === 'livePollControl') {
       return sendResponse(handleLiveApi_(action, requestData));
     }
 
