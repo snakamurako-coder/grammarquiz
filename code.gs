@@ -4719,8 +4719,16 @@ function exportStaticPresetData_() {
 const LIVE_META_PREFIX = 'live_meta_';
 const LIVE_ENTRY_PREFIX = 'live_entry_';
 const LIVE_INDEX_PREFIX = 'live_index_';
+const LIVE_POLL_SECRETS_PREFIX = 'live_pollsec_';
 const LIVE_PIN_MIN = 1000;
 const LIVE_PIN_MAX = 9999;
+const LIVE_POLL_CHOICE_SETS = {
+  ABC: ['A', 'B', 'C'],
+  AIUE: ['あ', 'い', 'う', 'え'],
+  CIRCLED10: ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'],
+  TF: ['True', 'False'],
+  KATAKANA5: ['ア', 'イ', 'ウ', 'エ', 'オ']
+};
 
 function liveCache_() {
   return CacheService.getScriptCache();
@@ -4736,6 +4744,10 @@ function liveIndexKey_(pin) {
 
 function liveMetaKey_(pin) {
   return LIVE_META_PREFIX + String(pin);
+}
+
+function livePollSecretsKey_(pin) {
+  return LIVE_POLL_SECRETS_PREFIX + String(pin);
 }
 
 function computeLiveRoomTtlSec_(timeLimitSec) {
@@ -4954,7 +4966,8 @@ function buildLiveBoardEntry_(entry) {
     status: entry.status || 'joined',
     working: !!(entry && entry.working),
     lastActiveAt: parseInt(entry && entry.lastActiveAt, 10) || 0,
-    best: best
+    best: best,
+    poll: entry && entry.poll ? entry.poll : null
   };
 }
 
@@ -5323,10 +5336,18 @@ function firestoreRequest_(method, path, body, query) {
   const token = getFirebaseAccessToken_();
   let url = firestoreBaseUrl_() + path;
   if (query) {
-    const qs = Object.keys(query).map(function (k) {
-      return encodeURIComponent(k) + '=' + encodeURIComponent(query[k]);
-    }).join('&');
-    if (qs) url += (url.indexOf('?') >= 0 ? '&' : '?') + qs;
+    const parts = [];
+    Object.keys(query).forEach(function (k) {
+      const val = query[k];
+      if (Array.isArray(val)) {
+        val.forEach(function (v) {
+          parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(v));
+        });
+      } else if (val != null && val !== '') {
+        parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(val));
+      }
+    });
+    if (parts.length) url += (url.indexOf('?') >= 0 ? '&' : '?') + parts.join('&');
   }
   const options = {
     method: method,
@@ -5351,6 +5372,15 @@ function firestoreRequest_(method, path, body, query) {
 function firebaseCreateLiveRoom_(pin, meta) {
   const docPath = '/liveRooms/' + encodeURIComponent(pin) + '?currentDocument.exists=false';
   firestoreRequest_('PATCH', docPath, { fields: firestoreEncodeFields_(meta) });
+}
+
+function firebasePatchLiveRoom_(pin, fields) {
+  const keys = Object.keys(fields || {});
+  if (!keys.length) return;
+  const docPath = '/liveRooms/' + encodeURIComponent(pin);
+  firestoreRequest_('PATCH', docPath, { fields: firestoreEncodeFields_(fields) }, {
+    'updateMask.fieldPaths': keys
+  });
 }
 
 function firebaseReadLiveEntry_(pin, account) {
@@ -5457,6 +5487,299 @@ function exportLiveResultsBook_(pin, meta, entriesOverride) {
   };
 }
 
+function emptyLivePollPublic_() {
+  return {
+    runMode: 'improv',
+    phase: 'idle',
+    collectEndsAt: 0,
+    collectDurationSec: 0,
+    ballotRound: 0,
+    sectionIndex: 0,
+    sectionName: '',
+    reviewQuestionId: '',
+    visibleQuestionIds: [],
+    questions: [],
+    revealed: {},
+    frozenTally: {},
+    submittedCount: 0,
+    presetName: ''
+  };
+}
+
+function normalizeLivePollText_(s) {
+  s = String(s == null ? '' : s);
+  s = s.replace(/[\uFF01-\uFF5E]/g, function (ch) {
+    return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+  });
+  s = s.replace(/\u3000/g, ' ');
+  s = s.replace(/[ \t\r\n]+/g, ' ').trim();
+  return s;
+}
+
+function getLivePollSecrets_(pin) {
+  const raw = liveCache_().get(livePollSecretsKey_(pin));
+  if (!raw) return { answers: {} };
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return { answers: {} };
+    if (!parsed.answers || typeof parsed.answers !== 'object') parsed.answers = {};
+    return parsed;
+  } catch (e) {
+    return { answers: {} };
+  }
+}
+
+function putLivePollSecrets_(pin, secrets, ttlSec) {
+  liveCache_().put(livePollSecretsKey_(pin), JSON.stringify(secrets || { answers: {} }), ttlSec);
+}
+
+function livePollTtlSec_(meta) {
+  if (meta && meta.mode === 'poll') return 21600;
+  return computeLiveRoomTtlSec_(meta && meta.timeLimitSec);
+}
+
+function persistLivePollMeta_(pin, meta) {
+  const ttlSec = livePollTtlSec_(meta);
+  putLiveMeta_(pin, meta, ttlSec);
+  if (isLiveFirebaseBackend_(meta)) {
+    firebasePatchLiveRoom_(pin, {
+      pollPublic: meta.pollPublic || emptyLivePollPublic_(),
+      activity: meta.activity || meta.mode || 'poll'
+    });
+  }
+  return ttlSec;
+}
+
+function livePollChoiceSet_(key) {
+  return LIVE_POLL_CHOICE_SETS[String(key || '').trim()] || null;
+}
+
+function tallyLivePollAnswers_(questions, entries, round) {
+  const out = {};
+  (questions || []).forEach(function (q) {
+    const choiceCounts = {};
+    if (q && q.type === 'choice' && q.choices) {
+      q.choices.forEach(function (c) {
+        choiceCounts[String(c)] = 0;
+      });
+    }
+    const writtenMap = {};
+    let total = 0;
+    (entries || []).forEach(function (e) {
+      const poll = (e && e.poll) || {};
+      if ((parseInt(poll.round, 10) || 0) !== round) return;
+      const ans = poll.answers && q && poll.answers[q.id];
+      if (ans == null || String(ans).trim() === '') return;
+      if (q.type === 'written') {
+        const key = normalizeLivePollText_(ans);
+        if (!key) return;
+        total += 1;
+        if (!writtenMap[key]) writtenMap[key] = { text: String(ans).trim(), count: 0 };
+        writtenMap[key].count += 1;
+      } else {
+        const k = String(ans);
+        total += 1;
+        choiceCounts[k] = (choiceCounts[k] || 0) + 1;
+      }
+    });
+    const writtenGroups = Object.keys(writtenMap).map(function (k) {
+      return writtenMap[k];
+    }).sort(function (a, b) {
+      if (b.count !== a.count) return b.count - a.count;
+      return String(a.text).localeCompare(String(b.text), 'ja');
+    });
+    out[q.id] = {
+      total: total,
+      choiceCounts: choiceCounts,
+      writtenGroups: writtenGroups
+    };
+  });
+  return out;
+}
+
+function countLivePollSubmitted_(questions, entries, round, visibleIds) {
+  const ids = visibleIds && visibleIds.length
+    ? visibleIds
+    : (questions || []).map(function (q) { return q.id; });
+  if (!ids.length) return 0;
+  let n = 0;
+  (entries || []).forEach(function (e) {
+    const poll = (e && e.poll) || {};
+    if ((parseInt(poll.round, 10) || 0) !== round) return;
+    const answers = poll.answers || {};
+    let ok = false;
+    ids.forEach(function (id) {
+      if (answers[id] != null && String(answers[id]).trim() !== '') ok = true;
+    });
+    if (ok) n += 1;
+  });
+  return n;
+}
+
+function requireLivePollMeta_(requestData) {
+  const admin = requireAssignmentAdminFromRequest_(requestData || {});
+  if (!admin.ok) return { ok: false, error: admin.error };
+  const pin = String(requestData.pin || '').trim();
+  if (!/^\d{4}$/.test(pin)) return { ok: false, error: '参加コードが無効です' };
+  const meta = getLiveMeta_(pin);
+  if (!meta) return { ok: false, error: '部屋が見つかりません' };
+  if (meta.mode !== 'poll' && meta.activity !== 'poll') {
+    return { ok: false, error: 'この部屋は投票ライブではありません' };
+  }
+  if (!isLiveFirebaseBackend_(meta)) {
+    return { ok: false, error: '投票ライブは Firebase β が必要です' };
+  }
+  if (!isLiveRoomOpen_(meta)) return { ok: false, error: 'この部屋は終了しました' };
+  return { ok: true, admin: admin, pin: pin, meta: meta };
+}
+
+function apiLivePollControl_(requestData) {
+  const req = requireLivePollMeta_(requestData || {});
+  if (!req.ok) return { status: 'error', message: req.error };
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+  } catch (e) {
+    return { status: 'error', message: 'ほかの操作と重なりました。少し待って再試行してください' };
+  }
+  try {
+    const pin = req.pin;
+    let meta = getLiveMeta_(pin) || req.meta;
+    if (!meta.pollPublic) meta.pollPublic = emptyLivePollPublic_();
+    const pub = meta.pollPublic;
+    const cmd = String(requestData.cmd || '').trim();
+    const ttlSec = livePollTtlSec_(meta);
+
+    if (cmd === 'startImprov') {
+      if (pub.phase === 'collecting') {
+        return { status: 'error', message: '集約中です。先に打ち切るか、次の即興へ進んでください' };
+      }
+      const choiceSet = String(requestData.choiceSet || '').trim();
+      const isWritten = choiceSet === 'WRITTEN' || String(requestData.type || '') === 'written';
+      const round = (parseInt(pub.ballotRound, 10) || 0) + 1;
+      const id = 'q' + round;
+      const label = String(requestData.label || '').trim() || ('Q' + round);
+      let question;
+      if (isWritten) {
+        question = { id: id, label: label, type: 'written', choiceSet: 'WRITTEN', choices: [] };
+      } else {
+        const choices = livePollChoiceSet_(choiceSet);
+        if (!choices) return { status: 'error', message: '選択肢の種類が不正です' };
+        question = { id: id, label: label, type: 'choice', choiceSet: choiceSet, choices: choices.slice() };
+      }
+      pub.runMode = 'improv';
+      pub.phase = 'prompt';
+      pub.ballotRound = round;
+      pub.collectEndsAt = 0;
+      pub.collectDurationSec = 0;
+      pub.reviewQuestionId = id;
+      pub.visibleQuestionIds = [id];
+      pub.questions = [question];
+      pub.revealed = {};
+      pub.frozenTally = {};
+      pub.submittedCount = 0;
+      pub.sectionName = '';
+      putLivePollSecrets_(pin, { answers: {} }, ttlSec);
+    } else if (cmd === 'startCollect') {
+      if (!pub.questions || !pub.questions.length) {
+        return { status: 'error', message: '先に設問を出してください' };
+      }
+      if (pub.phase === 'collecting') {
+        return { status: 'error', message: 'すでに集約中です' };
+      }
+      let durationSec = Math.max(0, parseInt(requestData.durationSec, 10) || 0);
+      if (durationSec > 0 && durationSec < 60 && durationSec % 5 !== 0) {
+        return { status: 'error', message: '秒のタイマーは 5 の倍数にしてください' };
+      }
+      pub.phase = 'collecting';
+      pub.collectDurationSec = durationSec;
+      pub.collectEndsAt = durationSec > 0 ? (Date.now() + durationSec * 1000) : 0;
+      pub.revealed = {};
+      pub.frozenTally = {};
+      pub.submittedCount = 0;
+    } else if (cmd === 'endCollect') {
+      if (pub.phase !== 'collecting' && pub.phase !== 'waiting') {
+        return { status: 'error', message: '集約中ではありません' };
+      }
+      const entries = firebaseReadLiveEntries_(pin);
+      const round = parseInt(pub.ballotRound, 10) || 1;
+      pub.frozenTally = tallyLivePollAnswers_(pub.questions, entries, round);
+      pub.submittedCount = countLivePollSubmitted_(pub.questions, entries, round, pub.visibleQuestionIds);
+      pub.phase = 'waiting';
+      pub.collectEndsAt = 0;
+    } else if (cmd === 'showResults') {
+      if (pub.phase === 'collecting') {
+        const entries = firebaseReadLiveEntries_(pin);
+        const round = parseInt(pub.ballotRound, 10) || 1;
+        pub.frozenTally = tallyLivePollAnswers_(pub.questions, entries, round);
+        pub.submittedCount = countLivePollSubmitted_(pub.questions, entries, round, pub.visibleQuestionIds);
+        pub.collectEndsAt = 0;
+      }
+      if (!pub.questions || !pub.questions.length) {
+        return { status: 'error', message: '表示する設問がありません' };
+      }
+      const qid = String(requestData.questionId || pub.reviewQuestionId || pub.visibleQuestionIds[0] || pub.questions[0].id);
+      pub.reviewQuestionId = qid;
+      pub.phase = 'results';
+    } else if (cmd === 'reveal') {
+      if (pub.phase !== 'results' && pub.phase !== 'reveal') {
+        return { status: 'error', message: '集計表示のあとで正答を出せます' };
+      }
+      const qid = String(requestData.questionId || pub.reviewQuestionId || '');
+      const q = (pub.questions || []).filter(function (item) { return item.id === qid; })[0];
+      if (!q) return { status: 'error', message: '設問が見つかりません' };
+      const answer = String(requestData.answer == null ? '' : requestData.answer);
+      if (q.type === 'choice') {
+        if ((q.choices || []).indexOf(answer) < 0) {
+          return { status: 'error', message: 'その選択肢はありません' };
+        }
+      } else if (!normalizeLivePollText_(answer)) {
+        return { status: 'error', message: '模範解答を入力してください' };
+      }
+      if (!pub.revealed) pub.revealed = {};
+      pub.revealed[qid] = q.type === 'written' ? String(answer).trim() : answer;
+      const secrets = getLivePollSecrets_(pin);
+      secrets.answers[qid] = pub.revealed[qid];
+      putLivePollSecrets_(pin, secrets, ttlSec);
+      pub.reviewQuestionId = qid;
+      pub.phase = 'reveal';
+    } else if (cmd === 'undoReveal') {
+      const qid = String(requestData.questionId || pub.reviewQuestionId || '');
+      if (pub.revealed && qid) delete pub.revealed[qid];
+      const secrets = getLivePollSecrets_(pin);
+      if (secrets.answers && qid) delete secrets.answers[qid];
+      putLivePollSecrets_(pin, secrets, ttlSec);
+      pub.phase = 'results';
+    } else if (cmd === 'resetQuestion') {
+      pub.phase = 'idle';
+      pub.collectEndsAt = 0;
+      pub.collectDurationSec = 0;
+      pub.reviewQuestionId = '';
+      pub.visibleQuestionIds = [];
+      pub.questions = [];
+      pub.revealed = {};
+      pub.frozenTally = {};
+      pub.submittedCount = 0;
+      putLivePollSecrets_(pin, { answers: {} }, ttlSec);
+    } else {
+      return { status: 'error', message: '未知の投票コマンド: ' + cmd };
+    }
+
+    meta.pollPublic = pub;
+    persistLivePollMeta_(pin, meta);
+    return {
+      status: 'success',
+      data: {
+        pin: pin,
+        activity: meta.activity || 'poll',
+        pollPublic: pub
+      }
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function handleLiveApi_(action, requestData) {
   try {
     if (action === 'liveConfig') return apiLiveConfig_(requestData);
@@ -5466,6 +5789,7 @@ function handleLiveApi_(action, requestData) {
     if (action === 'liveBoard') return apiLiveBoard_(requestData);
     if (action === 'liveExport') return apiLiveExport_(requestData);
     if (action === 'liveClose') return apiLiveClose_(requestData);
+    if (action === 'livePollControl') return apiLivePollControl_(requestData);
     return { status: 'error', message: '未知のライブAPI: ' + action };
   } catch (e) {
     return { status: 'error', message: e.toString() };
@@ -5476,10 +5800,59 @@ function apiLiveCreate_(requestData) {
   const admin = requireAssignmentAdminFromRequest_(requestData || {});
   if (!admin.ok) return { status: 'error', message: admin.error };
   const mode = String(requestData.mode || '').trim();
-  if (mode !== 'vocab' && mode !== 'word-link') {
-    return { status: 'error', message: 'mode は vocab または word-link が必要です' };
+  if (mode !== 'vocab' && mode !== 'word-link' && mode !== 'poll') {
+    return { status: 'error', message: 'mode は vocab / word-link / poll が必要です' };
   }
   const launchOptions = requestData.launchOptions || {};
+  if (mode === 'poll') {
+    if (!isFirebaseServerConfigured_()) {
+      return { status: 'error', message: '投票ライブは Firebase β が必要です。Script Properties を設定してください' };
+    }
+    const pin = generateLivePin_();
+    const nowMs = Date.now();
+    const targetClass = String(requestData.targetClass || '').trim();
+    const roster = buildLiveRoster_(targetClass);
+    const title = String(requestData.title || '').trim() || 'リアルタイム投票';
+    const pollPublic = emptyLivePollPublic_();
+    const ttlSec = 21600;
+    const meta = {
+      pin: pin,
+      backend: 'firebase',
+      title: title,
+      mode: 'poll',
+      activity: 'poll',
+      launchOptions: {},
+      targetClass: targetClass,
+      timeLimitSec: 0,
+      autoSubmitOnTimeout: false,
+      createdAt: nowMs,
+      closesAt: 0,
+      createdBy: String(admin.email || '').trim().toLowerCase(),
+      roster: roster,
+      pollPublic: pollPublic
+    };
+    putLiveMeta_(pin, meta, ttlSec);
+    putLivePollSecrets_(pin, { answers: {} }, ttlSec);
+    firebaseCreateLiveRoom_(pin, meta);
+    return {
+      status: 'success',
+      data: {
+        pin: pin,
+        backend: 'firebase',
+        title: title,
+        mode: 'poll',
+        activity: 'poll',
+        targetClass: targetClass,
+        timeLimitSec: 0,
+        autoSubmitOnTimeout: false,
+        closesAt: 0,
+        rosterCount: roster.length,
+        ttlSec: ttlSec,
+        launchOptions: {},
+        pollPublic: pollPublic
+      }
+    };
+  }
   if (!launchOptions.bookName || !launchOptions.sheetName) {
     return { status: 'error', message: 'ブックと教材（シート）が必要です' };
   }
@@ -5507,6 +5880,7 @@ function apiLiveCreate_(requestData) {
     backend: backend,
     title: title,
     mode: mode,
+    activity: mode,
     launchOptions: launchOptions,
     targetClass: targetClass,
     timeLimitSec: timeLimitSec,
@@ -5589,6 +5963,8 @@ function apiLiveJoin_(requestData) {
       backend: backend,
       title: meta.title,
       mode: meta.mode,
+      activity: meta.activity || meta.mode,
+      pollPublic: meta.pollPublic || null,
       timeLimitSec: meta.timeLimitSec,
       autoSubmitOnTimeout: meta.autoSubmitOnTimeout !== false,
       closesAt: meta.closesAt,
@@ -5604,6 +5980,9 @@ function apiLiveSubmit_(requestData) {
   const pin = String(requestData.pin || '').trim();
   const meta = getLiveMeta_(pin);
   if (!meta) return { status: 'error', message: '部屋が見つかりません' };
+  if (meta.mode === 'poll' || meta.activity === 'poll') {
+    return { status: 'error', message: '投票ライブの回答は Firebase 経由で送信してください' };
+  }
   if (isLiveFirebaseBackend_(meta)) {
     return {
       status: 'success',
@@ -5679,6 +6058,9 @@ function apiLiveExport_(requestData) {
   const pin = String(requestData.pin || '').trim();
   const meta = getLiveMeta_(pin);
   if (!meta) return { status: 'error', message: '部屋が見つかりません' };
+  if (meta.mode === 'poll' || meta.activity === 'poll') {
+    return { status: 'error', message: '投票ライブのスプレッドシート保存は未対応です' };
+  }
   let entriesOverride = null;
   if (isLiveFirebaseBackend_(meta)) {
     entriesOverride = firebaseReadLiveEntries_(pin);
@@ -5694,18 +6076,21 @@ function apiLiveClose_(requestData) {
   const meta = getLiveMeta_(pin);
   if (!meta) return { status: 'success', data: { closed: true } };
   const isFirebase = isLiveFirebaseBackend_(meta);
+  const isPoll = meta.mode === 'poll' || meta.activity === 'poll';
   let entriesOverride = null;
   if (isFirebase) {
     entriesOverride = firebaseReadLiveEntries_(pin);
   }
   let exported = null;
-  try {
-    exported = exportLiveResultsBook_(pin, meta, entriesOverride);
-  } catch (e) {
-    return {
-      status: 'error',
-      message: '結果の保存に失敗したため部屋を閉じていません: ' + e.toString()
-    };
+  if (!isPoll) {
+    try {
+      exported = exportLiveResultsBook_(pin, meta, entriesOverride);
+    } catch (e) {
+      return {
+        status: 'error',
+        message: '結果の保存に失敗したため部屋を閉じていません: ' + e.toString()
+      };
+    }
   }
   const cache = liveCache_();
   if (isFirebase) {
@@ -5718,19 +6103,21 @@ function apiLiveClose_(requestData) {
       };
     }
     cache.remove(liveMetaKey_(pin));
+    cache.remove(livePollSecretsKey_(pin));
   } else {
     const keys = collectLiveEntryKeys_(meta, pin);
     keys.push(liveMetaKey_(pin));
     keys.push(liveIndexKey_(pin));
+    keys.push(livePollSecretsKey_(pin));
     cache.removeAll(keys);
   }
   return {
     status: 'success',
     data: {
       closed: true,
-      spreadsheetId: exported.spreadsheetId,
-      spreadsheetUrl: exported.spreadsheetUrl,
-      spreadsheetName: exported.spreadsheetName
+      spreadsheetId: exported && exported.spreadsheetId,
+      spreadsheetUrl: exported && exported.spreadsheetUrl,
+      spreadsheetName: exported && exported.spreadsheetName
     }
   };
 }

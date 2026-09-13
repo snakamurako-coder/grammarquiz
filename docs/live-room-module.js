@@ -143,6 +143,25 @@ const LiveRoomModule = (function () {
     return key === 'wl-eija' || key === 'wl-jaei' || key === 'awl-eija' || key === 'awl-jaei';
   }
 
+  function isPollRoom_(room) {
+    room = room || activeRoom_;
+    if (!room) return false;
+    return room.mode === 'poll' || room.activity === 'poll';
+  }
+
+  function showLiveModeView_(on) {
+    document.body.classList.toggle('live-mode-view-active', !!on);
+    const screen = el_('live-mode-screen');
+    if (screen) screen.style.display = on ? 'block' : 'none';
+    const btn = el_('live-mode-open-btn');
+    if (btn) btn.classList.toggle('is-active-live-nav', !!on);
+    refreshUi_();
+  }
+
+  function isLiveModeView_() {
+    return document.body.classList.contains('live-mode-view-active');
+  }
+
   function compareWordLinkBest_(aBest, bBest) {
     aBest = aBest || {};
     bBest = bBest || {};
@@ -308,6 +327,12 @@ const LiveRoomModule = (function () {
   function relocateLiveEntry_() {
     const block = el_('live-room-entry-block');
     if (!block) return;
+    if (document.body.classList.contains('live-mode-view-active')) {
+      const slot = el_('live-mode-entry-slot');
+      if (slot && block.parentNode !== slot) slot.appendChild(block);
+      block.style.display = '';
+      return;
+    }
     const quiz = document.getElementById('vocab-quiz-section');
     const link = document.getElementById('vocab-link-section');
     const quizOn = quiz && quiz.style.display !== 'none';
@@ -351,7 +376,14 @@ const LiveRoomModule = (function () {
     opts = opts || {};
     const left = [];
     const right = [];
-    left.push('種別: ' + (mode === 'word-link' ? 'Word Link' : '単語クイズ'));
+    left.push('種別: ' + (mode === 'poll' ? 'リアルタイム投票'
+      : (mode === 'word-link' ? 'Word Link' : '単語クイズ')));
+    if (mode === 'poll') {
+      right.push('問題文はスライド側に表示');
+      if (timeLimitSec > 0) right.push('制限時間: ' + formatLimit_(timeLimitSec));
+      else right.push('部屋の制限時間: なし');
+      return { left: left, right: right };
+    }
     if (opts.bookName || opts.sheetName) {
       left.push('教材: ' + (opts.bookName || '—') + ' / ' + (opts.sheetName || '—'));
     }
@@ -482,6 +514,18 @@ const LiveRoomModule = (function () {
     localBest_ = stored.localBest || null;
     timeoutFired_ = false;
     if (stored.isTeacher) {
+      if (isPollRoom_(stored)) {
+        activeRoom_ = stored;
+        localBest_ = stored.localBest || null;
+        timeoutFired_ = false;
+        refreshUi_();
+        if (window.LivePollModule) {
+          LivePollModule.openHost().catch(function (e) {
+            console.warn('投票ホスト復帰:', e.message || e);
+          });
+        }
+        return;
+      }
       showBoardScreen_();
       startBoardUpdates_();
     } else if (stored.closesAt) {
@@ -510,19 +554,38 @@ const LiveRoomModule = (function () {
     applyStoredRoom_(stored);
   }
 
+  function maybeOpenLivePollFromQuery_() {
+    try {
+      if (maybeOpenLivePollFromQuery_._done) return;
+      const params = new URLSearchParams(window.location.search || '');
+      if (params.get('livePoll') !== '1') return;
+      if (!isLoggedIn_() || !isAdminUser_()) return;
+      maybeOpenLivePollFromQuery_._done = true;
+      if (activeRoom_ && activeRoom_.isTeacher && isPollRoom_(activeRoom_)) {
+        if (window.LivePollModule) LivePollModule.openHost();
+        return;
+      }
+      const btn = el_('live-vote-open-btn');
+      if (btn) btn.click();
+    } catch (e) { /* ignore */ }
+  }
+
   function tryResumeAfterAuth_() {
     if (activeRoom_) {
       if (activeRoom_.isTeacher && (!isLoggedIn_() || !isAdminUser_())) {
         hideBoardScreen_();
         stopBoardUpdates_();
+        if (window.LivePollModule) LivePollModule.closeScreens();
         refreshUi_();
         return;
       }
       refreshUi_();
+      maybeOpenLivePollFromQuery_();
       return;
     }
     restoreFromStorage_();
     refreshUi_();
+    maybeOpenLivePollFromQuery_();
   }
 
   function refreshUi_() {
@@ -539,6 +602,10 @@ const LiveRoomModule = (function () {
             + (activeRoom_.title || activeRoom_.pin)
             + '（コード ' + activeRoom_.pin + '）';
         }
+        const startBtn = el_('live-room-start-attempt-btn');
+        if (startBtn) {
+          startBtn.textContent = isPollRoom_(activeRoom_) ? '参加する（投票）' : '参加する（取り組む）';
+        }
         const settingsEl = el_('live-room-student-settings');
         if (settingsEl) {
           settingsEl.textContent = formatLaunchSummary_(activeRoom_.mode, activeRoom_.launchOptions, activeRoom_.timeLimitSec);
@@ -548,14 +615,16 @@ const LiveRoomModule = (function () {
       }
     }
     const storedTeacher = (activeRoom_ && activeRoom_.isTeacher) ? activeRoom_ : loadStoredRoom_();
-    const boardVisible = document.body.classList.contains('live-room-board-active');
+    const boardVisible = document.body.classList.contains('live-room-board-active')
+      || document.body.classList.contains('live-poll-host-active');
     if (teacherBanner) {
       if (canRestoreTeacher_(storedTeacher) && !boardVisible) {
         teacherBanner.style.display = 'block';
         teacherBanner.innerHTML = '授業ライブ開催中 [' + escapeHtml_(backendLabel_(storedTeacher.backend)) + ']: '
           + escapeHtml_(storedTeacher.title || storedTeacher.pin)
           + '（コード ' + escapeHtml_(storedTeacher.pin) + '）'
-          + ' <button type="button" class="btn-secondary" id="live-room-show-board-btn" style="width:auto;min-width:auto;padding:4px 10px;margin-left:8px;">ボードを表示</button>';
+          + ' <button type="button" class="btn-secondary" id="live-room-show-board-btn" style="width:auto;min-width:auto;padding:4px 10px;margin-left:8px;">'
+          + (isPollRoom_(storedTeacher) ? '投票画面を表示' : 'ボードを表示') + '</button>';
         const showBtn = el_('live-room-show-board-btn');
         if (showBtn) showBtn.onclick = reopenTeacherBoard_;
       } else {
@@ -574,6 +643,10 @@ const LiveRoomModule = (function () {
     const liveModeWrap = el_('vocab-link-live-mode-wrap');
     if (liveModeWrap) {
       liveModeWrap.style.display = (isAdminUser_() && isLoggedIn_() && !homework) ? '' : 'none';
+    }
+    const voteBtn = el_('live-vote-open-btn');
+    if (voteBtn) {
+      voteBtn.style.display = (isAdminUser_() && isLoggedIn_() && !homework) ? '' : 'none';
     }
     if (joinPanel && activeRoom_ && !activeRoom_.isTeacher) {
       const pinInput = el_('live-room-pin-input');
@@ -637,6 +710,8 @@ const LiveRoomModule = (function () {
       backend: data.backend || backend,
       title: data.title,
       mode: data.mode,
+      activity: data.activity || data.mode,
+      pollPublic: data.pollPublic || null,
       isTeacher: true,
       closesAt: data.closesAt || 0,
       timeLimitSec: data.timeLimitSec || 0,
@@ -647,8 +722,60 @@ const LiveRoomModule = (function () {
     timeoutFired_ = false;
     boardDefaultedPin_ = '';
     setActiveRoom_(room);
+    if (isPollRoom_(room)) {
+      if (window.LivePollModule) await LivePollModule.openHost();
+      return room;
+    }
     showBoardScreen_();
     startBoardUpdates_();
+    return room;
+  }
+
+  async function createPollRoomWithOpts_(opts) {
+    if (!isAdminUser_()) throw new Error('管理者のみ投票を開催できます');
+    opts = opts || {};
+    if (activeRoom_ && activeRoom_.isTeacher && !isPollRoom_(activeRoom_)) {
+      throw new Error('先に開催中の授業ライブを閉じてください');
+    }
+    if (activeRoom_ && activeRoom_.isTeacher && isPollRoom_(activeRoom_)) {
+      if (window.LivePollModule) await LivePollModule.openHost();
+      return activeRoom_;
+    }
+    if (window.LiveFirebase && typeof LiveFirebase.fetchConfig === 'function') {
+      const cfg = await LiveFirebase.fetchConfig();
+      if (!cfg || !cfg.firebaseEnabled) {
+        throw new Error('投票ライブは Firebase β が必要です。接続方式の設定を確認してください');
+      }
+    }
+    const res = await post_({
+      action: 'liveCreate',
+      mode: 'poll',
+      backend: 'firebase',
+      targetClass: opts.targetClass,
+      title: opts.title,
+      timeLimitSec: 0,
+      autoSubmitOnTimeout: false
+    });
+    const data = res.data || {};
+    if (!data.pin) throw new Error('参加コードを発行できませんでした');
+    const room = {
+      pin: data.pin,
+      backend: 'firebase',
+      title: data.title || 'リアルタイム投票',
+      mode: 'poll',
+      activity: 'poll',
+      pollPublic: data.pollPublic || null,
+      isTeacher: true,
+      closesAt: 0,
+      timeLimitSec: 0,
+      autoSubmitOnTimeout: false,
+      rosterCount: data.rosterCount || 0,
+      launchOptions: {}
+    };
+    timeoutFired_ = false;
+    boardDefaultedPin_ = '';
+    setActiveRoom_(room);
+    if (window.LivePollModule) await LivePollModule.openHost();
     return room;
   }
 
@@ -665,6 +792,8 @@ const LiveRoomModule = (function () {
       backend: data.backend || 'gas',
       title: data.title,
       mode: data.mode,
+      activity: data.activity || data.mode,
+      pollPublic: data.pollPublic || null,
       isTeacher: false,
       closesAt: data.closesAt || 0,
       timeLimitSec: data.timeLimitSec || 0,
@@ -675,7 +804,7 @@ const LiveRoomModule = (function () {
     timeoutFired_ = false;
     localBest_ = room.localBest;
     setActiveRoom_(room);
-    applyLaunchOptionsToUi_(room.launchOptions, room.mode);
+    if (!isPollRoom_(room)) applyLaunchOptionsToUi_(room.launchOptions, room.mode);
     return room;
   }
 
@@ -693,6 +822,14 @@ const LiveRoomModule = (function () {
 
   async function startAssignedSession_() {
     if (!activeRoom_ || activeRoom_.isTeacher) throw new Error('授業ライブに参加してから取り組んでください');
+    if (isPollRoom_(activeRoom_)) {
+      if (!window.LivePollModule) throw new Error('投票モジュールの読み込みに失敗しました');
+      const startBtn = el_('live-room-start-attempt-btn');
+      await BusyButton.run(startBtn, async function () {
+        await LivePollModule.openStudent();
+      }, '開いています…');
+      return;
+    }
     const opts = Object.assign({}, activeRoom_.launchOptions || {});
     opts.homeworkMode = false;
     if (!opts.bookName || !opts.sheetName) throw new Error('出題設定がありません。もう一度参加し直してください。');
@@ -718,6 +855,7 @@ const LiveRoomModule = (function () {
     stopBoardUpdates_();
     stopBoardClock_();
     clearRoomTimer_();
+    if (window.LivePollModule) LivePollModule.closeScreens();
     activeRoom_ = null;
     localBest_ = null;
     saveStoredRoom_(null);
@@ -734,6 +872,7 @@ const LiveRoomModule = (function () {
     }
     activeRoom_ = room;
     const res = await post_({ action: 'liveClose', pin: room.pin }, 1, EXPORT_TIMEOUT_MS);
+    if (window.LivePollModule) LivePollModule.closeScreens();
     await leaveRoom();
     const data = (res && res.data) || {};
     if (data.spreadsheetUrl) {
@@ -776,6 +915,14 @@ const LiveRoomModule = (function () {
   function reopenTeacherBoard_() {
     const stored = (activeRoom_ && activeRoom_.isTeacher) ? activeRoom_ : loadStoredRoom_();
     if (!canRestoreTeacher_(stored)) return;
+    if (isPollRoom_(stored)) {
+      activeRoom_ = stored;
+      refreshUi_();
+      if (window.LivePollModule) {
+        LivePollModule.openHost().catch(function (e) { alert(e.message || e); });
+      }
+      return;
+    }
     applyStoredRoom_(stored);
   }
 
@@ -851,7 +998,7 @@ const LiveRoomModule = (function () {
   }
 
   async function trySubmitFromSession(summary, extra) {
-    if (!isActive() || isTeacherRoom()) return { skipped: true };
+    if (!isActive() || isTeacherRoom() || isPollRoom_()) return { skipped: true };
     try {
       const attempt = buildAttemptFromSummary_(summary, extra);
       return await submitAttempt(attempt);
@@ -1099,6 +1246,45 @@ const LiveRoomModule = (function () {
   }
 
   function bindUi_() {
+    const liveModeBtn = el_('live-mode-open-btn');
+    if (liveModeBtn) {
+      liveModeBtn.addEventListener('click', function () {
+        showLiveModeView_(!isLiveModeView_());
+      });
+    }
+    const liveModeBack = el_('live-mode-back-btn');
+    if (liveModeBack) {
+      liveModeBack.addEventListener('click', function () {
+        showLiveModeView_(false);
+      });
+    }
+    const voteBtn = el_('live-vote-open-btn');
+    if (voteBtn) {
+      voteBtn.addEventListener('click', function () {
+        if (!isAdminUser_()) {
+          alert('管理者のみ投票を開催できます');
+          return;
+        }
+        if (activeRoom_ && activeRoom_.isTeacher && isPollRoom_(activeRoom_)) {
+          BusyButton.run(voteBtn, function () {
+            return createPollRoomWithOpts_({});
+          }, '開いています…').catch(function (e) {
+            alert(e.message || e);
+          });
+          return;
+        }
+        const targetClass = window.prompt('名簿に出すクラス（空欄可。PIN を知っている人は誰でも参加できます）', '') || '';
+        const title = window.prompt('表示名（空欄＝リアルタイム投票）', '') || '';
+        BusyButton.run(voteBtn, function () {
+          return createPollRoomWithOpts_({
+            targetClass: String(targetClass).trim(),
+            title: String(title).trim()
+          });
+        }, '部屋を開いています…').catch(function (e) {
+          alert(e.message || e);
+        });
+      });
+    }
     document.querySelectorAll('.live-room-open-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         const mode = btn.getAttribute('data-live-mode') || 'vocab';
@@ -1126,8 +1312,12 @@ const LiveRoomModule = (function () {
         const pin = (el_('live-room-pin-input') || {}).value;
         BusyButton.run(joinBtn, function () {
           return joinRoom(pin);
-        }, '参加中…').then(function () {
-          if (typeof showToast_ === 'function') showToast_('授業ライブに参加しました。「参加する（取り組む）」で開始できます');
+        }, '参加中…').then(function (room) {
+          if (typeof showToast_ === 'function') {
+            showToast_(isPollRoom_(room)
+              ? '授業ライブに参加しました。「参加する（投票）」で投票画面を開けます'
+              : '授業ライブに参加しました。「参加する（取り組む）」で開始できます');
+          }
         }).catch(function (e) {
           alert(e.message || e);
         });
@@ -1235,6 +1425,9 @@ const LiveRoomModule = (function () {
     }
     restoreFromStorage_();
     refreshUi_();
+    if (window.LivePollModule && typeof LivePollModule.init === 'function') {
+      LivePollModule.init();
+    }
     if (window.AuthGateService) {
       AuthGateService.fetchUserIfNeeded().then(function () {
         tryResumeAfterAuth_();
@@ -1260,7 +1453,15 @@ const LiveRoomModule = (function () {
     isActive: isActive,
     isTeacherRoom: isTeacherRoom,
     isAdminUser_: isAdminUser_,
-    refreshUi_: refreshUi_
+    refreshUi_: refreshUi_,
+    apiPost: post_,
+    touchActiveRoom: function (room) {
+      if (!room) return;
+      activeRoom_ = room;
+      saveStoredRoom_(room);
+    },
+    createPollRoom: createPollRoomWithOpts_,
+    showLiveModeView: showLiveModeView_
   };
 })();
 

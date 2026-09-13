@@ -126,7 +126,8 @@ const LiveFirebase = (function () {
       class: data.class || '',
       attempts: parseInt(data.attempts, 10) || 0,
       status: data.status || 'joined',
-      best: data.best || null
+      best: data.best || null,
+      poll: data.poll || null
     };
   }
 
@@ -149,7 +150,9 @@ const LiveFirebase = (function () {
       joinedCount: entries.length,
       lists: lists,
       entries: entries,
-      launchOptions: meta.launchOptions || null
+      launchOptions: meta.launchOptions || null,
+      activity: meta.activity || mode,
+      pollPublic: meta.pollPublic || null
     };
   }
 
@@ -225,6 +228,92 @@ const LiveFirebase = (function () {
     return boardUnsub_;
   }
 
+  let pollUnsub_ = null;
+
+  function unsubscribePoll_() {
+    if (pollUnsub_) {
+      pollUnsub_();
+      pollUnsub_ = null;
+    }
+  }
+
+  async function subscribePoll_(pin, includeEntries, roomMeta, onData, onError) {
+    unsubscribePoll_();
+    const db = await ensureDb_();
+    const { collection, doc, onSnapshot } = await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js');
+    const roomRef = doc(db, 'liveRooms', pin);
+    let meta = Object.assign({}, roomMeta || {});
+    let entries = [];
+
+    function emit_() {
+      onData({
+        pin: pin,
+        title: meta.title || 'リアルタイム投票',
+        mode: meta.mode || 'poll',
+        activity: meta.activity || meta.mode || 'poll',
+        backend: 'firebase',
+        pollPublic: meta.pollPublic || null,
+        rosterCount: (meta.roster && meta.roster.length) || 0,
+        joinedCount: entries.length,
+        entries: entries
+      });
+    }
+
+    const unsubRoom = onSnapshot(roomRef, function (snap) {
+      if (snap.exists()) meta = Object.assign(meta, snap.data() || {});
+      emit_();
+    }, function (err) {
+      if (onError) onError(err);
+    });
+
+    let unsubEntries = function () {};
+    if (includeEntries) {
+      const entriesRef = collection(db, 'liveRooms', pin, 'entries');
+      unsubEntries = onSnapshot(entriesRef, function (snap) {
+        entries = [];
+        snap.forEach(function (docSnap) {
+          entries.push(decodeEntryDoc_(docSnap.id, docSnap.data()));
+        });
+        emit_();
+      }, function (err) {
+        if (onError) onError(err);
+      });
+    }
+
+    pollUnsub_ = function () {
+      unsubRoom();
+      unsubEntries();
+      pollUnsub_ = null;
+    };
+    return pollUnsub_;
+  }
+
+  async function submitPollAnswers_(pin, user, round, answers) {
+    const db = await ensureDb_();
+    const { doc, getDoc, setDoc } = await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js');
+    const account = String((user && user.account) || '').trim().toLowerCase();
+    if (!account) throw new Error('アカウント情報を取得できません');
+    const ref = doc(db, 'liveRooms', pin, 'entries', account);
+    const snap = await getDoc(ref);
+    const prev = snap.exists() ? decodeEntryDoc_(account, snap.data()) : {};
+    const entry = {
+      account: account,
+      name: String((user && user.name) || prev.name || '').trim(),
+      number: String((user && user.number != null ? user.number : prev.number) || '').trim(),
+      class: String((user && user.class) || prev.class || '').trim(),
+      attempts: parseInt(prev.attempts, 10) || 0,
+      status: prev.status || 'joined',
+      best: prev.best || null,
+      poll: {
+        round: parseInt(round, 10) || 0,
+        answers: answers || {},
+        updatedAt: Date.now()
+      }
+    };
+    await setDoc(ref, entry, { merge: true });
+    return { entry: entry };
+  }
+
   async function applyBackendUi_(rootId, hintId) {
     const cfg = await fetchConfig_();
     const root = document.getElementById(rootId);
@@ -262,6 +351,9 @@ const LiveFirebase = (function () {
     submitEntry: submitEntry_,
     subscribeBoard: subscribeBoard_,
     unsubscribeBoard: unsubscribeBoard_,
+    subscribePoll: subscribePoll_,
+    unsubscribePoll: unsubscribePoll_,
+    submitPollAnswers: submitPollAnswers_,
     applyBackendUi: applyBackendUi_,
     getSelectedBackend: getSelectedBackend_,
     backendLabel: backendLabel_,
