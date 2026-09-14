@@ -385,12 +385,8 @@ const LiveRoomModule = (function () {
     const quizOn = quiz && quiz.style.display !== 'none';
     const linkOn = link && link.style.display !== 'none';
     const target = linkOn ? link : (quizOn ? quiz : null);
-    if (target) {
-      if (block.parentNode !== target) target.appendChild(block);
-      block.style.display = '';
-    } else {
-      block.style.display = 'none';
-    }
+    if (target && block.parentNode !== target) target.appendChild(block);
+    block.style.display = '';
   }
 
   function formatLimit_(sec) {
@@ -1067,9 +1063,7 @@ const LiveRoomModule = (function () {
       applyLaunchOptionsToUi_(room.launchOptions, room.activity || room.mode);
     }
     startStudentRoomMetaWatch_();
-    if (isTeamRoom_(room) && window.LiveTeamModule) {
-      await LiveTeamModule.openStudent();
-    }
+    await openStudentActivity_(room);
     return room;
   }
 
@@ -1102,6 +1096,10 @@ const LiveRoomModule = (function () {
       }
       if (window.LivePollModule && LivePollModule.isStudentOpen && LivePollModule.isStudentOpen()) {
         if (newActivity !== 'poll') LivePollModule.closeScreens();
+      } else if (newActivity === 'poll' && window.LivePollModule) {
+        LivePollModule.openStudent().catch(function (e) {
+          console.warn('投票画面:', e.message || e);
+        });
       }
       if (window.LiveTeamModule && LiveTeamModule.isStudentOpen && LiveTeamModule.isStudentOpen()) {
         if (newActivity !== 'vocab-team') LiveTeamModule.closeScreens();
@@ -1112,14 +1110,19 @@ const LiveRoomModule = (function () {
       }
       if (newActivity !== 'poll' && newActivity !== 'vocab-team') {
         applyLaunchOptionsToUi_(activeRoom_.launchOptions, newActivity);
+        if (!studentActivityAlreadyOpen_()) {
+          startAssignedSession_().catch(function (e) {
+            console.warn('取り組み自動開始:', e.message || e);
+          });
+        }
       }
       if (typeof showToast_ === 'function') {
         if (newActivity === 'poll') {
-          showToast_('投票が始まりました。「参加する（投票）」から入れます');
+          showToast_('投票が始まりました。画面を開きます');
         } else if (newActivity === 'vocab-team') {
           showToast_('チームN択が始まりました。画面が開きます');
         } else {
-          showToast_('取り組みが再開できます。「参加する（取り組む）」から開始できます');
+          showToast_('取り組みを開始します');
         }
       }
     }
@@ -1149,6 +1152,29 @@ const LiveRoomModule = (function () {
     } catch (e) {
       console.warn('授業ライブ設定の反映:', e.message || e);
     }
+  }
+
+  function studentActivityAlreadyOpen_() {
+    if (window.LivePollModule && typeof LivePollModule.isStudentOpen === 'function' && LivePollModule.isStudentOpen()) {
+      return true;
+    }
+    if (window.LiveTeamModule && typeof LiveTeamModule.isStudentOpen === 'function' && LiveTeamModule.isStudentOpen()) {
+      return true;
+    }
+    const game = el_('game-screen');
+    if (game && game.style.display === 'block') return true;
+    const vl = el_('vocab-link-screen');
+    if (vl && vl.style.display && vl.style.display !== 'none' && vl.getAttribute('aria-hidden') !== 'true') {
+      return true;
+    }
+    return false;
+  }
+
+  async function openStudentActivity_(room) {
+    room = room || activeRoom_;
+    if (!room || room.isTeacher) return;
+    if (studentActivityAlreadyOpen_()) return;
+    await startAssignedSession_();
   }
 
   async function startAssignedSession_() {
@@ -1694,10 +1720,10 @@ const LiveRoomModule = (function () {
         }, '参加中…').then(function (room) {
           if (typeof showToast_ === 'function') {
             showToast_(isPollRoom_(room)
-              ? '授業ライブに参加しました。「参加する（投票）」で投票画面を開けます'
+              ? '投票に参加しました。画面を開きます'
               : (isTeamRoom_(room)
                 ? 'チームN択に参加しました。待機中はミニ学習ができます'
-                : '授業ライブに参加しました。「参加する（取り組む）」で開始できます'));
+                : '授業ライブに参加しました。取り組みを開始します'));
           }
         }).catch(function (e) {
           alert(e.message || e);
