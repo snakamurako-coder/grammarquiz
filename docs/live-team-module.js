@@ -15,6 +15,7 @@ const LiveTeamModule = (function () {
   let actionBusy_ = false;
   let miniQuestions_ = [];
   let miniIndex_ = 0;
+  let miniRunning_ = false;
   let markFinishedSent_ = false;
 
   function el_(id) {
@@ -81,7 +82,19 @@ const LiveTeamModule = (function () {
     return null;
   }
 
+  function questionPromptText_(q) {
+    if (!q) return '';
+    if (typeof window.getQuestionPrompt_ === 'function') {
+      const t = window.getQuestionPrompt_(q);
+      if (t) return String(t);
+    }
+    const word = q.word || q.promptEn || q.japanese || '';
+    const pos = q.posLabel ? '（' + q.posLabel + '）' : '';
+    return String(q.prompt || q.promptText || (word + pos) || '');
+  }
+
   function memberLabels_(team, entries) {
+    if (team.memberNames && team.memberNames.length) return team.memberNames.slice();
     return (team.memberAccounts || []).map(function (acc) {
       const e = entryByAccount_(entries, acc);
       const num = e && e.number ? String(e.number) + ' ' : '';
@@ -179,20 +192,14 @@ const LiveTeamModule = (function () {
       formats: wordOnlyFormats_(launchOptions),
       dummyScope: launchOptions.dummyScope || 'sheet'
     });
-    let questions;
-    if (typeof window.prepareVocabQuestions === 'function') {
-      questions = window.prepareVocabQuestions(words, pool, bookPool, opts, null);
-    } else if (window.VocabQuizGenerator) {
-      questions = VocabQuizGenerator.buildQuestions(words, pool, bookPool, opts);
-    } else {
-      throw new Error('問題生成器が未初期化です');
-    }
+    if (!window.VocabQuizGenerator) throw new Error('問題生成器が未初期化です');
+    const questions = VocabQuizGenerator.buildQuestions(words, pool, bookPool, opts);
     if (!questions.length) throw new Error('出題できる問題がありません');
     return questions.slice(0, questionCount).map(function (q, idx) {
       const qid = q.id || ('q' + (idx + 1));
       return {
         id: qid,
-        prompt: q.prompt || q.promptText || '',
+        prompt: questionPromptText_(q),
         choices: (q.choices || []).map(function (c, ci) {
           return {
             id: qid + '_c' + ci,
@@ -208,7 +215,8 @@ const LiveTeamModule = (function () {
     const wrap = el_('live-team-host-teams');
     if (!wrap) return;
     const pub = teamPub_(snap);
-    const teams = sortTeamsForRank_(snap.teams || [], pub);
+    const liveTeams = (snap.teams && snap.teams.length) ? snap.teams : (pub.roster || []);
+    const teams = sortTeamsForRank_(liveTeams, pub);
     const entries = snap.entries || [];
     if (!teams.length) {
       wrap.innerHTML = '<p class="filter-axis-hint">チーム未編成です。「チームを組む」を押してください。</p>';
@@ -264,8 +272,9 @@ const LiveTeamModule = (function () {
     const countsEl = el_('live-team-host-counts');
     if (countsEl) {
       countsEl.textContent = '参加 ' + (snap.joinedCount || 0)
-        + ' 人 · チーム ' + ((snap.teams && snap.teams.length) || 0)
-        + ' · 1チーム ' + (pub.teamSize || 4) + ' 人 · 全 ' + (pub.questionCount || 0) + ' 問';
+        + ' 人 · チーム ' + ((snap.teams && snap.teams.length) || (pub.roster && pub.roster.length) || 0)
+        + ' · 1チーム ' + (pub.teamSize || 4) + ' 人 · 全 ' + (pub.questionCount || 0) + ' 問'
+        + (pub.waitingCount ? (' · 待機 ' + pub.waitingCount + ' 人') : '');
     }
     const teamSizeInput = el_('live-team-size-input');
     if (teamSizeInput && document.activeElement !== teamSizeInput) {
@@ -296,6 +305,11 @@ const LiveTeamModule = (function () {
       renderHost_(snap);
     }, function (err) {
       console.warn('チームホスト購読:', err.message || err);
+      const wrap = el_('live-team-host-teams');
+      if (wrap && !(lastSnap_ && ((lastSnap_.teams && lastSnap_.teams.length) || (teamPub_(lastSnap_).roster || []).length))) {
+        wrap.innerHTML = '<p class="filter-axis-hint">チーム表の取得に失敗しました: '
+          + escapeHtml_(err.message || err) + '</p>';
+      }
     });
   }
 
@@ -364,7 +378,8 @@ const LiveTeamModule = (function () {
     const infoEl = el_('live-team-student-team-info');
     if (!infoEl) return;
     const teamId = myEntry && myEntry.teamId ? String(myEntry.teamId) : '';
-    const teams = snap.teams || [];
+    const pub = lastSnap_ ? teamPub_(lastSnap_) : {};
+    const teams = (snap.teams && snap.teams.length) ? snap.teams : (pub.roster || []);
     let team = null;
     teams.forEach(function (t) {
       if (String(t.id) === teamId) team = t;
@@ -387,21 +402,20 @@ const LiveTeamModule = (function () {
     const promptEl = el_('live-team-student-prompt');
     const choicesEl = el_('live-team-student-choices');
     const statusEl = el_('live-team-student-status');
-    const miniEl = el_('live-team-mini-quiz');
-    if (miniEl) miniEl.style.display = 'none';
     if (!promptEl || !choicesEl) return;
     if (!hands || hands.waiting) {
-      if (promptEl) promptEl.textContent = 'チーム割当待ちです';
-      if (choicesEl) choicesEl.innerHTML = '';
-      if (statusEl) statusEl.textContent = '';
+      promptEl.textContent = '';
+      choicesEl.innerHTML = '';
+      if (statusEl) statusEl.textContent = 'ホストがチームを組むまで、下のミニ学習ができます';
       return;
     }
     if (hands.phase !== 'racing') {
-      if (promptEl) promptEl.textContent = '開始を待っています';
-      if (choicesEl) choicesEl.innerHTML = '';
-      if (statusEl) statusEl.textContent = '';
+      promptEl.textContent = '';
+      choicesEl.innerHTML = '';
+      if (statusEl) statusEl.textContent = '開始待ちです。下のミニ学習ができます';
       return;
     }
+    hideMini_();
     if (hands.finished || parseInt(hands.finishedAt, 10) > 0
       || (hands.totalQuestions > 0 && hands.currentIndex >= hands.totalQuestions)) {
       promptEl.textContent = '完走しました！';
@@ -437,8 +451,6 @@ const LiveTeamModule = (function () {
     renderStudentTeamInfo_(snap, myEntry);
 
     const shouldRace = pub.phase === 'racing' && myEntry && myEntry.teamId;
-    const shouldWaitMini = !shouldRace;
-
     if (shouldRace) {
       try {
         const hands = await refreshHands_();
@@ -446,81 +458,110 @@ const LiveTeamModule = (function () {
       } catch (e) {
         const statusEl = el_('live-team-student-status');
         if (statusEl) statusEl.textContent = e.message || String(e);
+        showMiniIfNeeded_(snap);
       }
     } else {
-      renderStudentRace_({ waiting: true });
-      if (shouldWaitMini) renderMiniQuiz_(snap);
+      renderStudentRace_({ waiting: true, phase: pub.phase });
+      if (pub.phase === 'ready' && myEntry && myEntry.teamId) {
+        const statusEl = el_('live-team-student-status');
+        if (statusEl) statusEl.textContent = '開始待ちです。下のミニ学習ができます';
+      }
+      showMiniIfNeeded_(snap);
     }
+  }
+
+  function hideMini_() {
+    const miniEl = el_('live-team-mini-quiz');
+    if (miniEl) miniEl.style.display = 'none';
+  }
+
+  function showMiniIfNeeded_(snap) {
+    const miniEl = el_('live-team-mini-quiz');
+    if (!miniEl) return;
+    miniEl.style.display = 'block';
+    if (miniRunning_) return;
+    miniRunning_ = true;
+    renderMiniQuiz_(snap);
   }
 
   async function ensureMiniQuestions_(launchOptions) {
     if (miniQuestions_.length) return miniQuestions_;
     const data = await fetchWordsForTeam_(launchOptions);
     const opts = Object.assign({}, launchOptions, {
-      questionCount: '20',
+      questionCount: '30',
       choiceCount: 4,
       includeNone: false,
       includeUnknown: false,
       formats: wordOnlyFormats_(launchOptions),
       dummyScope: launchOptions.dummyScope || 'sheet'
     });
-    let questions;
-    if (typeof window.prepareVocabQuestions === 'function') {
-      questions = window.prepareVocabQuestions(data.words || [], data.pool || [], data.bookPool || data.pool || [], opts, null);
-    } else {
-      questions = VocabQuizGenerator.buildQuestions(data.words || [], data.pool || [], data.bookPool || data.pool || [], opts);
-    }
-    miniQuestions_ = (questions || []).slice(0, 50);
+    if (!window.VocabQuizGenerator) throw new Error('問題生成器が未初期化です');
+    const questions = VocabQuizGenerator.buildQuestions(
+      data.words || [], data.pool || [], data.bookPool || data.pool || [], opts);
+    miniQuestions_ = (questions || []).slice();
     miniIndex_ = 0;
     return miniQuestions_;
+  }
+
+  function paintMiniQuestion_(q) {
+    const miniEl = el_('live-team-mini-quiz');
+    if (!miniEl || !q) return;
+    miniRunning_ = true;
+    let html = '<div class="subsection-title">待機ミニ学習（4択・個人練習・何度でも）</div>';
+    html += '<p class="live-team-mini-prompt">' + escapeHtml_(questionPromptText_(q)) + '</p>';
+    html += '<div class="live-team-mini-choices">';
+    (q.choices || []).forEach(function (c, idx) {
+      html += '<button type="button" class="btn-secondary live-team-mini-choice" data-mini-idx="' + idx + '">'
+        + escapeHtml_(c.text || '') + '</button>';
+    });
+    html += '</div><p class="filter-axis-hint" id="live-team-mini-feedback"></p>';
+    miniEl.innerHTML = html;
+    miniEl.querySelectorAll('.live-team-mini-choice').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const idx = parseInt(btn.getAttribute('data-mini-idx'), 10) || 0;
+        const choice = (q.choices || [])[idx];
+        const fb = el_('live-team-mini-feedback');
+        if (fb) fb.textContent = choice && choice.isCorrect ? '正解！' : '不正解';
+        miniEl.querySelectorAll('.live-team-mini-choice').forEach(function (b) { b.disabled = true; });
+        setTimeout(function () {
+          miniIndex_ += 1;
+          miniRunning_ = false;
+          if (miniIndex_ >= miniQuestions_.length) {
+            miniQuestions_ = [];
+            miniIndex_ = 0;
+          }
+          renderMiniQuiz_(lastSnap_);
+        }, 550);
+      });
+    });
   }
 
   function renderMiniQuiz_(snap) {
     const miniEl = el_('live-team-mini-quiz');
     if (!miniEl) return;
-    const pub = teamPub_(snap);
-    if (pub.phase === 'racing') {
-      miniEl.style.display = 'none';
-      return;
-    }
     miniEl.style.display = 'block';
-    const launchOptions = snap.launchOptions || (LiveRoomModule.getActiveRoom() || {}).launchOptions;
+    const launchOptions = (snap && snap.launchOptions)
+      || (LiveRoomModule.getActiveRoom() || {}).launchOptions;
     if (!launchOptions) {
       miniEl.innerHTML = '<p class="filter-axis-hint">教材設定がありません</p>';
+      miniRunning_ = true;
+      return;
+    }
+    if (miniQuestions_.length && miniIndex_ < miniQuestions_.length) {
+      paintMiniQuestion_(miniQuestions_[miniIndex_]);
       return;
     }
     ensureMiniQuestions_(launchOptions).then(function () {
       if (!miniQuestions_.length) {
         miniEl.innerHTML = '<p class="filter-axis-hint">ミニ学習用の問題がありません</p>';
+        miniRunning_ = true;
         return;
       }
       if (miniIndex_ >= miniQuestions_.length) miniIndex_ = 0;
-      const q = miniQuestions_[miniIndex_];
-      let html = '<div class="subsection-title">待機ミニ学習（4択・個人練習）</div>';
-      html += '<p class="live-team-mini-prompt">' + escapeHtml_(q.prompt || q.promptText || '') + '</p>';
-      html += '<div class="live-team-mini-choices">';
-      (q.choices || []).forEach(function (c, idx) {
-        html += '<button type="button" class="btn-secondary live-team-mini-choice" data-mini-idx="' + idx + '">'
-          + escapeHtml_(c.text || '') + '</button>';
-      });
-      html += '</div><p class="filter-axis-hint" id="live-team-mini-feedback"></p>';
-      miniEl.innerHTML = html;
-      miniEl.querySelectorAll('.live-team-mini-choice').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          const idx = parseInt(btn.getAttribute('data-mini-idx'), 10) || 0;
-          const choice = (q.choices || [])[idx];
-          const fb = el_('live-team-mini-feedback');
-          if (fb) {
-            fb.textContent = choice && choice.isCorrect ? '正解！' : '不正解';
-          }
-          setTimeout(function () {
-            miniIndex_ += 1;
-            renderMiniQuiz_(lastSnap_ || snap);
-          }, 600);
-        });
-      });
+      paintMiniQuestion_(miniQuestions_[miniIndex_]);
     }).catch(function (e) {
       miniEl.innerHTML = '<p class="filter-axis-hint">' + escapeHtml_(e.message || e) + '</p>';
+      miniRunning_ = false;
     });
   }
 
@@ -556,6 +597,8 @@ const LiveTeamModule = (function () {
       if (window.LiveFirebase && LiveFirebase.unsubscribeTeam) LiveFirebase.unsubscribeTeam();
       clearLockTimer_();
       miniQuestions_ = [];
+      miniIndex_ = 0;
+      miniRunning_ = false;
       hands_ = null;
     }
   }
@@ -570,6 +613,21 @@ const LiveTeamModule = (function () {
     showStudentScreen_(false);
     lastSnap_ = null;
     markFinishedSent_ = false;
+  }
+
+  async function onHostDeal_(reshuffle) {
+    const teamSize = parseInt((el_('live-team-size-input') || {}).value, 10) || 4;
+    async function deal_() {
+      return control_({ command: reshuffle ? 'reshuffleTeams' : 'dealTeams', teamSize: teamSize });
+    }
+    try {
+      return await deal_();
+    } catch (e) {
+      const msg = String((e && e.message) || e || '');
+      if (msg.indexOf('先に問題') === -1 && msg.indexOf('NEED_QUESTIONS') === -1) throw e;
+      await onHostLoadQuestions_();
+      return deal_();
+    }
   }
 
   async function onHostLoadQuestions_() {
@@ -621,9 +679,8 @@ const LiveTeamModule = (function () {
       dealBtn.addEventListener('click', function () {
         if (actionBusy_) return;
         setActionBusy_(true);
-        const teamSize = parseInt((el_('live-team-size-input') || {}).value, 10) || 4;
         BusyButton.run(dealBtn, function () {
-          return control_({ command: 'dealTeams', teamSize: teamSize });
+          return onHostDeal_(false);
         }, '組み分け中…').catch(function (e) {
           alert(e.message || e);
         }).finally(function () {
@@ -638,9 +695,8 @@ const LiveTeamModule = (function () {
         if (actionBusy_) return;
         if (!window.confirm('チームを組み直しますか？')) return;
         setActionBusy_(true);
-        const teamSize = parseInt((el_('live-team-size-input') || {}).value, 10) || 4;
         BusyButton.run(reshuffleBtn, function () {
-          return control_({ command: 'reshuffleTeams', teamSize: teamSize });
+          return onHostDeal_(true);
         }, '再編中…').catch(function (e) {
           alert(e.message || e);
         }).finally(function () {

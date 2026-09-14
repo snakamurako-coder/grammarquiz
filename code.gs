@@ -5620,36 +5620,40 @@ function emptyLiveTeamPublic_() {
     questionCount: 12,
     choiceCount: 12,
     startedAt: 0,
-    questions: []
+    questions: [],
+    roster: [],
+    waitingCount: 0
   };
 }
 
 function slimTeamPublicForCache_(teamPublic) {
   if (!teamPublic) return null;
   const out = Object.assign({}, teamPublic);
-  if (out.questions && out.questions.length) {
-    out.questionCount = out.questions.length;
-    out.questions = [];
-  }
+  out.questions = [];
   return out;
 }
 
 function getLiveTeamSecrets_(pin) {
   const raw = liveCache_().get(liveTeamSecretsKey_(pin));
-  if (!raw) return { correctByQ: {}, assignments: {} };
+  if (!raw) return { correctByQ: {}, assignments: {}, questions: [] };
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return { correctByQ: {}, assignments: {} };
+    if (!parsed || typeof parsed !== 'object') return { correctByQ: {}, assignments: {}, questions: [] };
     if (!parsed.correctByQ || typeof parsed.correctByQ !== 'object') parsed.correctByQ = {};
     if (!parsed.assignments || typeof parsed.assignments !== 'object') parsed.assignments = {};
+    if (!parsed.questions || !Array.isArray(parsed.questions)) parsed.questions = [];
     return parsed;
   } catch (e) {
-    return { correctByQ: {}, assignments: {} };
+    return { correctByQ: {}, assignments: {}, questions: [] };
   }
 }
 
 function putLiveTeamSecrets_(pin, secrets, ttlSec) {
-  liveCache_().put(liveTeamSecretsKey_(pin), JSON.stringify(secrets || { correctByQ: {}, assignments: {} }), ttlSec);
+  const raw = JSON.stringify(secrets || { correctByQ: {}, assignments: {}, questions: [] });
+  if (raw.length > 90000) {
+    throw new Error('手札データが大きすぎます。問題数を減らしてください');
+  }
+  liveCache_().put(liveTeamSecretsKey_(pin), raw, ttlSec);
 }
 
 function liveTeamTtlSec_(meta) {
@@ -5659,6 +5663,7 @@ function liveTeamTtlSec_(meta) {
 
 function persistLiveTeamMeta_(pin, meta) {
   const ttlSec = liveTeamTtlSec_(meta);
+  if (meta.teamPublic) meta.teamPublic = slimTeamPublicForCache_(meta.teamPublic);
   putLiveMeta_(pin, meta, ttlSec);
   if (isLiveFirebaseBackend_(meta)) {
     firebasePatchLiveRoom_(pin, {
@@ -5688,7 +5693,13 @@ function partitionLiveTeams_(accounts, teamSize) {
   let i = 0;
   while (i < shuffled.length) {
     const rem = shuffled.length - i;
-    if (rem === 1) break;
+    if (rem === 1) {
+      if (!teams.length) {
+        teams.push(shuffled.slice(i));
+        i += 1;
+      }
+      break;
+    }
     const size = Math.min(teamSize, rem);
     teams.push(shuffled.slice(i, i + size));
     i += size;
@@ -5723,12 +5734,38 @@ function buildTeamAssignmentSecrets_(members, questions, correctByQ) {
     const correctId = correctByQ[q.id];
     const assign = distributeTeamHandsForQuestion_(members, q.choices || [], correctId);
     Object.keys(assign).forEach(function (acc) {
-      handsByAccount[acc][q.id] = shuffleLiveArray_(assign[acc].map(function (c) {
-        return { id: c.id, text: c.text, isCorrect: c.id === correctId };
-      }));
+      handsByAccount[acc][q.id] = shuffleLiveArray_(assign[acc].map(function (c) { return c.id; }));
     });
   });
   return { qOrder: qOrder, handsByAccount: handsByAccount };
+}
+
+function expandTeamHand_(question, choiceIds, correctId) {
+  const byId = {};
+  ((question && question.choices) || []).forEach(function (c) {
+    if (c && c.id) byId[c.id] = c;
+  });
+  return (choiceIds || []).map(function (id) {
+    const c = byId[id];
+    return {
+      id: id,
+      text: c && c.text != null ? c.text : '',
+      isCorrect: id === correctId
+    };
+  });
+}
+
+function firestoreDocumentName_(relativePath) {
+  const projectId = String(PropertiesService.getScriptProperties().getProperty(PROP.FIREBASE_PROJECT_ID) || '').trim();
+  return 'projects/' + projectId + '/databases/(default)/documents/' + String(relativePath || '').replace(/^\//, '');
+}
+
+function firebaseCommitWrites_(writes) {
+  if (!writes || !writes.length) return;
+  const chunk = 400;
+  for (let i = 0; i < writes.length; i += chunk) {
+    firestoreRequest_('POST', ':commit', { writes: writes.slice(i, i + chunk) });
+  }
 }
 
 function firebaseReadLiveTeams_(pin) {
@@ -5786,7 +5823,11 @@ function normalizeTeamQuestionsInput_(questions) {
     });
     publicQs.push({
       id: qid,
-      prompt: String(q.prompt != null ? q.prompt : (q.promptText != null ? q.promptText : '')).trim(),
+      prompt: String(
+        q.prompt != null && q.prompt !== '' ? q.prompt
+          : (q.promptText != null && q.promptText !== '' ? q.promptText
+            : (q.word != null ? q.word : (q.promptEn != null ? q.promptEn : (q.japanese != null ? q.japanese : ''))))
+      ).trim(),
       choices: choices
     });
   });
@@ -5860,14 +5901,18 @@ function apiLiveTeamControl_(requestData) {
       };
     }
     const questionId = qOrder[currentIndex];
-    const questions = (secrets.questions && secrets.questions.length)
-      ? secrets.questions : (teamPublic.questions || []);
-    let prompt = '';
+    const questions = secrets.questions || [];
+    let question = null;
     questions.forEach(function (q) {
-      if (q.id === questionId) prompt = q.prompt || '';
+      if (q.id === questionId) question = q;
     });
-    const hand = (assign.handsByAccount && assign.handsByAccount[account] && assign.handsByAccount[account][questionId])
+    const prompt = (question && question.prompt) ? question.prompt : '';
+    const correctId = secrets.correctByQ && secrets.correctByQ[questionId] ? secrets.correctByQ[questionId] : '';
+    const rawHand = (assign.handsByAccount && assign.handsByAccount[account] && assign.handsByAccount[account][questionId])
       ? assign.handsByAccount[account][questionId] : [];
+    const hand = (rawHand.length && rawHand[0] && typeof rawHand[0] === 'object' && rawHand[0].text != null)
+      ? rawHand
+      : expandTeamHand_(question, rawHand, correctId);
     return {
       status: 'success',
       data: {
@@ -5904,15 +5949,16 @@ function apiLiveTeamControl_(requestData) {
         return { status: 'error', message: '正答のない問題があります: ' + qid };
       }
     }
-    if (normalized.questions.some(function (q) { return (q.choices || []).length < choiceCount; })) {
-      return { status: 'error', message: '各問の選択肢数が不足しています' };
+    if (normalized.questions.some(function (q) { return (q.choices || []).length < teamSize; })) {
+      return { status: 'error', message: '各問の選択肢が1チーム人数より少ないです。選択肢数を増やすか人数を減らしてください' };
     }
     teamPublic.phase = 'lobby';
     teamPublic.teamSize = teamSize;
     teamPublic.choiceCount = choiceCount;
     teamPublic.questionCount = normalized.questions.length;
-    teamPublic.questions = normalized.questions;
+    teamPublic.questions = [];
     teamPublic.startedAt = 0;
+    teamPublic.roster = [];
     secrets = { correctByQ: normalized.correctByQ, assignments: {}, questions: normalized.questions };
     putLiveTeamSecrets_(pin, secrets, ttlSec);
     meta.teamPublic = teamPublic;
@@ -5921,8 +5967,11 @@ function apiLiveTeamControl_(requestData) {
   }
 
   if (cmd === 'dealTeams' || cmd === 'reshuffleTeams') {
-    if (!teamPublic.questions || !teamPublic.questions.length) {
-      return { status: 'error', message: '先に問題を読み込んでください' };
+    const questions = (secrets.questions && secrets.questions.length)
+      ? secrets.questions
+      : (teamPublic.questions || []);
+    if (!questions.length) {
+      return { status: 'error', message: '先に問題を読み込んでください', code: 'NEED_QUESTIONS' };
     }
     if (teamPublic.phase === 'racing') {
       return { status: 'error', message: 'レース中はチーム再編できません' };
@@ -5934,33 +5983,86 @@ function apiLiveTeamControl_(requestData) {
     }
     teamPublic.teamSize = teamSize;
     const entries = firebaseReadLiveEntries_(pin);
-    const accounts = entries.map(function (e) { return String(e.account || '').trim().toLowerCase(); }).filter(Boolean);
+    if (!entries.length) {
+      return { status: 'error', message: '参加者がいません。生徒が入室してからチームを組んでください' };
+    }
+    const entryByAcc = {};
+    entries.forEach(function (e) {
+      const acc = String(e.account || '').trim().toLowerCase();
+      if (acc) entryByAcc[acc] = e;
+    });
+    const accounts = Object.keys(entryByAcc);
     const parts = partitionLiveTeams_(accounts, teamSize);
-    firebaseDeleteAllTeams_(pin);
-    accounts.forEach(function (acc) { firebasePatchEntryTeamId_(pin, acc, ''); });
+    if (!parts.teams.length) {
+      return { status: 'error', message: 'チームを組めませんでした（参加 ' + accounts.length + ' 人）' };
+    }
+    const existingTeams = firebaseReadLiveTeams_(pin);
+    const writes = [];
+    const newCount = parts.teams.length;
+    existingTeams.forEach(function (team) {
+      const teamId = String(team.id || '').trim();
+      if (!teamId) return;
+      const num = parseInt(String(teamId).replace(/^team/i, ''), 10);
+      if (isNaN(num) || num > newCount) {
+        writes.push({ delete: firestoreDocumentName_('liveRooms/' + pin + '/teams/' + teamId) });
+      }
+    });
+    secrets.questions = questions;
     secrets.assignments = {};
+    const roster = [];
+    const teamIdByAcc = {};
+    parts.waiting.forEach(function (acc) { teamIdByAcc[acc] = ''; });
     parts.teams.forEach(function (members, idx) {
       const teamId = 'team' + (idx + 1);
       const color = LIVE_TEAM_COLORS_[idx % LIVE_TEAM_COLORS_.length];
-      const assign = buildTeamAssignmentSecrets_(members, teamPublic.questions, secrets.correctByQ || {});
+      const assign = buildTeamAssignmentSecrets_(members, questions, secrets.correctByQ || {});
       secrets.assignments[teamId] = assign;
-      firebaseWriteTeam_(pin, teamId, {
+      const memberNames = members.map(function (acc) {
+        const e = entryByAcc[acc];
+        return ((e && e.number) ? (String(e.number) + ' ') : '') + ((e && e.name) || acc);
+      });
+      members.forEach(function (acc) { teamIdByAcc[acc] = teamId; });
+      writes.push({
+        update: {
+          name: firestoreDocumentName_('liveRooms/' + pin + '/teams/' + teamId),
+          fields: firestoreEncodeFields_({
+            id: teamId,
+            color: color,
+            name: 'チーム ' + (idx + 1),
+            memberAccounts: members,
+            memberNames: memberNames,
+            qOrder: assign.qOrder,
+            currentIndex: 0,
+            lockUntil: 0,
+            finishedAt: 0,
+            wrongCount: 0
+          })
+        }
+      });
+      roster.push({
         id: teamId,
         color: color,
         name: 'チーム ' + (idx + 1),
         memberAccounts: members,
-        qOrder: assign.qOrder,
-        currentIndex: 0,
-        lockUntil: 0,
-        finishedAt: 0,
-        wrongCount: 0
+        memberNames: memberNames
       });
-      members.forEach(function (acc) { firebasePatchEntryTeamId_(pin, acc, teamId); });
     });
-    parts.waiting.forEach(function (acc) { firebasePatchEntryTeamId_(pin, acc, ''); });
+    Object.keys(teamIdByAcc).forEach(function (acc) {
+      writes.push({
+        update: {
+          name: firestoreDocumentName_('liveRooms/' + pin + '/entries/' + acc),
+          fields: { teamId: { stringValue: String(teamIdByAcc[acc] || '') } }
+        },
+        updateMask: { fieldPaths: ['teamId'] }
+      });
+    });
+    firebaseCommitWrites_(writes);
     putLiveTeamSecrets_(pin, secrets, ttlSec);
-    teamPublic.phase = parts.teams.length ? 'ready' : 'lobby';
+    teamPublic.phase = 'ready';
     teamPublic.startedAt = 0;
+    teamPublic.questions = [];
+    teamPublic.roster = roster;
+    teamPublic.waitingCount = parts.waiting.length;
     meta.teamPublic = teamPublic;
     persistLiveTeamMeta_(pin, meta);
     return {
