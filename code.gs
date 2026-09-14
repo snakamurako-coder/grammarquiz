@@ -541,7 +541,7 @@ function doPost(e) {
     // 授業ライブは Cache + 認証のみ。毎回の Drive 初期化を挟むと作成・ボードがタイムアウトする
     if (action === 'liveCreate' || action === 'liveJoin' || action === 'liveSubmit'
         || action === 'liveBoard' || action === 'liveClose' || action === 'liveExport'
-        || action === 'liveConfig' || action === 'livePollControl'
+        || action === 'liveConfig' || action === 'livePollControl' || action === 'liveTeamControl'
         || action === 'liveSwitchActivity') {
       return sendResponse(handleLiveApi_(action, requestData));
     }
@@ -4721,6 +4721,8 @@ const LIVE_META_PREFIX = 'live_meta_';
 const LIVE_ENTRY_PREFIX = 'live_entry_';
 const LIVE_INDEX_PREFIX = 'live_index_';
 const LIVE_POLL_SECRETS_PREFIX = 'live_pollsec_';
+const LIVE_TEAM_SECRETS_PREFIX = 'live_teamsec_';
+const LIVE_TEAM_COLORS_ = ['#1976d2', '#e53935', '#43a047', '#fb8c00', '#8e24aa', '#00838f', '#c2185b', '#5d4037', '#546e7a', '#f9a825'];
 const LIVE_PIN_MIN = 1000;
 const LIVE_PIN_MAX = 9999;
 const LIVE_POLL_HIRAGANA_POOL_ = 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろ'.split('');
@@ -4750,6 +4752,10 @@ function liveMetaKey_(pin) {
 
 function livePollSecretsKey_(pin) {
   return LIVE_POLL_SECRETS_PREFIX + String(pin);
+}
+
+function liveTeamSecretsKey_(pin) {
+  return LIVE_TEAM_SECRETS_PREFIX + String(pin);
 }
 
 function computeLiveRoomTtlSec_(timeLimitSec) {
@@ -4846,6 +4852,7 @@ function slimLiveMetaForCache_(meta, dropRoster) {
     targetClass: meta.targetClass || '',
     continueAcrossModes: meta.continueAcrossModes !== false,
     pollPublic: meta.pollPublic || null,
+    teamPublic: slimTeamPublicForCache_(meta.teamPublic),
     launchOptions: compactLiveLaunchOptions_(meta.launchOptions)
   };
   if (!dropRoster && meta.roster && meta.roster.length) out.roster = meta.roster;
@@ -4856,7 +4863,7 @@ function slimLiveMetaForCache_(meta, dropRoster) {
 function putLiveMeta_(pin, meta, ttlSec) {
   let payload = meta;
   let raw = JSON.stringify(payload || {});
-  if (raw.length > 90000 && liveCurrentMode_(meta) === 'poll') {
+  if (raw.length > 90000 && (liveCurrentMode_(meta) === 'poll' || liveCurrentMode_(meta) === 'vocab-team')) {
     payload = slimLiveMetaForCache_(meta, false);
     raw = JSON.stringify(payload);
     if (raw.length > 90000) {
@@ -4886,7 +4893,7 @@ function putLiveEntry_(pin, account, entry, ttlSec) {
 
 function isLiveRoomOpen_(meta) {
   if (!meta) return false;
-  if (liveCurrentMode_(meta) === 'poll') return true;
+  if (liveCurrentMode_(meta) === 'poll' || liveCurrentMode_(meta) === 'vocab-team') return true;
   const closesAt = parseInt(meta.closesAt, 10) || 0;
   return !closesAt || Date.now() <= closesAt;
 }
@@ -5012,7 +5019,8 @@ function buildLiveBoardEntry_(entry) {
     working: !!(entry && entry.working),
     lastActiveAt: parseInt(entry && entry.lastActiveAt, 10) || 0,
     best: best,
-    poll: entry && entry.poll ? entry.poll : null
+    poll: entry && entry.poll ? entry.poll : null,
+    teamId: entry && entry.teamId != null ? String(entry.teamId) : ''
   };
 }
 
@@ -5483,6 +5491,7 @@ function firebaseReadLiveEntries_(pin) {
 }
 
 function firebaseDeleteLiveRoom_(pin) {
+  firebaseDeleteAllTeams_(pin);
   const entries = firebaseReadLiveEntries_(pin);
   entries.forEach(function (entry) {
     const account = String((entry && entry.account) || '').trim().toLowerCase();
@@ -5602,6 +5611,437 @@ function getLivePollSecrets_(pin) {
 
 function putLivePollSecrets_(pin, secrets, ttlSec) {
   liveCache_().put(livePollSecretsKey_(pin), JSON.stringify(secrets || { answers: {} }), ttlSec);
+}
+
+function emptyLiveTeamPublic_() {
+  return {
+    phase: 'lobby',
+    teamSize: 4,
+    questionCount: 12,
+    choiceCount: 12,
+    startedAt: 0,
+    questions: []
+  };
+}
+
+function slimTeamPublicForCache_(teamPublic) {
+  if (!teamPublic) return null;
+  const out = Object.assign({}, teamPublic);
+  if (out.questions && out.questions.length) {
+    out.questionCount = out.questions.length;
+    out.questions = [];
+  }
+  return out;
+}
+
+function getLiveTeamSecrets_(pin) {
+  const raw = liveCache_().get(liveTeamSecretsKey_(pin));
+  if (!raw) return { correctByQ: {}, assignments: {} };
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return { correctByQ: {}, assignments: {} };
+    if (!parsed.correctByQ || typeof parsed.correctByQ !== 'object') parsed.correctByQ = {};
+    if (!parsed.assignments || typeof parsed.assignments !== 'object') parsed.assignments = {};
+    return parsed;
+  } catch (e) {
+    return { correctByQ: {}, assignments: {} };
+  }
+}
+
+function putLiveTeamSecrets_(pin, secrets, ttlSec) {
+  liveCache_().put(liveTeamSecretsKey_(pin), JSON.stringify(secrets || { correctByQ: {}, assignments: {} }), ttlSec);
+}
+
+function liveTeamTtlSec_(meta) {
+  if (liveCurrentMode_(meta) === 'vocab-team') return 21600;
+  return computeLiveRoomTtlSec_(meta && meta.timeLimitSec);
+}
+
+function persistLiveTeamMeta_(pin, meta) {
+  const ttlSec = liveTeamTtlSec_(meta);
+  putLiveMeta_(pin, meta, ttlSec);
+  if (isLiveFirebaseBackend_(meta)) {
+    firebasePatchLiveRoom_(pin, {
+      teamPublic: meta.teamPublic || emptyLiveTeamPublic_(),
+      activity: meta.activity || meta.mode || 'vocab-team',
+      mode: meta.mode || meta.activity || 'vocab-team'
+    });
+  }
+  return ttlSec;
+}
+
+function shuffleLiveArray_(arr) {
+  arr = (arr || []).slice();
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = arr[i];
+    arr[i] = arr[j];
+    arr[j] = t;
+  }
+  return arr;
+}
+
+function partitionLiveTeams_(accounts, teamSize) {
+  teamSize = Math.max(2, parseInt(teamSize, 10) || 4);
+  const shuffled = shuffleLiveArray_(accounts || []);
+  const teams = [];
+  let i = 0;
+  while (i < shuffled.length) {
+    const rem = shuffled.length - i;
+    if (rem === 1) break;
+    const size = Math.min(teamSize, rem);
+    teams.push(shuffled.slice(i, i + size));
+    i += size;
+  }
+  return { teams: teams, waiting: shuffled.slice(i) };
+}
+
+function distributeTeamHandsForQuestion_(members, choices, correctId) {
+  members = members || [];
+  choices = choices || [];
+  const assign = {};
+  members.forEach(function (m) { assign[m] = []; });
+  if (!members.length) return assign;
+  const holder = members[Math.floor(Math.random() * members.length)];
+  let correctChoice = null;
+  choices.forEach(function (c) {
+    if (c && c.id === correctId) correctChoice = c;
+  });
+  const rest = shuffleLiveArray_(choices.filter(function (c) { return c && c.id !== correctId; }));
+  if (correctChoice) assign[holder].push(correctChoice);
+  rest.forEach(function (c, idx) {
+    assign[members[idx % members.length]].push(c);
+  });
+  return assign;
+}
+
+function buildTeamAssignmentSecrets_(members, questions, correctByQ) {
+  const qOrder = shuffleLiveArray_((questions || []).map(function (q) { return q.id; }));
+  const handsByAccount = {};
+  members.forEach(function (m) { handsByAccount[m] = {}; });
+  (questions || []).forEach(function (q) {
+    const correctId = correctByQ[q.id];
+    const assign = distributeTeamHandsForQuestion_(members, q.choices || [], correctId);
+    Object.keys(assign).forEach(function (acc) {
+      handsByAccount[acc][q.id] = shuffleLiveArray_(assign[acc].map(function (c) {
+        return { id: c.id, text: c.text, isCorrect: c.id === correctId };
+      }));
+    });
+  });
+  return { qOrder: qOrder, handsByAccount: handsByAccount };
+}
+
+function firebaseReadLiveTeams_(pin) {
+  const docPath = '/liveRooms/' + encodeURIComponent(pin) + '/teams';
+  const res = firestoreRequest_('GET', docPath, null, null);
+  if (!res || !res.documents) return [];
+  return res.documents.map(function (doc) {
+    const data = firestoreDecodeFields_(doc.fields || {});
+    if (!data.id && doc.name) {
+      const parts = String(doc.name).split('/');
+      data.id = parts[parts.length - 1];
+    }
+    return data;
+  });
+}
+
+function firebaseWriteTeam_(pin, teamId, data) {
+  teamId = String(teamId || '').trim();
+  if (!teamId) throw new Error('teamId が必要です');
+  const docPath = '/liveRooms/' + encodeURIComponent(pin) + '/teams/' + encodeURIComponent(teamId);
+  firestoreRequest_('PATCH', docPath, { fields: firestoreEncodeFields_(data) });
+}
+
+function firebaseDeleteAllTeams_(pin) {
+  const teams = firebaseReadLiveTeams_(pin);
+  teams.forEach(function (team) {
+    const teamId = String(team.id || '').trim();
+    if (!teamId) return;
+    try {
+      firestoreRequest_('DELETE', '/liveRooms/' + encodeURIComponent(pin) + '/teams/' + encodeURIComponent(teamId));
+    } catch (e) { /* ignore */ }
+  });
+}
+
+function firebasePatchEntryTeamId_(pin, account, teamId) {
+  account = String(account || '').trim().toLowerCase();
+  if (!account) return;
+  const entry = firebaseReadLiveEntry_(pin, account);
+  if (!entry) return;
+  entry.teamId = teamId != null ? String(teamId) : '';
+  firebaseWriteLiveEntry_(pin, entry);
+}
+
+function normalizeTeamQuestionsInput_(questions) {
+  const publicQs = [];
+  const correctByQ = {};
+  (questions || []).forEach(function (q, idx) {
+    const qid = String(q.id || ('q' + (idx + 1))).trim();
+    const choices = [];
+    (q.choices || []).forEach(function (c, ci) {
+      const cid = String(c.id || (qid + '_c' + ci)).trim();
+      const text = String(c.text != null ? c.text : '').trim();
+      choices.push({ id: cid, text: text });
+      if (c.isCorrect) correctByQ[qid] = cid;
+    });
+    publicQs.push({
+      id: qid,
+      prompt: String(q.prompt != null ? q.prompt : (q.promptText != null ? q.promptText : '')).trim(),
+      choices: choices
+    });
+  });
+  return { questions: publicQs, correctByQ: correctByQ };
+}
+
+function requireLiveTeamAdmin_(requestData) {
+  const admin = requireAssignmentAdminFromRequest_(requestData || {});
+  if (!admin.ok) return { ok: false, error: admin.error };
+  const pin = String(requestData.pin || '').trim();
+  const meta = getLiveMeta_(pin);
+  if (!meta) return { ok: false, error: '部屋が見つかりません' };
+  if (liveCurrentMode_(meta) !== 'vocab-team') return { ok: false, error: 'この部屋はチームN択ではありません' };
+  if (!isLiveFirebaseBackend_(meta)) return { ok: false, error: 'チームN択は Firebase β が必要です' };
+  return { ok: true, pin: pin, meta: meta, admin: admin };
+}
+
+function apiLiveTeamControl_(requestData) {
+  requestData = requestData || {};
+  const cmd = String(requestData.command || requestData.subAction || '').trim();
+  if (!cmd) return { status: 'error', message: 'command が必要です' };
+
+  if (cmd === 'myHands') {
+    const authReq = requireAuthToken_(requestData);
+    if (!authReq.ok) return { status: 'error', message: authReq.error };
+    const pin = String(requestData.pin || '').trim();
+    const meta = getLiveMeta_(pin);
+    if (!meta) return { status: 'error', message: '部屋が見つかりません' };
+    if (liveCurrentMode_(meta) !== 'vocab-team') return { status: 'error', message: 'この部屋はチームN択ではありません' };
+    const user = resolveAuthUserFromRequest_(authReq);
+    const account = String(user.account || authReq.auth.email || '').trim().toLowerCase();
+    if (!account) return { status: 'error', message: 'アカウント情報を取得できません' };
+    const entry = firebaseReadLiveEntry_(pin, account);
+    const teamId = entry && entry.teamId ? String(entry.teamId) : '';
+    const teamPublic = meta.teamPublic || emptyLiveTeamPublic_();
+    if (!teamId) {
+      return {
+        status: 'success',
+        data: {
+          phase: teamPublic.phase,
+          teamId: '',
+          waiting: true
+        }
+      };
+    }
+    const teams = firebaseReadLiveTeams_(pin);
+    let team = null;
+    teams.forEach(function (t) {
+      if (String(t.id) === teamId) team = t;
+    });
+    if (!team) return { status: 'error', message: 'チームが見つかりません' };
+    const secrets = getLiveTeamSecrets_(pin);
+    const assign = secrets.assignments && secrets.assignments[teamId] ? secrets.assignments[teamId] : null;
+    if (!assign) return { status: 'error', message: '手札が未設定です' };
+    const qOrder = team.qOrder || assign.qOrder || [];
+    const currentIndex = parseInt(team.currentIndex, 10) || 0;
+    const finishedAt = parseInt(team.finishedAt, 10) || 0;
+    if (finishedAt > 0 || currentIndex >= qOrder.length) {
+      return {
+        status: 'success',
+        data: {
+          phase: teamPublic.phase,
+          teamId: teamId,
+          currentIndex: currentIndex,
+          totalQuestions: qOrder.length,
+          finished: true,
+          finishedAt: finishedAt,
+          lockUntil: parseInt(team.lockUntil, 10) || 0,
+          startedAt: parseInt(teamPublic.startedAt, 10) || 0
+        }
+      };
+    }
+    const questionId = qOrder[currentIndex];
+    const questions = (secrets.questions && secrets.questions.length)
+      ? secrets.questions : (teamPublic.questions || []);
+    let prompt = '';
+    questions.forEach(function (q) {
+      if (q.id === questionId) prompt = q.prompt || '';
+    });
+    const hand = (assign.handsByAccount && assign.handsByAccount[account] && assign.handsByAccount[account][questionId])
+      ? assign.handsByAccount[account][questionId] : [];
+    return {
+      status: 'success',
+      data: {
+        phase: teamPublic.phase,
+        teamId: teamId,
+        currentIndex: currentIndex,
+        totalQuestions: qOrder.length,
+        questionId: questionId,
+        prompt: prompt,
+        hand: hand,
+        lockUntil: parseInt(team.lockUntil, 10) || 0,
+        startedAt: parseInt(teamPublic.startedAt, 10) || 0
+      }
+    };
+  }
+
+  const req = requireLiveTeamAdmin_(requestData);
+  if (!req.ok) return { status: 'error', message: req.error };
+  const pin = req.pin;
+  let meta = req.meta;
+  const ttlSec = liveTeamTtlSec_(meta);
+  if (!meta.teamPublic) meta.teamPublic = emptyLiveTeamPublic_();
+  const teamPublic = meta.teamPublic;
+  let secrets = getLiveTeamSecrets_(pin);
+
+  if (cmd === 'loadQuestions') {
+    const teamSize = Math.max(2, parseInt(requestData.teamSize, 10) || teamPublic.teamSize || 4);
+    const choiceCount = Math.max(teamSize, parseInt(requestData.choiceCount, 10) || teamPublic.choiceCount || 12);
+    const normalized = normalizeTeamQuestionsInput_(requestData.questions || []);
+    if (!normalized.questions.length) return { status: 'error', message: '問題がありません' };
+    for (let qi = 0; qi < normalized.questions.length; qi++) {
+      const qid = normalized.questions[qi].id;
+      if (!normalized.correctByQ[qid]) {
+        return { status: 'error', message: '正答のない問題があります: ' + qid };
+      }
+    }
+    if (normalized.questions.some(function (q) { return (q.choices || []).length < choiceCount; })) {
+      return { status: 'error', message: '各問の選択肢数が不足しています' };
+    }
+    teamPublic.phase = 'lobby';
+    teamPublic.teamSize = teamSize;
+    teamPublic.choiceCount = choiceCount;
+    teamPublic.questionCount = normalized.questions.length;
+    teamPublic.questions = normalized.questions;
+    teamPublic.startedAt = 0;
+    secrets = { correctByQ: normalized.correctByQ, assignments: {}, questions: normalized.questions };
+    putLiveTeamSecrets_(pin, secrets, ttlSec);
+    meta.teamPublic = teamPublic;
+    persistLiveTeamMeta_(pin, meta);
+    return { status: 'success', data: { teamPublic: teamPublic } };
+  }
+
+  if (cmd === 'dealTeams' || cmd === 'reshuffleTeams') {
+    if (!teamPublic.questions || !teamPublic.questions.length) {
+      return { status: 'error', message: '先に問題を読み込んでください' };
+    }
+    if (teamPublic.phase === 'racing') {
+      return { status: 'error', message: 'レース中はチーム再編できません' };
+    }
+    const teamSize = Math.max(2, parseInt(requestData.teamSize, 10) || teamPublic.teamSize || 4);
+    const choiceCount = Math.max(teamSize, parseInt(teamPublic.choiceCount, 10) || 12);
+    if (teamSize > choiceCount) {
+      return { status: 'error', message: '1チーム人数は選択肢数以下にしてください' };
+    }
+    teamPublic.teamSize = teamSize;
+    const entries = firebaseReadLiveEntries_(pin);
+    const accounts = entries.map(function (e) { return String(e.account || '').trim().toLowerCase(); }).filter(Boolean);
+    const parts = partitionLiveTeams_(accounts, teamSize);
+    firebaseDeleteAllTeams_(pin);
+    accounts.forEach(function (acc) { firebasePatchEntryTeamId_(pin, acc, ''); });
+    secrets.assignments = {};
+    parts.teams.forEach(function (members, idx) {
+      const teamId = 'team' + (idx + 1);
+      const color = LIVE_TEAM_COLORS_[idx % LIVE_TEAM_COLORS_.length];
+      const assign = buildTeamAssignmentSecrets_(members, teamPublic.questions, secrets.correctByQ || {});
+      secrets.assignments[teamId] = assign;
+      firebaseWriteTeam_(pin, teamId, {
+        id: teamId,
+        color: color,
+        name: 'チーム ' + (idx + 1),
+        memberAccounts: members,
+        qOrder: assign.qOrder,
+        currentIndex: 0,
+        lockUntil: 0,
+        finishedAt: 0,
+        wrongCount: 0
+      });
+      members.forEach(function (acc) { firebasePatchEntryTeamId_(pin, acc, teamId); });
+    });
+    parts.waiting.forEach(function (acc) { firebasePatchEntryTeamId_(pin, acc, ''); });
+    putLiveTeamSecrets_(pin, secrets, ttlSec);
+    teamPublic.phase = parts.teams.length ? 'ready' : 'lobby';
+    teamPublic.startedAt = 0;
+    meta.teamPublic = teamPublic;
+    persistLiveTeamMeta_(pin, meta);
+    return {
+      status: 'success',
+      data: {
+        teamPublic: teamPublic,
+        teamCount: parts.teams.length,
+        waitingCount: parts.waiting.length
+      }
+    };
+  }
+
+  if (cmd === 'startRace') {
+    if (teamPublic.phase !== 'ready') {
+      return { status: 'error', message: 'チームを組んでから開始してください' };
+    }
+    const teams = firebaseReadLiveTeams_(pin);
+    if (!teams.length) return { status: 'error', message: 'チームがありません' };
+    const nowMs = Date.now();
+    teamPublic.phase = 'racing';
+    teamPublic.startedAt = nowMs;
+    teams.forEach(function (team) {
+      const teamId = String(team.id || '').trim();
+      if (!teamId) return;
+      firebaseWriteTeam_(pin, teamId, {
+        id: teamId,
+        color: team.color,
+        name: team.name,
+        memberAccounts: team.memberAccounts || [],
+        qOrder: team.qOrder || [],
+        currentIndex: 0,
+        lockUntil: 0,
+        finishedAt: 0,
+        wrongCount: 0
+      });
+    });
+    meta.teamPublic = teamPublic;
+    persistLiveTeamMeta_(pin, meta);
+    return { status: 'success', data: { teamPublic: teamPublic, startedAt: nowMs } };
+  }
+
+  if (cmd === 'markFinished') {
+    const teams = firebaseReadLiveTeams_(pin);
+    if (!teams.length) return { status: 'error', message: 'チームがありません' };
+    const allDone = teams.every(function (team) {
+      return parseInt(team.finishedAt, 10) > 0;
+    });
+    if (!allDone) return { status: 'success', data: { teamPublic: teamPublic, finished: false } };
+    teamPublic.phase = 'finished';
+    meta.teamPublic = teamPublic;
+    persistLiveTeamMeta_(pin, meta);
+    return { status: 'success', data: { teamPublic: teamPublic, finished: true } };
+  }
+
+  if (cmd === 'resetRace') {
+    if (teamPublic.phase === 'racing' || teamPublic.phase === 'finished') {
+      const teams = firebaseReadLiveTeams_(pin);
+      teams.forEach(function (team) {
+        const teamId = String(team.id || '').trim();
+        if (!teamId) return;
+        firebaseWriteTeam_(pin, teamId, {
+          id: teamId,
+          color: team.color,
+          name: team.name,
+          memberAccounts: team.memberAccounts || [],
+          qOrder: team.qOrder || [],
+          currentIndex: 0,
+          lockUntil: 0,
+          finishedAt: 0,
+          wrongCount: 0
+        });
+      });
+    }
+    teamPublic.phase = firebaseReadLiveTeams_(pin).length ? 'ready' : 'lobby';
+    teamPublic.startedAt = 0;
+    meta.teamPublic = teamPublic;
+    persistLiveTeamMeta_(pin, meta);
+    return { status: 'success', data: { teamPublic: teamPublic } };
+  }
+
+  return { status: 'error', message: '未知の command: ' + cmd };
 }
 
 function livePollTtlSec_(meta) {
@@ -6207,8 +6647,36 @@ function apiLiveSwitchActivity_(requestData) {
   }
   const prevActivity = liveCurrentMode_(meta);
   const activity = String(requestData.activity || '').trim();
-  if (activity !== 'poll' && activity !== 'vocab' && activity !== 'word-link') {
-    return { status: 'error', message: 'activity は poll / vocab / word-link が必要です' };
+  if (activity !== 'poll' && activity !== 'vocab' && activity !== 'word-link' && activity !== 'vocab-team') {
+    return { status: 'error', message: 'activity は poll / vocab / word-link / vocab-team が必要です' };
+  }
+  if (activity === 'vocab-team') {
+    if (!isFirebaseServerConfigured_()) {
+      return { status: 'error', message: 'チームN択は Firebase β が必要です' };
+    }
+    if (normalizeLiveBackend_(meta.backend) !== 'firebase') {
+      return { status: 'error', message: 'チームN択への切替は Firebase β で開いた部屋のみ可能です' };
+    }
+    const launchOptions = requestData.launchOptions || meta.launchOptions || {};
+    if (!launchOptions.bookName || !launchOptions.sheetName) {
+      return { status: 'error', message: 'ブックと教材（シート）が必要です' };
+    }
+    meta.backend = 'firebase';
+    if (prevActivity !== 'vocab-team' || !meta.teamPublic) {
+      meta.teamPublic = emptyLiveTeamPublic_();
+      putLiveTeamSecrets_(pin, { correctByQ: {}, assignments: {}, questions: [] }, 21600);
+      firebaseDeleteAllTeams_(pin);
+    }
+    meta.launchOptions = launchOptions;
+    meta.timeLimitSec = 0;
+    meta.closesAt = 0;
+    meta.autoSubmitOnTimeout = false;
+    const teamTitle = String(requestData.title || '').trim();
+    meta.title = teamTitle || (launchOptions.bookName + ' / ' + launchOptions.sheetName + '（チームN択）');
+    if (prevActivity === 'poll' && meta.pollPublic) {
+      meta.pollPublic.phase = 'idle';
+      meta.pollPublic.collectEndsAt = 0;
+    }
   }
   if (activity === 'poll') {
     if (!isFirebaseServerConfigured_()) {
@@ -6257,7 +6725,7 @@ function apiLiveSwitchActivity_(requestData) {
   }
   meta.activity = activity;
   meta.mode = activity;
-  const ttlSec = activity === 'poll' ? 21600 : computeLiveRoomTtlSec_(meta.timeLimitSec);
+  const ttlSec = (activity === 'poll' || activity === 'vocab-team') ? 21600 : computeLiveRoomTtlSec_(meta.timeLimitSec);
   putLiveMeta_(pin, meta, ttlSec);
   if (isLiveFirebaseBackend_(meta)) {
     const patch = {
@@ -6272,6 +6740,8 @@ function apiLiveSwitchActivity_(requestData) {
     };
     if (activity === 'poll') patch.pollPublic = meta.pollPublic || emptyLivePollPublic_();
     else if (prevActivity === 'poll' && meta.pollPublic) patch.pollPublic = meta.pollPublic;
+    if (activity === 'vocab-team') patch.teamPublic = meta.teamPublic || emptyLiveTeamPublic_();
+    else if (prevActivity === 'vocab-team' && meta.teamPublic) patch.teamPublic = meta.teamPublic;
     firebasePatchLiveRoom_(pin, patch);
   }
   return {
@@ -6283,6 +6753,7 @@ function apiLiveSwitchActivity_(requestData) {
       mode: meta.mode,
       activity: meta.activity,
       pollPublic: meta.pollPublic || null,
+      teamPublic: meta.teamPublic || null,
       launchOptions: meta.launchOptions || null,
       timeLimitSec: meta.timeLimitSec || 0,
       autoSubmitOnTimeout: meta.autoSubmitOnTimeout !== false,
@@ -6303,6 +6774,7 @@ function handleLiveApi_(action, requestData) {
     if (action === 'liveExport') return apiLiveExport_(requestData);
     if (action === 'liveClose') return apiLiveClose_(requestData);
     if (action === 'livePollControl') return apiLivePollControl_(requestData);
+    if (action === 'liveTeamControl') return apiLiveTeamControl_(requestData);
     if (action === 'liveSwitchActivity') return apiLiveSwitchActivity_(requestData);
     return { status: 'error', message: '未知のライブAPI: ' + action };
   } catch (e) {
@@ -6314,10 +6786,65 @@ function apiLiveCreate_(requestData) {
   const admin = requireAssignmentAdminFromRequest_(requestData || {});
   if (!admin.ok) return { status: 'error', message: admin.error };
   const mode = String(requestData.mode || '').trim();
-  if (mode !== 'vocab' && mode !== 'word-link' && mode !== 'poll') {
-    return { status: 'error', message: 'mode は vocab / word-link / poll が必要です' };
+  if (mode !== 'vocab' && mode !== 'word-link' && mode !== 'poll' && mode !== 'vocab-team') {
+    return { status: 'error', message: 'mode は vocab / word-link / poll / vocab-team が必要です' };
   }
   const launchOptions = requestData.launchOptions || {};
+  if (mode === 'vocab-team') {
+    if (!isFirebaseServerConfigured_()) {
+      return { status: 'error', message: 'チームN択ライブは Firebase β が必要です。Script Properties を設定してください' };
+    }
+    if (!launchOptions.bookName || !launchOptions.sheetName) {
+      return { status: 'error', message: 'ブックと教材（シート）が必要です' };
+    }
+    const pin = generateLivePin_();
+    const nowMs = Date.now();
+    const targetClass = String(requestData.targetClass || '').trim();
+    const roster = buildLiveRoster_(targetClass);
+    const title = String(requestData.title || '').trim()
+      || (launchOptions.bookName + ' / ' + launchOptions.sheetName + '（チームN択）');
+    const teamPublic = emptyLiveTeamPublic_();
+    const ttlSec = 21600;
+    const meta = {
+      pin: pin,
+      backend: 'firebase',
+      title: title,
+      mode: 'vocab-team',
+      activity: 'vocab-team',
+      launchOptions: launchOptions,
+      targetClass: targetClass,
+      timeLimitSec: 0,
+      autoSubmitOnTimeout: false,
+      createdAt: nowMs,
+      closesAt: 0,
+      createdBy: String(admin.email || '').trim().toLowerCase(),
+      roster: roster,
+      teamPublic: teamPublic,
+      continueAcrossModes: requestData.continueAcrossModes !== false
+    };
+    putLiveMeta_(pin, meta, ttlSec);
+    putLiveTeamSecrets_(pin, { correctByQ: {}, assignments: {}, questions: [] }, ttlSec);
+    firebaseCreateLiveRoom_(pin, meta);
+    return {
+      status: 'success',
+      data: {
+        pin: pin,
+        backend: 'firebase',
+        title: title,
+        mode: 'vocab-team',
+        activity: 'vocab-team',
+        targetClass: targetClass,
+        timeLimitSec: 0,
+        autoSubmitOnTimeout: false,
+        closesAt: 0,
+        rosterCount: roster.length,
+        ttlSec: ttlSec,
+        launchOptions: launchOptions,
+        teamPublic: teamPublic,
+        continueAcrossModes: meta.continueAcrossModes
+      }
+    };
+  }
   if (mode === 'poll') {
     if (!isFirebaseServerConfigured_()) {
       return { status: 'error', message: '投票ライブは Firebase β が必要です。Script Properties を設定してください' };
@@ -6442,7 +6969,8 @@ function apiLiveJoin_(requestData) {
   const user = resolveAuthUserFromRequest_(authReq);
   const account = String(user.account || authReq.auth.email || '').trim().toLowerCase();
   if (!account) return { status: 'error', message: 'アカウント情報を取得できません' };
-  const ttlSec = computeLiveRoomTtlSec_(meta.timeLimitSec);
+  const ttlSec = (liveCurrentMode_(meta) === 'poll' || liveCurrentMode_(meta) === 'vocab-team')
+    ? 21600 : computeLiveRoomTtlSec_(meta.timeLimitSec);
   const backend = normalizeLiveBackend_(meta.backend);
   let entry = null;
   if (backend === 'firebase') {
@@ -6455,7 +6983,8 @@ function apiLiveJoin_(requestData) {
         class: String(user.class || '').trim(),
         attempts: 0,
         status: 'joined',
-        best: null
+        best: null,
+        teamId: ''
       };
       firebaseWriteLiveEntry_(pin, entry);
     }
@@ -6484,6 +7013,7 @@ function apiLiveJoin_(requestData) {
       mode: meta.mode,
       activity: meta.activity || meta.mode,
       pollPublic: meta.pollPublic || null,
+      teamPublic: meta.teamPublic || null,
       timeLimitSec: meta.timeLimitSec,
       autoSubmitOnTimeout: meta.autoSubmitOnTimeout !== false,
       closesAt: meta.closesAt,
@@ -6503,6 +7033,9 @@ function apiLiveSubmit_(requestData) {
   const activity = meta.activity || meta.mode;
   if (activity === 'poll') {
     return { status: 'error', message: '投票ライブの回答は Firebase 経由で送信してください' };
+  }
+  if (activity === 'vocab-team') {
+    return { status: 'error', message: 'チームN択ライブの回答は Firebase 経由で送信してください' };
   }
   if (activity !== 'vocab' && activity !== 'word-link') {
     return { status: 'error', message: 'いまはクイズ提出を受け付けていません' };

@@ -1205,7 +1205,9 @@ body.live-mode-view-active #profile-container,
 body.live-mode-view-active #mypage-container,
 body.live-mode-view-active #start-btn { display: none !important; }
 body.live-poll-host-active,
-body.live-poll-student-active {
+body.live-poll-student-active,
+body.live-team-host-active,
+body.live-team-student-active {
   max-width: none;
   padding: 0;
   overflow: hidden;
@@ -1226,8 +1228,30 @@ body.live-poll-student-active #vocab-link-screen,
 body.live-poll-student-active #reading-screen,
 body.live-poll-student-active #login-screen,
 body.live-poll-student-active #live-room-board-screen { display: none !important; }
+body.live-team-host-active #settings-screen,
+body.live-team-host-active #game-screen,
+body.live-team-host-active #result-screen,
+body.live-team-host-active #vocab-card-screen,
+body.live-team-host-active #vocab-link-screen,
+body.live-team-host-active #reading-screen,
+body.live-team-host-active #login-screen,
+body.live-team-host-active #live-room-board-screen,
+body.live-team-host-active #live-poll-host-screen,
+body.live-team-host-active #live-poll-student-screen { display: none !important; }
+body.live-team-student-active #settings-screen,
+body.live-team-student-active #game-screen,
+body.live-team-student-active #result-screen,
+body.live-team-student-active #vocab-card-screen,
+body.live-team-student-active #vocab-link-screen,
+body.live-team-student-active #reading-screen,
+body.live-team-student-active #login-screen,
+body.live-team-student-active #live-room-board-screen,
+body.live-team-student-active #live-poll-host-screen,
+body.live-team-student-active #live-poll-student-screen { display: none !important; }
 #live-poll-host-screen,
-#live-poll-student-screen {
+#live-poll-student-screen,
+#live-team-host-screen,
+#live-team-student-screen {
   display: none;
   position: fixed;
   inset: 0;
@@ -1463,6 +1487,193 @@ body.live-poll-student-active #live-room-board-screen { display: none !important
   .live-poll-host-body { grid-template-columns: 1fr; }
   .live-poll-host-stage-side { border-left: none; border-top: 1px solid #e2e8f0; }
 }
+#live-team-host-screen {
+  --live-team-pt: 18;
+  --live-team-scale: calc(var(--live-team-pt) / 18);
+  background: #0f172a;
+  color: #e2e8f0;
+  overflow: hidden;
+  flex-direction: column;
+}
+#live-team-student-screen {
+  background: #f4f7fb;
+  color: #1a237e;
+  flex-direction: column;
+  overflow: auto;
+}
+.live-team-host-frame,
+.live-team-student-top,
+.live-team-student-body {
+  box-sizing: border-box;
+}
+.live-team-host-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 12px 16px;
+}
+.live-team-top-row,
+.live-team-student-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.live-team-pin {
+  font-size: calc(var(--live-team-pt) * 2.4pt);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #fff;
+}
+.live-team-meta {
+  font-size: calc(var(--live-team-pt) * 0.95pt);
+  color: #cbd5e1;
+}
+.live-team-host-body {
+  display: grid;
+  grid-template-columns: 1fr minmax(240px, 320px);
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  margin-top: 10px;
+}
+.live-team-host-main {
+  overflow: auto;
+  min-height: 0;
+}
+.live-team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.live-team-card {
+  background: #1e293b;
+  border-radius: 14px;
+  border: 2px solid var(--team-color, #1976d2);
+  box-shadow: inset 6px 0 0 var(--team-color, #1976d2);
+  padding: 12px 14px;
+}
+.live-team-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+.live-team-card-name {
+  font-size: calc(var(--live-team-pt) * 1.15pt);
+  font-weight: 800;
+  color: #fff;
+}
+.live-team-card-meta {
+  font-size: calc(var(--live-team-pt) * 0.85pt);
+  color: #94a3b8;
+  white-space: nowrap;
+}
+.live-team-member-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.live-team-member-list li {
+  font-size: calc(var(--live-team-pt) * 1.35pt);
+  font-weight: 700;
+  color: #f8fafc;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+.live-team-member-list.compact li {
+  font-size: 1em;
+  font-weight: 600;
+}
+.live-team-panel {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+.live-team-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  font-size: 0.85em;
+}
+.live-team-panel input[type="number"] {
+  min-height: 40px;
+  border-radius: 8px;
+  border: 1px solid #64748b;
+  padding: 0 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+.live-team-ops button {
+  width: 100%;
+  margin-bottom: 8px;
+  min-height: 44px;
+}
+#live-team-host-screen.is-action-busy .live-team-ops button:not(.is-busy) {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.live-team-student-top {
+  padding: 12px 16px;
+  border-bottom: 1px solid #dbeafe;
+  background: #fff;
+}
+.live-team-student-body {
+  padding: 12px 16px 24px;
+  display: grid;
+  gap: 16px;
+}
+.live-team-student-badge {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--team-color, #1976d2);
+  color: #fff;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.live-team-prompt {
+  font-size: 1.35em;
+  font-weight: 700;
+  margin: 8px 0 12px;
+  line-height: 1.45;
+}
+.live-team-lock {
+  color: #c62828;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.live-team-choice-grid,
+.live-team-mini-choices {
+  display: grid;
+  gap: 10px;
+}
+.live-team-choice-btn,
+.live-team-mini-choice {
+  min-height: 52px;
+  font-size: 1.05em;
+  font-weight: 600;
+  text-align: left;
+}
+.live-team-mini-panel {
+  background: #fff;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  padding: 12px;
+}
+.live-team-mini-prompt {
+  font-size: 1.1em;
+  font-weight: 700;
+  margin: 8px 0;
+}
+@media (max-width: 900px) {
+  .live-team-host-body { grid-template-columns: 1fr; }
+}
 .live-poll-panel {
   background: #fff;
   border: 1px solid #e2e8f0;
@@ -1532,7 +1743,9 @@ select.live-poll-timer-input {
 .live-poll-timer-hint { font-size: 0.82em; color: #666; margin: 6px 0 0; }
 body.live-poll-setup-active,
 body.live-poll-host-active,
-body.live-poll-student-active {
+body.live-poll-student-active,
+body.live-team-host-active,
+body.live-team-student-active {
   max-width: none;
   padding: 0;
   overflow: hidden;
@@ -2608,6 +2821,7 @@ body.live-room-board-active #login-screen { display: none !important; }
       <div class="paper-quiz-start-row">
         <button id="vocab-start-btn" class="btn-primary">▶ 単語クイズを開始する</button>
         <button type="button" class="btn-secondary live-room-open-btn" data-live-mode="vocab" style="display:none;">この設定で授業ライブを開く</button>
+        <button type="button" class="btn-secondary live-room-open-btn" data-live-mode="vocab-team" style="display:none;">この設定でチームN択を開く</button>
         <button type="button" id="vocab-paper-print-btn" class="btn-secondary">問題用紙を印刷</button>
       </div>
       </div>
@@ -3426,6 +3640,78 @@ body.live-room-board-active #login-screen { display: none !important; }
     </div>
   </div>
 
+  <div id="live-team-host-screen" aria-hidden="true">
+    <div class="live-team-host-frame">
+      <div class="live-team-top">
+        <div class="live-team-top-row">
+          <div>
+            <div class="live-team-pin" id="live-team-host-pin">----</div>
+            <div class="live-team-meta" id="live-team-host-title">チームN択</div>
+            <div class="live-team-meta" id="live-team-host-phase">待機</div>
+            <div class="live-team-meta" id="live-team-host-counts"></div>
+          </div>
+          <div class="live-team-top-actions">
+            <label class="live-board-font-ctrl">
+              文字
+              <button type="button" id="live-team-font-minus" aria-label="文字サイズを小さく">−</button>
+              <input type="number" id="live-team-font-input" min="1" max="50" step="1" value="18" aria-label="文字サイズ（pt）">
+              <button type="button" id="live-team-font-plus" aria-label="文字サイズを大きく">+</button>
+              pt
+            </label>
+            <button type="button" class="btn-secondary" id="live-team-host-close-btn">部屋を閉じる</button>
+          </div>
+        </div>
+      </div>
+      <div class="live-team-host-body">
+        <div class="live-team-host-main">
+          <div id="live-team-host-teams" class="live-team-grid"></div>
+        </div>
+        <div class="live-team-host-side">
+          <div class="live-team-panel">
+            <div class="subsection-title">設定</div>
+            <label>1チーム人数
+              <input type="number" id="live-team-size-input" min="2" max="12" value="4" inputmode="numeric">
+            </label>
+            <label>問題数
+              <input type="number" id="live-team-qcount-input" min="1" max="100" value="12" inputmode="numeric">
+            </label>
+            <label>選択肢数
+              <input type="number" id="live-team-ccount-input" min="2" max="20" value="12" inputmode="numeric">
+            </label>
+            <p class="filter-axis-hint">語のみ・「わからない」なし。1チーム人数 ≤ 選択肢数。</p>
+          </div>
+          <div class="live-team-panel live-team-ops">
+            <div class="subsection-title">操作</div>
+            <button type="button" class="btn-primary" id="live-team-load-questions-btn">問題を準備</button>
+            <button type="button" class="btn-primary" id="live-team-deal-btn">チームを組む</button>
+            <button type="button" class="btn-secondary" id="live-team-reshuffle-btn">再編</button>
+            <button type="button" class="btn-primary" id="live-team-start-btn">開始</button>
+            <button type="button" class="btn-secondary" id="live-team-reset-btn">やり直す</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="live-team-student-screen" aria-hidden="true">
+    <div class="live-team-student-top">
+      <div class="live-team-student-head">
+        <div class="subsection-title">チームN択 LIVE</div>
+        <button type="button" class="btn-secondary" id="live-team-student-back-btn">学習画面</button>
+      </div>
+      <div id="live-team-student-team-info"></div>
+    </div>
+    <div class="live-team-student-body">
+      <div class="live-team-race-panel">
+        <div id="live-team-student-status" class="live-team-meta"></div>
+        <div id="live-team-student-prompt" class="live-team-prompt"></div>
+        <div id="live-team-student-lock" class="live-team-lock" hidden></div>
+        <div id="live-team-student-choices" class="live-team-choice-grid"></div>
+      </div>
+      <div id="live-team-mini-quiz" class="live-team-mini-panel"></div>
+    </div>
+  </div>
+
   <div id="vocab-link-screen" style="display: none;" aria-hidden="true">
     <button type="button" class="vl-top-back" id="vl-back-btn" title="学習設定に戻る">✕ 戻る</button>
 
@@ -3539,6 +3825,7 @@ body.live-room-board-active #login-screen { display: none !important; }
 <script src="live-poll-choice-sets.js"></script>
 <script src="live-room-module.js"></script>
 <script src="live-poll-module.js"></script>
+<script src="live-team-module.js"></script>
 <script>
 /** true: GAS① 認証ゲート必須（短命 auth トークン） */
 const AUTH_ENABLED = true;

@@ -13,6 +13,13 @@ service cloud.firestore {
           && request.resource.data.account == account;
         allow delete: if false;
       }
+
+      // チームN択: 進行（ロック・正解進行）はクライアント送信を信頼（教室用途）
+      match /teams/{teamId} {
+        allow read: if true;
+        allow create, update: if true;
+        allow delete: if false;
+      }
     }
   }
 }

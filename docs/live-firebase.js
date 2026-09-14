@@ -149,7 +149,8 @@ const LiveFirebase = (function () {
       attempts: parseInt(data.attempts, 10) || 0,
       status: data.status || 'joined',
       best: data.best || null,
-      poll: data.poll || null
+      poll: data.poll || null,
+      teamId: data.teamId != null ? String(data.teamId) : ''
     };
   }
 
@@ -261,6 +262,7 @@ const LiveFirebase = (function () {
   }
 
   let pollUnsub_ = null;
+  let teamUnsub_ = null;
   let roomMetaUnsub_ = null;
 
   function unsubscribeRoomMeta_() {
@@ -284,6 +286,7 @@ const LiveFirebase = (function () {
         activity: meta.activity || meta.mode,
         mode: meta.mode,
         pollPublic: meta.pollPublic || null,
+        teamPublic: meta.teamPublic || null,
         launchOptions: meta.launchOptions || null,
         title: meta.title,
         timeLimitSec: meta.timeLimitSec,
@@ -351,6 +354,125 @@ const LiveFirebase = (function () {
       pollUnsub_ = null;
     };
     return pollUnsub_;
+  }
+
+  function unsubscribeTeam_() {
+    if (teamUnsub_) {
+      teamUnsub_();
+      teamUnsub_ = null;
+    }
+  }
+
+  async function subscribeTeam_(pin, includeEntries, roomMeta, onData, onError) {
+    unsubscribeTeam_();
+    const db = await ensureDb_();
+    const { collection, doc, onSnapshot } = await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js');
+    const roomRef = doc(db, 'liveRooms', pin);
+    let meta = Object.assign({}, roomMeta || {});
+    let entries = [];
+    let teams = [];
+
+    function emit_() {
+      onData({
+        pin: pin,
+        title: meta.title || 'チームN択',
+        mode: meta.mode || 'vocab-team',
+        activity: meta.activity || meta.mode || 'vocab-team',
+        backend: 'firebase',
+        teamPublic: meta.teamPublic || null,
+        launchOptions: meta.launchOptions || null,
+        rosterCount: (meta.roster && meta.roster.length) || 0,
+        joinedCount: entries.length,
+        entries: entries,
+        teams: teams
+      });
+    }
+
+    const unsubRoom = onSnapshot(roomRef, function (snap) {
+      if (snap.exists()) meta = Object.assign(meta, snap.data() || {});
+      emit_();
+    }, function (err) {
+      if (onError) onError(err);
+    });
+
+    let unsubEntries = function () {};
+    if (includeEntries) {
+      const entriesRef = collection(db, 'liveRooms', pin, 'entries');
+      unsubEntries = onSnapshot(entriesRef, function (snap) {
+        entries = [];
+        snap.forEach(function (docSnap) {
+          entries.push(decodeEntryDoc_(docSnap.id, docSnap.data()));
+        });
+        emit_();
+      }, function (err) {
+        if (onError) onError(err);
+      });
+    }
+
+    const teamsRef = collection(db, 'liveRooms', pin, 'teams');
+    const unsubTeams = onSnapshot(teamsRef, function (snap) {
+      teams = [];
+      snap.forEach(function (docSnap) {
+        const data = docSnap.data() || {};
+        data.id = docSnap.id;
+        teams.push(data);
+      });
+      emit_();
+    }, function (err) {
+      if (onError) onError(err);
+    });
+
+    teamUnsub_ = function () {
+      unsubRoom();
+      unsubEntries();
+      unsubTeams();
+      teamUnsub_ = null;
+    };
+    return teamUnsub_;
+  }
+
+  async function submitTeamPick_(pin, teamId, pick) {
+    const db = await ensureDb_();
+    const { doc, getDoc, setDoc } = await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js');
+    teamId = String(teamId || '').trim();
+    if (!teamId) throw new Error('teamId が必要です');
+    pick = pick || {};
+    const expectedIndex = parseInt(pick.expectedIndex, 10) || 0;
+    const totalQuestions = parseInt(pick.totalQuestions, 10) || 0;
+    const isCorrect = !!pick.isCorrect;
+    const ref = doc(db, 'liveRooms', pin, 'teams', teamId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error('チームが見つかりません');
+    const team = snap.data() || {};
+    const now = Date.now();
+    const lockUntil = parseInt(team.lockUntil, 10) || 0;
+    if (lockUntil > now) return { blocked: true, lockUntil: lockUntil };
+    const currentIndex = parseInt(team.currentIndex, 10) || 0;
+    if (currentIndex !== expectedIndex) return { stale: true, currentIndex: currentIndex };
+    if (parseInt(team.finishedAt, 10) > 0) return { stale: true, finished: true };
+
+    if (!isCorrect) {
+      await setDoc(ref, {
+        lockUntil: now + 2000,
+        wrongCount: (parseInt(team.wrongCount, 10) || 0) + 1
+      }, { merge: true });
+      return { ok: false, wrong: true, lockUntil: now + 2000 };
+    }
+
+    const nextIndex = currentIndex + 1;
+    if (totalQuestions > 0 && nextIndex >= totalQuestions) {
+      await setDoc(ref, {
+        currentIndex: nextIndex,
+        lockUntil: 0,
+        finishedAt: now
+      }, { merge: true });
+      return { ok: true, finished: true, finishedAt: now };
+    }
+    await setDoc(ref, {
+      currentIndex: nextIndex,
+      lockUntil: 0
+    }, { merge: true });
+    return { ok: true, currentIndex: nextIndex };
   }
 
   async function submitPollAnswers_(pin, user, round, answers) {
@@ -423,6 +545,9 @@ const LiveFirebase = (function () {
     unsubscribeBoard: unsubscribeBoard_,
     subscribePoll: subscribePoll_,
     unsubscribePoll: unsubscribePoll_,
+    subscribeTeam: subscribeTeam_,
+    unsubscribeTeam: unsubscribeTeam_,
+    submitTeamPick: submitTeamPick_,
     subscribeRoomMeta: subscribeRoomMeta_,
     unsubscribeRoomMeta: unsubscribeRoomMeta_,
     submitPollAnswers: submitPollAnswers_,

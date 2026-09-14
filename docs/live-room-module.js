@@ -150,6 +150,13 @@ const LiveRoomModule = (function () {
     return act === 'poll';
   }
 
+  function isTeamRoom_(room) {
+    room = room || activeRoom_;
+    if (!room) return false;
+    const act = room.activity || room.mode;
+    return act === 'vocab-team';
+  }
+
   function isQuizActivity_(room) {
     room = room || activeRoom_;
     if (!room) return false;
@@ -568,6 +575,16 @@ const LiveRoomModule = (function () {
         }
         return;
       }
+      if (isTeamRoom_(stored)) {
+        activeRoom_ = stored;
+        refreshUi_();
+        if (window.LiveTeamModule) {
+          LiveTeamModule.openHost().catch(function (e) {
+            console.warn('チームN択ホスト復帰:', e.message || e);
+          });
+        }
+        return;
+      }
       showBoardScreen_();
       startBoardUpdates_();
     } else if (stored.closesAt) {
@@ -619,6 +636,7 @@ const LiveRoomModule = (function () {
         hideBoardScreen_();
         stopBoardUpdates_();
         if (window.LivePollModule) LivePollModule.closeScreens();
+        if (window.LiveTeamModule) LiveTeamModule.closeScreens();
         refreshUi_();
         return;
       }
@@ -647,7 +665,9 @@ const LiveRoomModule = (function () {
         }
         const startBtn = el_('live-room-start-attempt-btn');
         if (startBtn) {
-          startBtn.textContent = isPollRoom_(activeRoom_) ? '参加する（投票）' : '参加する（取り組む）';
+          if (isPollRoom_(activeRoom_)) startBtn.textContent = '参加する（投票）';
+          else if (isTeamRoom_(activeRoom_)) startBtn.textContent = '参加する（チームN択）';
+          else startBtn.textContent = '参加する（取り組む）';
         }
         const settingsEl = el_('live-room-student-settings');
         if (settingsEl) {
@@ -660,7 +680,8 @@ const LiveRoomModule = (function () {
     const storedTeacher = (activeRoom_ && activeRoom_.isTeacher) ? activeRoom_ : loadStoredRoom_();
     const boardVisible = document.body.classList.contains('live-room-board-active')
       || document.body.classList.contains('live-poll-host-active')
-      || document.body.classList.contains('live-poll-setup-active');
+      || document.body.classList.contains('live-poll-setup-active')
+      || document.body.classList.contains('live-team-host-active');
     if (teacherBanner) {
       if (canRestoreTeacher_(storedTeacher) && !boardVisible) {
         teacherBanner.style.display = 'block';
@@ -668,7 +689,8 @@ const LiveRoomModule = (function () {
           + escapeHtml_(storedTeacher.title || storedTeacher.pin)
           + '（コード ' + escapeHtml_(storedTeacher.pin) + '）'
           + ' <button type="button" class="btn-secondary" id="live-room-show-board-btn" style="width:auto;min-width:auto;padding:4px 10px;margin-left:8px;">'
-          + (isPollRoom_(storedTeacher) ? '投票画面を表示' : 'ボードを表示') + '</button>';
+          + (isPollRoom_(storedTeacher) ? '投票画面を表示'
+            : (isTeamRoom_(storedTeacher) ? 'チームN択画面を表示' : 'ボードを表示')) + '</button>';
         const showBtn = el_('live-room-show-board-btn');
         if (showBtn) showBtn.onclick = reopenTeacherBoard_;
       } else {
@@ -732,9 +754,15 @@ const LiveRoomModule = (function () {
       stopBoardClock_();
       lastBoardData_ = null;
       hideBoardScreen_();
+    } else if (activity === 'vocab-team') {
+      stopBoardUpdates_();
+      stopBoardClock_();
+      lastBoardData_ = null;
+      hideBoardScreen_();
     } else if (window.LivePollModule) {
       LivePollModule.closeScreens();
     }
+    if (activity !== 'vocab-team' && window.LiveTeamModule) LiveTeamModule.closeScreens();
     const payload = {
       action: 'liveSwitchActivity',
       pin: room.pin,
@@ -760,6 +788,15 @@ const LiveRoomModule = (function () {
       payload.autoSubmitOnTimeout = opts.autoSubmitOnTimeout !== false;
     }
     if (activity === 'poll' && opts.title) payload.title = opts.title;
+    if (activity === 'vocab-team') {
+      if (!window.VocabSettingsModule) throw new Error('設定モジュールが未初期化です');
+      const launchOptions = opts.launchOptions || window.VocabSettingsModule.getQuizOptions();
+      if (!launchOptions.bookName || !launchOptions.sheetName) {
+        throw new Error('ブックと教材（シート）を選択してください');
+      }
+      payload.launchOptions = launchOptions;
+      if (opts.title) payload.title = opts.title;
+    }
     const res = await post_(payload);
     const data = res.data || {};
     const current = data.activity || activity;
@@ -767,6 +804,7 @@ const LiveRoomModule = (function () {
     room.mode = current;
     room.backend = data.backend || room.backend;
     room.pollPublic = data.pollPublic != null ? data.pollPublic : room.pollPublic;
+    room.teamPublic = data.teamPublic != null ? data.teamPublic : room.teamPublic;
     room.launchOptions = data.launchOptions || room.launchOptions;
     room.title = data.title || room.title;
     room.timeLimitSec = data.timeLimitSec != null ? data.timeLimitSec : room.timeLimitSec;
@@ -783,12 +821,22 @@ const LiveRoomModule = (function () {
       stopBoardClock_();
       lastBoardData_ = null;
       hideBoardScreen_();
+      if (window.LiveTeamModule) LiveTeamModule.closeScreens();
       if (window.LivePollModule) {
         if (LivePollModule.openSetup) await LivePollModule.openSetup();
         else await LivePollModule.openHost();
       }
+    } else if (activity === 'vocab-team') {
+      stopBoardUpdates_();
+      stopBoardClock_();
+      lastBoardData_ = null;
+      hideBoardScreen_();
+      if (window.LivePollModule) LivePollModule.closeScreens();
+      applyLaunchOptionsToUi_(room.launchOptions, 'vocab');
+      if (window.LiveTeamModule) await LiveTeamModule.openHost();
     } else {
       if (window.LivePollModule) LivePollModule.closeScreens();
+      if (window.LiveTeamModule) LiveTeamModule.closeScreens();
       applyLaunchOptionsToUi_(room.launchOptions, activity);
       showBoardScreen_();
       startBoardUpdates_();
@@ -797,8 +845,69 @@ const LiveRoomModule = (function () {
     return room;
   }
 
+  async function createTeamRoomWithOpts_(opts) {
+    if (!isAdminUser_()) throw new Error('管理者のみ部屋を開けます');
+    opts = opts || {};
+    if (activeRoom_ && activeRoom_.isTeacher && activeRoom_.continueAcrossModes && !isTeamRoom_(activeRoom_)) {
+      await switchActivity_('vocab-team', opts);
+      return activeRoom_;
+    }
+    if (activeRoom_ && activeRoom_.isTeacher && !isTeamRoom_(activeRoom_)) {
+      throw new Error('先に開催中の授業ライブを閉じるか、モード継続を有効にしてください');
+    }
+    if (activeRoom_ && activeRoom_.isTeacher && isTeamRoom_(activeRoom_)) {
+      if (window.LiveTeamModule) await LiveTeamModule.openHost();
+      return activeRoom_;
+    }
+    if (window.LiveFirebase && typeof LiveFirebase.fetchConfig === 'function') {
+      const cfg = await LiveFirebase.fetchConfig();
+      if (!cfg || !cfg.firebaseEnabled) {
+        throw new Error('チームN択ライブは Firebase β が必要です');
+      }
+    }
+    if (!window.VocabSettingsModule) throw new Error('設定モジュールが未初期化です');
+    const launchOptions = window.VocabSettingsModule.getQuizOptions();
+    if (!launchOptions.bookName || !launchOptions.sheetName) {
+      throw new Error('ブックと教材（シート）を選択してください');
+    }
+    const res = await post_({
+      action: 'liveCreate',
+      mode: 'vocab-team',
+      backend: 'firebase',
+      launchOptions: launchOptions,
+      targetClass: opts.targetClass,
+      title: opts.title,
+      timeLimitSec: 0,
+      autoSubmitOnTimeout: false,
+      continueAcrossModes: opts.continueAcrossModes != null ? opts.continueAcrossModes : getContinueChecked_()
+    });
+    const data = res.data || {};
+    if (!data.pin) throw new Error('参加コードを発行できませんでした');
+    const room = {
+      pin: data.pin,
+      backend: 'firebase',
+      title: data.title,
+      mode: 'vocab-team',
+      activity: 'vocab-team',
+      teamPublic: data.teamPublic || null,
+      launchOptions: data.launchOptions || launchOptions,
+      isTeacher: true,
+      closesAt: 0,
+      timeLimitSec: 0,
+      autoSubmitOnTimeout: false,
+      rosterCount: data.rosterCount || 0,
+      continueAcrossModes: data.continueAcrossModes !== false
+    };
+    timeoutFired_ = false;
+    boardDefaultedPin_ = '';
+    setActiveRoom_(room);
+    if (window.LiveTeamModule) await LiveTeamModule.openHost();
+    return room;
+  }
+
   async function createRoomWithOpts_(mode, opts) {
     if (!isAdminUser_()) throw new Error('管理者のみ部屋を開けます');
+    if (mode === 'vocab-team') return createTeamRoomWithOpts_(opts);
     if (!window.VocabSettingsModule) throw new Error('設定モジュールが未初期化です');
     opts = opts || {};
     if (activeRoom_ && activeRoom_.isTeacher && (activeRoom_.continueAcrossModes || getContinueChecked_())) {
@@ -854,6 +963,10 @@ const LiveRoomModule = (function () {
     setActiveRoom_(room);
     if (isPollRoom_(room)) {
       if (window.LivePollModule) await LivePollModule.openHost();
+      return room;
+    }
+    if (isTeamRoom_(room)) {
+      if (window.LiveTeamModule) await LiveTeamModule.openHost();
       return room;
     }
     showBoardScreen_();
@@ -936,6 +1049,7 @@ const LiveRoomModule = (function () {
       mode: data.mode,
       activity: data.activity || data.mode,
       pollPublic: data.pollPublic || null,
+      teamPublic: data.teamPublic || null,
       isTeacher: false,
       closesAt: data.closesAt || 0,
       timeLimitSec: data.timeLimitSec || 0,
@@ -947,7 +1061,9 @@ const LiveRoomModule = (function () {
     timeoutFired_ = false;
     localBest_ = room.localBest;
     setActiveRoom_(room);
-    if (!isPollRoom_(room)) applyLaunchOptionsToUi_(room.launchOptions, room.activity || room.mode);
+    if (!isPollRoom_(room) && !isTeamRoom_(room)) {
+      applyLaunchOptionsToUi_(room.launchOptions, room.activity || room.mode);
+    }
     startStudentRoomMetaWatch_();
     return room;
   }
@@ -964,6 +1080,7 @@ const LiveRoomModule = (function () {
     activeRoom_.activity = data.activity || activeRoom_.activity;
     if (data.mode) activeRoom_.mode = data.mode;
     activeRoom_.pollPublic = data.pollPublic != null ? data.pollPublic : activeRoom_.pollPublic;
+    activeRoom_.teamPublic = data.teamPublic != null ? data.teamPublic : activeRoom_.teamPublic;
     if (data.launchOptions) activeRoom_.launchOptions = data.launchOptions;
     if (data.title) activeRoom_.title = data.title;
     if (data.timeLimitSec != null) activeRoom_.timeLimitSec = data.timeLimitSec;
@@ -981,13 +1098,20 @@ const LiveRoomModule = (function () {
       if (window.LivePollModule && LivePollModule.isStudentOpen && LivePollModule.isStudentOpen()) {
         if (newActivity !== 'poll') LivePollModule.closeScreens();
       }
-      if (newActivity !== 'poll') {
+      if (window.LiveTeamModule && LiveTeamModule.isStudentOpen && LiveTeamModule.isStudentOpen()) {
+        if (newActivity !== 'vocab-team') LiveTeamModule.closeScreens();
+      }
+      if (newActivity !== 'poll' && newActivity !== 'vocab-team') {
         applyLaunchOptionsToUi_(activeRoom_.launchOptions, newActivity);
       }
       if (typeof showToast_ === 'function') {
-        showToast_(newActivity === 'poll'
-          ? '投票が始まりました。「参加する（投票）」から入れます'
-          : '取り組みが再開できます。「参加する（取り組む）」から開始できます');
+        if (newActivity === 'poll') {
+          showToast_('投票が始まりました。「参加する（投票）」から入れます');
+        } else if (newActivity === 'vocab-team') {
+          showToast_('チームN択が始まりました。「参加する（チームN択）」から入れます');
+        } else {
+          showToast_('取り組みが再開できます。「参加する（取り組む）」から開始できます');
+        }
       }
     }
     refreshUi_();
@@ -999,6 +1123,7 @@ const LiveRoomModule = (function () {
     LiveFirebase.subscribeRoomMeta(activeRoom_.pin, {
       activity: activeRoom_.activity || activeRoom_.mode,
       pollPublic: activeRoom_.pollPublic,
+      teamPublic: activeRoom_.teamPublic,
       launchOptions: activeRoom_.launchOptions
     }, handleRoomMetaChange_, function (e) {
       console.warn('部屋 meta 購読:', e.message || e);
@@ -1024,6 +1149,14 @@ const LiveRoomModule = (function () {
       const startBtn = el_('live-room-start-attempt-btn');
       await BusyButton.run(startBtn, async function () {
         await LivePollModule.openStudent();
+      }, '開いています…');
+      return;
+    }
+    if (isTeamRoom_(activeRoom_)) {
+      if (!window.LiveTeamModule) throw new Error('チームN択モジュールの読み込みに失敗しました');
+      const startBtn = el_('live-room-start-attempt-btn');
+      await BusyButton.run(startBtn, async function () {
+        await LiveTeamModule.openStudent();
       }, '開いています…');
       return;
     }
@@ -1054,6 +1187,7 @@ const LiveRoomModule = (function () {
     clearRoomTimer_();
     stopStudentRoomMetaWatch_();
     if (window.LivePollModule) LivePollModule.closeScreens();
+    if (window.LiveTeamModule) LiveTeamModule.closeScreens();
     activeRoom_ = null;
     localBest_ = null;
     saveStoredRoom_(null);
@@ -1071,6 +1205,7 @@ const LiveRoomModule = (function () {
     activeRoom_ = room;
     const res = await post_({ action: 'liveClose', pin: room.pin }, 1, EXPORT_TIMEOUT_MS);
     if (window.LivePollModule) LivePollModule.closeScreens();
+    if (window.LiveTeamModule) LiveTeamModule.closeScreens();
     await leaveRoom();
     const data = (res && res.data) || {};
     if (data.spreadsheetUrl) {
@@ -1119,6 +1254,14 @@ const LiveRoomModule = (function () {
       if (window.LivePollModule) {
         const openFn = LivePollModule.openSetup || LivePollModule.openHost;
         openFn.call(LivePollModule).catch(function (e) { alert(e.message || e); });
+      }
+      return;
+    }
+    if (isTeamRoom_(stored)) {
+      activeRoom_ = stored;
+      refreshUi_();
+      if (window.LiveTeamModule) {
+        LiveTeamModule.openHost().catch(function (e) { alert(e.message || e); });
       }
       return;
     }
@@ -1264,6 +1407,8 @@ const LiveRoomModule = (function () {
 
   function renderBoard_(data) {
     if (activeRoom_ && isPollRoom_(activeRoom_)) return;
+    if (activeRoom_ && isTeamRoom_(activeRoom_)) return;
+    if (window.LiveTeamModule && typeof LiveTeamModule.isHostOpen === 'function' && LiveTeamModule.isHostOpen()) return;
     if (window.LivePollModule && (
       (typeof LivePollModule.isHostOpen === 'function' && LivePollModule.isHostOpen())
       || (typeof LivePollModule.isSetupOpen === 'function' && LivePollModule.isSetupOpen())
@@ -1541,7 +1686,9 @@ const LiveRoomModule = (function () {
           if (typeof showToast_ === 'function') {
             showToast_(isPollRoom_(room)
               ? '授業ライブに参加しました。「参加する（投票）」で投票画面を開けます'
-              : '授業ライブに参加しました。「参加する（取り組む）」で開始できます');
+              : (isTeamRoom_(room)
+                ? '授業ライブに参加しました。「参加する（チームN択）」で開始できます'
+                : '授業ライブに参加しました。「参加する（取り組む）」で開始できます'));
           }
         }).catch(function (e) {
           alert(e.message || e);
@@ -1665,6 +1812,9 @@ const LiveRoomModule = (function () {
     refreshUi_();
     if (window.LivePollModule && typeof LivePollModule.init === 'function') {
       LivePollModule.init();
+    }
+    if (window.LiveTeamModule && typeof LiveTeamModule.init === 'function') {
+      LiveTeamModule.init();
     }
     if (window.AuthGateService) {
       AuthGateService.fetchUserIfNeeded().then(function () {
