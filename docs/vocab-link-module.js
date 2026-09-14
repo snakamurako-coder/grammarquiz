@@ -376,6 +376,19 @@ const VocabLinkModule = (function () {
       return;
     }
 
+    if (card === selectedCard1 || card === selectedCard2) {
+      if (card === selectedCard1) {
+        selectedCard1.classList.remove('selected');
+        selectedCard1 = null;
+      }
+      if (card === selectedCard2) {
+        selectedCard2.classList.remove('selected');
+        selectedCard2 = null;
+      }
+      if (!selectedCard1 && !selectedCard2) firstTapTimestamp = null;
+      return;
+    }
+
     if (isAudio) {
       playSpeech_(card.dataset.speechText, card.dataset.speechLang);
     }

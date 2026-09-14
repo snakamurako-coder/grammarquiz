@@ -300,13 +300,25 @@ const LiveRoomModule = (function () {
 
   function applyBestNToUi_(n) {
     n = saveBestN_(n);
-    const input = el_('live-board-best-n');
-    const select = el_('live-board-best-n-select');
-    if (input && String(input.value) !== String(n)) input.value = String(n);
-    if (select) {
-      select.value = BEST_N_PRESETS.indexOf(n) >= 0 ? String(n) : '';
-    }
+    [
+      ['live-board-best-n', 'live-board-best-n-select'],
+      ['live-poll-best-n', 'live-poll-best-n-select']
+    ].forEach(function (ids) {
+      const input = el_(ids[0]);
+      const select = el_(ids[1]);
+      if (input && String(input.value) !== String(n)) input.value = String(n);
+      if (select) select.value = BEST_N_PRESETS.indexOf(n) >= 0 ? String(n) : '';
+    });
     return n;
+  }
+
+  function setBestN_(n) {
+    applyBestNToUi_(n);
+    if (lastBoardData_) renderBoard_(lastBoardData_);
+    if (window.LivePollModule && typeof LivePollModule.refreshHost === 'function') {
+      LivePollModule.refreshHost();
+    }
+    return loadBestN_();
   }
 
   function bestFingerprint_(best) {
@@ -1237,7 +1249,8 @@ const LiveRoomModule = (function () {
     if (pinEl) pinEl.textContent = data.pin || (activeRoom_ && activeRoom_.pin) || pinEl.textContent || '';
     if (metaEl) {
       metaEl.textContent = '達成 ' + (data.finishedCount || 0)
-        + ' / 名簿 ' + (data.rosterCount || data.joinedCount || 0);
+        + ' / 参加 ' + (data.joinedCount || 0)
+        + ' / 名簿 ' + (data.rosterCount || 0);
     }
     lastBoardData_ = data;
     if (activeRoom_) {
@@ -1280,6 +1293,14 @@ const LiveRoomModule = (function () {
     });
   }
 
+  function boardRestHtml_(extraFinished, pendingCount) {
+    if (!extraFinished && !pendingCount) return '';
+    let html = '<div class="live-board-rest">';
+    if (extraFinished) html += '<div class="live-board-rest-row">ほか達成 ' + extraFinished + '名</div>';
+    if (pendingCount) html += '<div class="live-board-rest-row">参加中 ' + pendingCount + '名</div>';
+    return html + '</div>';
+  }
+
   function renderBoardList_(containerId, rows, mode, kind) {
     const el = el_(containerId);
     if (!el) return;
@@ -1287,60 +1308,67 @@ const LiveRoomModule = (function () {
     const prevMap = boardPrevByKind_[kind] || {};
     const nextMap = {};
     const limit = loadBestN_();
-    const shown = rows.slice(0, limit);
+    const finishers = rows.filter(function (r) { return r && r.best; });
+    const shown = finishers.slice(0, limit);
+    const extraFinished = Math.max(0, finishers.length - shown.length);
+    const pendingCount = Math.max(0, rows.length - finishers.length);
     const sig = limit + ':' + shown.map(function (r) {
       return String(r.account || '') + ':' + bestFingerprint_(r.best);
-    }).join(';');
-    if (sig === boardListSigByKind_[kind] && el.querySelector('table')) return;
+    }).join(';') + '|x' + extraFinished + '|p' + pendingCount;
+    if (sig === boardListSigByKind_[kind] && (el.querySelector('table') || el.querySelector('.live-board-rest'))) return;
     boardListSigByKind_[kind] = sig;
     if (!rows.length) {
       boardPrevByKind_[kind] = {};
-      el.innerHTML = '<p class="filter-axis-hint" style="margin:0;">まだ達成者がいません</p>';
+      el.innerHTML = '<p class="filter-axis-hint" style="margin:0;">まだ参加者はいません</p>';
       return;
     }
     const isWl = mode === 'word-link';
-    let html = '<table class="live-board-table"><thead><tr><th>#</th><th>番号</th><th>氏名</th>';
-    if (isWl) html += '<th>形式</th>';
-    if (kind === 'achievement') html += '<th>達成時刻</th>';
-    else if (isWl) html += '<th>ミス</th><th>タイム</th>';
-    else if (kind === 'speed') html += '<th>タイム</th>';
-    else html += '<th>正解率</th>';
-    html += '</tr></thead><tbody>';
-    shown.forEach(function (row, idx) {
-      const account = String(row.account || row.name || idx);
-      const rank = idx + 1;
-      const best = row.best || {};
-      const fp = bestFingerprint_(best);
-      const prev = prevMap[account];
-      const classes = [];
-      if (Object.keys(prevMap).length) {
-        if (prev && prev.fp && prev.fp !== fp) classes.push('live-row-best-flash');
-        else if (!prev && fp) classes.push('live-row-best-flash');
-        if (prev && prev.rank && prev.rank !== rank) classes.push('live-row-rank-shift');
-      }
-      nextMap[account] = { rank: rank, fp: fp };
-      const cls = classes.length ? (' class="' + classes.join(' ') + '"') : '';
-      html += '<tr' + cls + ' data-account="' + escapeHtml_(account) + '"><td>' + rank + '</td><td>'
-        + escapeHtml_(row.number || '—') + '</td><td>'
-        + escapeHtml_(row.name || '—') + '</td>';
-      if (isWl) html += '<td>' + escapeHtml_(wordLinkModeLabel_(best.linkMode) || '—') + '</td>';
-      if (kind === 'achievement') {
-        const d = best.finishedAt ? new Date(best.finishedAt) : null;
-        const value = d ? (d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0')) : '—';
-        html += '<td>' + escapeHtml_(value) + '</td>';
-      } else if (isWl) {
-        html += '<td>' + escapeHtml_(String(best.wrongCount || 0)) + '</td>';
-        html += '<td>' + escapeHtml_(formatDuration_(best.durationSec, true)) + '</td>';
-      } else if (kind === 'speed') {
-        html += '<td>' + escapeHtml_(formatDuration_(best.durationSec)) + '</td>';
-      } else {
-        let value = (best.scoreRate != null ? best.scoreRate : '—') + '%';
-        if (best.durationSec) value += ' / ' + formatDuration_(best.durationSec);
-        html += '<td>' + escapeHtml_(value) + '</td>';
-      }
-      html += '</tr>';
-    });
-    html += '</tbody></table>';
+    let html = '';
+    if (shown.length) {
+      html += '<table class="live-board-table"><thead><tr><th>#</th><th>番号</th><th>氏名</th>';
+      if (isWl) html += '<th>形式</th>';
+      if (kind === 'achievement') html += '<th>達成時刻</th>';
+      else if (isWl) html += '<th>ミス</th><th>タイム</th>';
+      else if (kind === 'speed') html += '<th>タイム</th>';
+      else html += '<th>正解率</th>';
+      html += '</tr></thead><tbody>';
+      shown.forEach(function (row, idx) {
+        const account = String(row.account || row.name || idx);
+        const rank = idx + 1;
+        const best = row.best || {};
+        const fp = bestFingerprint_(best);
+        const prev = prevMap[account];
+        const classes = [];
+        if (Object.keys(prevMap).length) {
+          if (prev && prev.fp && prev.fp !== fp) classes.push('live-row-best-flash');
+          else if (!prev && fp) classes.push('live-row-best-flash');
+          if (prev && prev.rank && prev.rank !== rank) classes.push('live-row-rank-shift');
+        }
+        nextMap[account] = { rank: rank, fp: fp };
+        const cls = classes.length ? (' class="' + classes.join(' ') + '"') : '';
+        html += '<tr' + cls + ' data-account="' + escapeHtml_(account) + '"><td>' + rank + '</td><td>'
+          + escapeHtml_(row.number || '—') + '</td><td>'
+          + escapeHtml_(row.name || '—') + '</td>';
+        if (isWl) html += '<td>' + escapeHtml_(wordLinkModeLabel_(best.linkMode) || '—') + '</td>';
+        if (kind === 'achievement') {
+          const d = best.finishedAt ? new Date(best.finishedAt) : null;
+          const value = d ? (d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0')) : '—';
+          html += '<td>' + escapeHtml_(value) + '</td>';
+        } else if (isWl) {
+          html += '<td>' + escapeHtml_(String(best.wrongCount || 0)) + '</td>';
+          html += '<td>' + escapeHtml_(formatDuration_(best.durationSec, true)) + '</td>';
+        } else if (kind === 'speed') {
+          html += '<td>' + escapeHtml_(formatDuration_(best.durationSec)) + '</td>';
+        } else {
+          let value = (best.scoreRate != null ? best.scoreRate : '—') + '%';
+          if (best.durationSec) value += ' / ' + formatDuration_(best.durationSec);
+          html += '<td>' + escapeHtml_(value) + '</td>';
+        }
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+    html += boardRestHtml_(extraFinished, pendingCount);
     el.innerHTML = html;
     boardPrevByKind_[kind] = nextMap;
   }
@@ -1587,20 +1615,15 @@ const LiveRoomModule = (function () {
     if (bestSelect) {
       bestSelect.addEventListener('change', function () {
         if (!bestSelect.value) return;
-        applyBestNToUi_(bestSelect.value);
-        if (lastBoardData_) renderBoard_(lastBoardData_);
+        setBestN_(bestSelect.value);
       });
     }
     if (bestInput) {
       bestInput.addEventListener('change', function () {
-        applyBestNToUi_(bestInput.value);
-        if (lastBoardData_) renderBoard_(lastBoardData_);
+        setBestN_(bestInput.value);
       });
       bestInput.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') {
-          applyBestNToUi_(bestInput.value);
-          if (lastBoardData_) renderBoard_(lastBoardData_);
-        }
+        if (e.key === 'Enter') setBestN_(bestInput.value);
       });
     }
   }
@@ -1643,6 +1666,8 @@ const LiveRoomModule = (function () {
     isAdminUser_: isAdminUser_,
     refreshUi_: refreshUi_,
     apiPost: post_,
+    getBestN: loadBestN_,
+    setBestN: setBestN_,
     touchActiveRoom: function (room) {
       if (!room) return;
       activeRoom_ = room;

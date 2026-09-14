@@ -89,6 +89,28 @@ const LiveFirebase = (function () {
     return false;
   }
 
+  function compareJoinedRoster_(a, b) {
+    const na = parseInt(a && a.number, 10);
+    const nb = parseInt(b && b.number, 10);
+    const aNum = !isNaN(na);
+    const bNum = !isNaN(nb);
+    if (aNum && bNum && na !== nb) return na - nb;
+    if (aNum !== bNum) return aNum ? -1 : 1;
+    return String((a && a.name) || '').localeCompare(String((b && b.name) || ''), 'ja');
+  }
+
+  function withUnfinishedJoiners_(ranked, entries) {
+    const seen = {};
+    (ranked || []).forEach(function (e) {
+      seen[String((e && (e.account || e.name)) || '')] = true;
+    });
+    const pending = (entries || []).filter(function (e) {
+      const key = String((e && (e.account || e.name)) || '');
+      return key && !seen[key];
+    }).sort(compareJoinedRoster_);
+    return (ranked || []).concat(pending);
+  }
+
   function sortBoardLists_(mode, entries) {
     const finished = (entries || []).filter(function (e) { return e.best; });
     const byAchievement = finished.slice().sort(function (a, b) {
@@ -111,9 +133,9 @@ const LiveFirebase = (function () {
       return b.best.scoreRate - a.best.scoreRate;
     });
     return {
-      achievement: byAchievement,
-      scoreRate: byScore,
-      speed: bySpeed
+      achievement: withUnfinishedJoiners_(byAchievement, entries),
+      scoreRate: withUnfinishedJoiners_(byScore, entries),
+      speed: withUnfinishedJoiners_(bySpeed, entries)
     };
   }
 
@@ -330,6 +352,10 @@ const LiveFirebase = (function () {
     const ref = doc(db, 'liveRooms', pin, 'entries', account);
     const snap = await getDoc(ref);
     const prev = snap.exists() ? decodeEntryDoc_(account, snap.data()) : {};
+    const prevPoll = prev.poll || {};
+    const nextRound = parseInt(round, 10) || 0;
+    const sameRound = (parseInt(prevPoll.round, 10) || 0) === nextRound;
+    const now = Date.now();
     const entry = {
       account: account,
       name: String((user && user.name) || prev.name || '').trim(),
@@ -339,9 +365,10 @@ const LiveFirebase = (function () {
       status: prev.status || 'joined',
       best: prev.best || null,
       poll: {
-        round: parseInt(round, 10) || 0,
+        round: nextRound,
         answers: answers || {},
-        updatedAt: Date.now()
+        updatedAt: now,
+        submittedAt: (sameRound && prevPoll.submittedAt) ? prevPoll.submittedAt : now
       }
     };
     await setDoc(ref, entry, { merge: true });

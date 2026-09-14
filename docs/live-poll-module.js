@@ -349,6 +349,132 @@ const LivePollModule = (function () {
     return n;
   }
 
+  function loadPollBestN_() {
+    if (window.LiveRoomModule && typeof LiveRoomModule.getBestN === 'function') {
+      return LiveRoomModule.getBestN();
+    }
+    try {
+      const n = parseInt(localStorage.getItem('dd_live_board_best_n'), 10);
+      if (isNaN(n)) return 8;
+      return Math.min(200, Math.max(1, n));
+    } catch (e) {
+      return 8;
+    }
+  }
+
+  function pollSubmitTs_(poll) {
+    return parseInt((poll && (poll.submittedAt || poll.updatedAt)), 10) || 0;
+  }
+
+  function pollElapsedSec_(pub, poll) {
+    const t = pollSubmitTs_(poll);
+    if (!t) return 0;
+    let start = parseInt(pub && pub.collectStartedAt, 10) || 0;
+    if (!start) {
+      const ends = parseInt(pub && pub.collectEndsAt, 10) || 0;
+      const dur = parseInt(pub && pub.collectDurationSec, 10) || 0;
+      if (ends && dur) start = ends - dur * 1000;
+    }
+    if (start && t >= start) return (t - start) / 1000;
+    return 0;
+  }
+
+  function formatPollTime_(sec) {
+    const n = Number(sec);
+    if (!n || !isFinite(n) || n <= 0) return '—';
+    const m = Math.floor(n / 60);
+    const r = n - m * 60;
+    return m > 0 ? (m + '分' + r.toFixed(1) + '秒') : (r.toFixed(1) + '秒');
+  }
+
+  function pollAnswerOf_(entry, q, round) {
+    const poll = (entry && entry.poll) || {};
+    if ((parseInt(poll.round, 10) || 0) !== round) return '';
+    if (!q) return '';
+    const ans = poll.answers && poll.answers[q.id];
+    return ans == null ? '' : String(ans);
+  }
+
+  function pollIsCorrect_(answer, revealed, type) {
+    const list = parseAnswerList_(revealed);
+    if (!list.length) return false;
+    if (answer == null || String(answer).trim() === '') return false;
+    if (type === 'written') {
+      return list.some(function (ans) { return normalizeText_(answer) === normalizeText_(ans); });
+    }
+    return list.indexOf(String(answer)) >= 0;
+  }
+
+  function pollRestHtml_(extraSubmitted, pendingCount, hasNamed) {
+    if (!extraSubmitted && !pendingCount) return '';
+    let html = '<div class="live-poll-rest">';
+    if (extraSubmitted) {
+      html += '<div class="live-poll-rest-row">' + (hasNamed ? 'ほか提出 ' : '提出 ')
+        + extraSubmitted + '名</div>';
+    }
+    if (pendingCount) html += '<div class="live-poll-rest-row">参加中 ' + pendingCount + '名</div>';
+    return html + '</div>';
+  }
+
+  function renderHostRoster_(snap, pub) {
+    const el = el_('live-poll-host-roster');
+    if (!el) return;
+    const entries = (snap && snap.entries) || [];
+    if (!entries.length) {
+      el.innerHTML = '<p class="filter-axis-hint" style="margin:0;">まだ参加者はいません</p>';
+      return;
+    }
+    const q = currentQuestion_(pub);
+    const round = parseInt(pub.ballotRound, 10) || 0;
+    const revealed = q && pub.revealed && pub.revealed[q.id];
+    const canJudge = !!(q && parseAnswerList_(revealed).length);
+    const limit = loadPollBestN_();
+    const submitted = [];
+    const correct = [];
+    entries.forEach(function (e) {
+      const poll = (e && e.poll) || {};
+      const answer = pollAnswerOf_(e, q, round);
+      const hasAns = !!(answer && String(answer).trim());
+      if (!hasAns) return;
+      const row = {
+        account: e.account,
+        name: e.name,
+        number: e.number,
+        ts: pollSubmitTs_(poll),
+        elapsed: pollElapsedSec_(pub, poll),
+        correct: canJudge && pollIsCorrect_(answer, revealed, q.type)
+      };
+      submitted.push(row);
+      if (row.correct) correct.push(row);
+    });
+    correct.sort(function (a, b) {
+      if (a.ts !== b.ts) {
+        if (!a.ts) return 1;
+        if (!b.ts) return -1;
+        return a.ts - b.ts;
+      }
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ja');
+    });
+    const shown = canJudge ? correct.slice(0, limit) : [];
+    const extraSubmitted = Math.max(0, submitted.length - shown.length);
+    const pendingCount = Math.max(0, entries.length - submitted.length);
+    let html = '';
+    if (shown.length) {
+      html += '<table class="live-poll-roster-table"><thead><tr>'
+        + '<th>#</th><th>番号</th><th>氏名</th><th>タイム</th>'
+        + '</tr></thead><tbody>';
+      shown.forEach(function (row, idx) {
+        html += '<tr><td>' + (idx + 1) + '</td><td>'
+          + escapeHtml_(row.number || '—') + '</td><td>'
+          + escapeHtml_(row.name || '—') + '</td><td>'
+          + escapeHtml_(formatPollTime_(row.elapsed)) + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+    html += pollRestHtml_(extraSubmitted, pendingCount, !!shown.length);
+    el.innerHTML = html || '<p class="filter-axis-hint" style="margin:0;">まだ参加者はいません</p>';
+  }
+
   async function control_(cmd, extra) {
     if (!window.LiveRoomModule || typeof LiveRoomModule.apiPost !== 'function') {
       throw new Error('授業ライブモジュールが未初期化です');
@@ -807,6 +933,11 @@ const LivePollModule = (function () {
 
   function renderHost_(snap) {
     lastHostSnap_ = snap;
+    const n = loadPollBestN_();
+    const bestInput = el_('live-poll-best-n');
+    const bestSelect = el_('live-poll-best-n-select');
+    if (bestInput && String(bestInput.value) !== String(n)) bestInput.value = String(n);
+    if (bestSelect) bestSelect.value = [3, 4, 8, 16].indexOf(n) >= 0 ? String(n) : '';
     const room = window.LiveRoomModule && LiveRoomModule.getActiveRoom();
     const pub = pub_(snap);
     updateHostPanels_(pub);
@@ -965,6 +1096,7 @@ const LivePollModule = (function () {
       stopCollectTimer_();
       paintTimer_(0);
     }
+    renderHostRoster_(snap, pub);
   }
 
   function studentOwnAnswer_(q) {
@@ -1292,6 +1424,29 @@ const LivePollModule = (function () {
         }, '終了中…').catch(function (e) { alert(e.message || e); });
       });
     }
+    const bestSelect = el_('live-poll-best-n-select');
+    const bestInput = el_('live-poll-best-n');
+    function applyPollBestN_(value) {
+      if (window.LiveRoomModule && typeof LiveRoomModule.setBestN === 'function') {
+        LiveRoomModule.setBestN(value);
+        return;
+      }
+      if (lastHostSnap_) renderHost_(lastHostSnap_);
+    }
+    if (bestSelect) {
+      bestSelect.addEventListener('change', function () {
+        if (!bestSelect.value) return;
+        applyPollBestN_(bestSelect.value);
+      });
+    }
+    if (bestInput) {
+      bestInput.addEventListener('change', function () {
+        applyPollBestN_(bestInput.value);
+      });
+      bestInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') applyPollBestN_(bestInput.value);
+      });
+    }
     const stuBack = el_('live-poll-student-back-btn');
     if (stuBack) {
       stuBack.addEventListener('click', function () {
@@ -1403,7 +1558,10 @@ const LivePollModule = (function () {
     isPollRoom: isPollRoom_,
     isHostOpen: function () { return hostOpen_; },
     isStudentOpen: function () { return studentOpen_; },
-    isSetupOpen: function () { return setupOpen_; }
+    isSetupOpen: function () { return setupOpen_; },
+    refreshHost: function () {
+      if (hostOpen_ && lastHostSnap_) renderHost_(lastHostSnap_);
+    }
   };
 })();
 

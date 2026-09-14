@@ -199,6 +199,11 @@ body.live-board-open .live-dash-section {
   font-size: inherit; line-height: 1.25; color: #f8fafc; background: transparent;
 }
 .live-board-table th { color: #94a3b8; font-weight: 600; font-size: 0.72em; background: transparent; }
+.live-board-rest { margin-top: 10px; color: #94a3b8; font-size: 0.92em; }
+.live-board-rest-row {
+  padding: 0.35em 0.45em;
+  border-bottom: 1px solid #334155;
+}
 .live-board-font-ctrl {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 0.82rem; color: #cbd5e1;
@@ -281,15 +286,15 @@ body.live-board-open .live-dash-section {
           <span class="live-board-backend-badge" id="live-dash-backend-badge" style="display:none;" aria-hidden="true"></span>
               <label class="live-board-best-n-ctrl">
                 ベスト
-                <select id="live-dash-best-n-select" aria-label="表示件数の候補">
+                <select id="live-dash-best-n-select" aria-label="氏名とスコアを出す人数の候補">
                   <option value="3">3</option>
                   <option value="4">4</option>
                   <option value="8" selected>8</option>
                   <option value="16">16</option>
                   <option value="">指定</option>
                 </select>
-                <input type="number" id="live-dash-best-n" min="1" max="200" value="8" inputmode="numeric" aria-label="表示件数">
-                まで表示
+                <input type="number" id="live-dash-best-n" min="1" max="200" value="8" inputmode="numeric" aria-label="氏名とスコアを出す人数">
+                人まで氏名・スコア表示
               </label>
               <div class="live-dash-meta" id="live-dash-meta"></div>
               <div class="live-dash-meta" id="live-dash-counts"></div>
@@ -1265,6 +1270,14 @@ function updateLiveDashTabLabels_(mode) {
   });
 }
 
+function liveBoardRestHtml_(extraFinished, pendingCount) {
+  if (!extraFinished && !pendingCount) return '';
+  var html = '<div class="live-board-rest">';
+  if (extraFinished) html += '<div class="live-board-rest-row">ほか達成 ' + extraFinished + '名</div>';
+  if (pendingCount) html += '<div class="live-board-rest-row">参加中 ' + pendingCount + '名</div>';
+  return html + '</div>';
+}
+
 function renderLiveDashList_(containerId, rows, mode, kind) {
   var el = document.getElementById(containerId);
   if (!el) return;
@@ -1272,59 +1285,66 @@ function renderLiveDashList_(containerId, rows, mode, kind) {
   var prevMap = livePrevByKind_[kind] || {};
   var nextMap = {};
   var limit = loadLiveBestN_();
-  var shown = rows.slice(0, limit);
+  var finishers = rows.filter(function (r) { return r && r.best; });
+  var shown = finishers.slice(0, limit);
+  var extraFinished = Math.max(0, finishers.length - shown.length);
+  var pendingCount = Math.max(0, rows.length - finishers.length);
   var sig = limit + ':' + shown.map(function (r) {
     return String(r.account || '') + ':' + liveBestFingerprint_(r.best);
-  }).join(';');
-  if (sig === liveListSigByKind_[kind] && el.querySelector('table')) return;
+  }).join(';') + '|x' + extraFinished + '|p' + pendingCount;
+  if (sig === liveListSigByKind_[kind] && (el.querySelector('table') || el.querySelector('.live-board-rest'))) return;
   liveListSigByKind_[kind] = sig;
   if (!rows.length) {
     livePrevByKind_[kind] = {};
-    el.innerHTML = '<p class="hint" style="margin:0;color:#94a3b8;">まだ達成者がいません</p>';
+    el.innerHTML = '<p class="hint" style="margin:0;color:#94a3b8;">まだ参加者はいません</p>';
     return;
   }
   var isWl = mode === 'word-link';
-  var html = '<table class="live-board-table"><thead><tr><th>#</th><th>番号</th><th>氏名</th>';
-  if (isWl) html += '<th>形式</th>';
-  if (kind === 'achievement') html += '<th>達成時刻</th>';
-  else if (isWl) html += '<th>ミス</th><th>タイム</th>';
-  else if (kind === 'speed') html += '<th>タイム</th>';
-  else html += '<th>正解率</th>';
-  html += '</tr></thead><tbody>';
-  shown.forEach(function (row, idx) {
-    var account = String(row.account || row.name || idx);
-    var rank = idx + 1;
-    var best = row.best || {};
-    var fp = liveBestFingerprint_(best);
-    var prev = prevMap[account];
-    var classes = [];
-    if (Object.keys(prevMap).length) {
-      if (prev && prev.fp && prev.fp !== fp) classes.push('live-row-best-flash');
-      else if (!prev && fp) classes.push('live-row-best-flash');
-      if (prev && prev.rank && prev.rank !== rank) classes.push('live-row-rank-shift');
-    }
-    nextMap[account] = { rank: rank, fp: fp };
-    var cls = classes.length ? (' class="' + classes.join(' ') + '"') : '';
-    html += '<tr' + cls + '><td>' + rank + '</td><td>' + escapeHtml(row.number || '—') + '</td><td>'
-      + escapeHtml(row.name || '—') + '</td>';
-    if (isWl) html += '<td>' + escapeHtml(wordLinkModeLabel_(best.linkMode) || '—') + '</td>';
-    if (kind === 'achievement') {
-      var d = best.finishedAt ? new Date(best.finishedAt) : null;
-      var value = d ? (d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0')) : '—';
-      html += '<td>' + escapeHtml(value) + '</td>';
-    } else if (isWl) {
-      html += '<td>' + escapeHtml(String(best.wrongCount || 0)) + '</td>';
-      html += '<td>' + escapeHtml(formatLiveDuration_(best.durationSec, true)) + '</td>';
-    } else if (kind === 'speed') {
-      html += '<td>' + escapeHtml(formatLiveDuration_(best.durationSec)) + '</td>';
-    } else {
-      var score = (best.scoreRate != null ? best.scoreRate : '—') + '%';
-      if (best.durationSec) score += ' / ' + formatLiveDuration_(best.durationSec);
-      html += '<td>' + escapeHtml(score) + '</td>';
-    }
-    html += '</tr>';
-  });
-  html += '</tbody></table>';
+  var html = '';
+  if (shown.length) {
+    html += '<table class="live-board-table"><thead><tr><th>#</th><th>番号</th><th>氏名</th>';
+    if (isWl) html += '<th>形式</th>';
+    if (kind === 'achievement') html += '<th>達成時刻</th>';
+    else if (isWl) html += '<th>ミス</th><th>タイム</th>';
+    else if (kind === 'speed') html += '<th>タイム</th>';
+    else html += '<th>正解率</th>';
+    html += '</tr></thead><tbody>';
+    shown.forEach(function (row, idx) {
+      var account = String(row.account || row.name || idx);
+      var rank = idx + 1;
+      var best = row.best || {};
+      var fp = liveBestFingerprint_(best);
+      var prev = prevMap[account];
+      var classes = [];
+      if (Object.keys(prevMap).length) {
+        if (prev && prev.fp && prev.fp !== fp) classes.push('live-row-best-flash');
+        else if (!prev && fp) classes.push('live-row-best-flash');
+        if (prev && prev.rank && prev.rank !== rank) classes.push('live-row-rank-shift');
+      }
+      nextMap[account] = { rank: rank, fp: fp };
+      var cls = classes.length ? (' class="' + classes.join(' ') + '"') : '';
+      html += '<tr' + cls + '><td>' + rank + '</td><td>' + escapeHtml(row.number || '—') + '</td><td>'
+        + escapeHtml(row.name || '—') + '</td>';
+      if (isWl) html += '<td>' + escapeHtml(wordLinkModeLabel_(best.linkMode) || '—') + '</td>';
+      if (kind === 'achievement') {
+        var d = best.finishedAt ? new Date(best.finishedAt) : null;
+        var value = d ? (d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0')) : '—';
+        html += '<td>' + escapeHtml(value) + '</td>';
+      } else if (isWl) {
+        html += '<td>' + escapeHtml(String(best.wrongCount || 0)) + '</td>';
+        html += '<td>' + escapeHtml(formatLiveDuration_(best.durationSec, true)) + '</td>';
+      } else if (kind === 'speed') {
+        html += '<td>' + escapeHtml(formatLiveDuration_(best.durationSec)) + '</td>';
+      } else {
+        var score = (best.scoreRate != null ? best.scoreRate : '—') + '%';
+        if (best.durationSec) score += ' / ' + formatLiveDuration_(best.durationSec);
+        html += '<td>' + escapeHtml(score) + '</td>';
+      }
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += liveBoardRestHtml_(extraFinished, pendingCount);
   el.innerHTML = html;
   livePrevByKind_[kind] = nextMap;
 }

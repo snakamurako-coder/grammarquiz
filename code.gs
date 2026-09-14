@@ -4973,6 +4973,28 @@ function buildLiveBoardEntry_(entry) {
   };
 }
 
+function compareLiveJoinedRoster_(a, b) {
+  const na = parseInt(a && a.number, 10);
+  const nb = parseInt(b && b.number, 10);
+  const aNum = !isNaN(na);
+  const bNum = !isNaN(nb);
+  if (aNum && bNum && na !== nb) return na - nb;
+  if (aNum !== bNum) return aNum ? -1 : 1;
+  return String((a && a.name) || '').localeCompare(String((b && b.name) || ''), 'ja');
+}
+
+function withUnfinishedLiveJoiners_(ranked, entries) {
+  const seen = {};
+  (ranked || []).forEach(function (e) {
+    seen[String((e && (e.account || e.name)) || '')] = true;
+  });
+  const pending = (entries || []).filter(function (e) {
+    const key = String((e && (e.account || e.name)) || '');
+    return key && !seen[key];
+  }).sort(compareLiveJoinedRoster_);
+  return (ranked || []).concat(pending);
+}
+
 function sortLiveBoardLists_(mode, entries) {
   const finished = entries.filter(function (e) { return e.best; });
   const byAchievement = finished.slice().sort(function (a, b) {
@@ -4993,9 +5015,9 @@ function sortLiveBoardLists_(mode, entries) {
     return b.best.scoreRate - a.best.scoreRate;
   });
   return {
-    achievement: byAchievement,
-    scoreRate: byScore,
-    speed: bySpeed
+    achievement: withUnfinishedLiveJoiners_(byAchievement, entries),
+    scoreRate: withUnfinishedLiveJoiners_(byScore, entries),
+    speed: withUnfinishedLiveJoiners_(bySpeed, entries)
   };
 }
 
@@ -5498,6 +5520,7 @@ function emptyLivePollPublic_() {
     phase: 'idle',
     collectEndsAt: 0,
     collectDurationSec: 0,
+    collectStartedAt: 0,
     ballotRound: 0,
     sectionIndex: 0,
     sectionName: '',
@@ -5733,6 +5756,7 @@ function loadLivePollPresetIntoSecrets_(pin, pub, preset, ttlSec) {
   pub.sectionName = '';
   pub.collectEndsAt = 0;
   pub.collectDurationSec = 0;
+  pub.collectStartedAt = 0;
   pub.reviewQuestionId = '';
   pub.visibleQuestionIds = [];
   pub.questions = [];
@@ -5774,6 +5798,7 @@ function startLivePollPresetSection_(pub, secrets, sectionIndex, durationSecOver
   pub.phase = 'collecting';
   pub.collectDurationSec = durationSec;
   pub.collectEndsAt = durationSec > 0 ? (Date.now() + durationSec * 1000) : 0;
+  pub.collectStartedAt = Date.now();
   pub.revealed = {};
   pub.frozenTally = {};
   pub.submittedCount = 0;
@@ -5908,6 +5933,7 @@ function apiLivePollControl_(requestData) {
       pub.ballotRound = round;
       pub.collectEndsAt = 0;
       pub.collectDurationSec = 0;
+      pub.collectStartedAt = 0;
       pub.reviewQuestionId = id;
       pub.visibleQuestionIds = [id];
       pub.questions = [question];
@@ -5930,6 +5956,7 @@ function apiLivePollControl_(requestData) {
       pub.phase = 'collecting';
       pub.collectDurationSec = durationSec;
       pub.collectEndsAt = durationSec > 0 ? (Date.now() + durationSec * 1000) : 0;
+      pub.collectStartedAt = Date.now();
       pub.revealed = {};
       pub.frozenTally = {};
       pub.submittedCount = 0;
@@ -6037,6 +6064,7 @@ function apiLivePollControl_(requestData) {
       pub.phase = 'idle';
       pub.collectEndsAt = 0;
       pub.collectDurationSec = 0;
+      pub.collectStartedAt = 0;
       pub.reviewQuestionId = '';
       pub.visibleQuestionIds = [];
       pub.questions = [];
