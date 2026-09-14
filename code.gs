@@ -5432,13 +5432,15 @@ function firebaseDeleteLiveRoom_(pin) {
 }
 
 function buildLiveBoardResponse_(meta, pin, entries) {
-  const lists = sortLiveBoardLists_(meta.mode, entries);
+  const currentMode = liveCurrentMode_(meta);
+  const lists = sortLiveBoardLists_(currentMode, entries);
   const rosterCount = (meta.roster && meta.roster.length) ? meta.roster.length : entries.length;
   const finishedCount = entries.filter(function (e) { return !!e.best; }).length;
   return {
     pin: pin,
     title: meta.title,
-    mode: meta.mode,
+    mode: currentMode,
+    activity: currentMode,
     backend: normalizeLiveBackend_(meta.backend),
     closesAt: meta.closesAt,
     timeLimitSec: meta.timeLimitSec,
@@ -5455,7 +5457,7 @@ function exportLiveResultsBook_(pin, meta, entriesOverride) {
   const entries = entriesOverride || readLiveEntriesForPin_(meta, pin);
   const merged = mergeLiveRosterAndEntries_(meta, entries);
   const finished = merged.filter(function (r) { return r.best; }).slice().sort(function (a, b) {
-    if (meta.mode === 'word-link') return compareWordLinkBest_(a.best, b.best);
+    if (liveCurrentMode_(meta) === 'word-link') return compareWordLinkBest_(a.best, b.best);
     if (a.best.scoreRate !== b.best.scoreRate) return b.best.scoreRate - a.best.scoreRate;
     return parseLiveDurationSec_(a.best.durationSec) - parseLiveDurationSec_(b.best.durationSec);
   });
@@ -5466,12 +5468,13 @@ function exportLiveResultsBook_(pin, meta, entriesOverride) {
   const unfinished = merged.filter(function (r) { return !r.best; }).slice().sort(compareLiveRoster_);
   const rankedRows = finished.concat(unfinished);
   const rosterRows = merged.slice().sort(compareLiveRoster_);
-  const headers = liveExportHeaders_(meta.mode);
+  const exportMode = liveCurrentMode_(meta);
+  const headers = liveExportHeaders_(exportMode);
   const rankedValues = rankedRows.map(function (r) {
-    return liveExportRow_(meta.mode, r, rankByAcct[String(r.account || '').trim().toLowerCase()] || '');
+    return liveExportRow_(exportMode, r, rankByAcct[String(r.account || '').trim().toLowerCase()] || '');
   });
   const rosterValues = rosterRows.map(function (r) {
-    return liveExportRow_(meta.mode, r, rankByAcct[String(r.account || '').trim().toLowerCase()] || '');
+    return liveExportRow_(exportMode, r, rankByAcct[String(r.account || '').trim().toLowerCase()] || '');
   });
 
   const folder = getOrCreateLiveModeFolder_();
@@ -6115,6 +6118,11 @@ function apiLivePollControl_(requestData) {
   }
 }
 
+function liveCurrentMode_(meta) {
+  if (!meta) return '';
+  return String(meta.activity || meta.mode || '').trim();
+}
+
 function apiLiveSwitchActivity_(requestData) {
   const admin = requireAssignmentAdminFromRequest_(requestData || {});
   if (!admin.ok) return { status: 'error', message: admin.error };
@@ -6137,6 +6145,12 @@ function apiLiveSwitchActivity_(requestData) {
     }
     meta.backend = 'firebase';
     if (!meta.pollPublic) meta.pollPublic = emptyLivePollPublic_();
+    meta.timeLimitSec = 0;
+    meta.closesAt = 0;
+    meta.autoSubmitOnTimeout = false;
+    const pollTitle = String(requestData.title || '').trim();
+    if (pollTitle) meta.title = pollTitle;
+    else if (!meta.title || meta.mode !== 'poll') meta.title = 'リアルタイム投票';
   }
   if (activity === 'vocab' || activity === 'word-link') {
     const launchOptions = requestData.launchOptions || meta.launchOptions || {};
@@ -6151,15 +6165,29 @@ function apiLiveSwitchActivity_(requestData) {
       launchOptions.linkMode = linkMode;
     }
     meta.launchOptions = launchOptions;
+    if (requestData.timeLimitSec != null && String(requestData.timeLimitSec) !== '') {
+      meta.timeLimitSec = Math.max(0, parseInt(requestData.timeLimitSec, 10) || 0);
+    }
+    meta.autoSubmitOnTimeout = requestData.autoSubmitOnTimeout !== false;
+    const nowMs = Date.now();
+    meta.closesAt = meta.timeLimitSec > 0 ? (nowMs + meta.timeLimitSec * 1000) : 0;
+    const title = String(requestData.title || '').trim();
+    meta.title = title || (launchOptions.bookName + ' / ' + launchOptions.sheetName);
   }
   meta.activity = activity;
-  const ttlSec = activity === 'poll' ? livePollTtlSec_(meta) : computeLiveRoomTtlSec_(meta.timeLimitSec);
+  meta.mode = activity;
+  const ttlSec = activity === 'poll' ? 21600 : computeLiveRoomTtlSec_(meta.timeLimitSec);
   putLiveMeta_(pin, meta, ttlSec);
   if (isLiveFirebaseBackend_(meta)) {
     const patch = {
       activity: meta.activity,
+      mode: meta.mode,
       backend: meta.backend,
-      launchOptions: meta.launchOptions || {}
+      title: meta.title,
+      launchOptions: meta.launchOptions || {},
+      timeLimitSec: meta.timeLimitSec || 0,
+      closesAt: meta.closesAt || 0,
+      autoSubmitOnTimeout: meta.autoSubmitOnTimeout !== false
     };
     if (activity === 'poll') patch.pollPublic = meta.pollPublic || emptyLivePollPublic_();
     firebasePatchLiveRoom_(pin, patch);
@@ -6412,8 +6440,8 @@ function apiLiveSubmit_(requestData) {
   const account = String(user.account || authReq.auth.email || '').trim().toLowerCase();
   if (!account) return { status: 'error', message: 'アカウント情報を取得できません' };
   const ttlSec = computeLiveRoomTtlSec_(meta.timeLimitSec);
-  const attempt = normalizeLiveAttempt_(meta.mode, requestData.attempt || requestData);
-  if (meta.mode === 'word-link' && attempt.total <= 0) {
+  const attempt = normalizeLiveAttempt_(activity, requestData.attempt || requestData);
+  if (activity === 'word-link' && attempt.total <= 0) {
     return { status: 'error', message: 'Word Link は完走後のみ提出できます' };
   }
   let entry = getLiveEntry_(pin, account);
@@ -6430,7 +6458,7 @@ function apiLiveSubmit_(requestData) {
   }
   entry.attempts = (parseInt(entry.attempts, 10) || 0) + 1;
   let updated = false;
-  if (isLiveBetterAttempt_(meta.mode, attempt, entry.best)) {
+  if (isLiveBetterAttempt_(activity, attempt, entry.best)) {
     entry.best = attempt;
     updated = true;
   }

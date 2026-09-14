@@ -157,6 +157,12 @@ const LiveRoomModule = (function () {
     return act === 'vocab' || act === 'word-link';
   }
 
+  function currentMode_(room) {
+    room = room || activeRoom_;
+    if (!room) return '';
+    return String(room.activity || room.mode || '').trim();
+  }
+
   function getContinueChecked_() {
     const boardCb = el_('live-board-continue-modes');
     const setupCb = el_('live-poll-setup-continue-modes');
@@ -628,7 +634,7 @@ const LiveRoomModule = (function () {
         }
         const settingsEl = el_('live-room-student-settings');
         if (settingsEl) {
-          settingsEl.textContent = formatLaunchSummary_(activeRoom_.mode, activeRoom_.launchOptions, activeRoom_.timeLimitSec);
+          settingsEl.textContent = formatLaunchSummary_(currentMode_(activeRoom_), activeRoom_.launchOptions, activeRoom_.timeLimitSec);
         }
       } else {
         banner.style.display = 'none';
@@ -701,6 +707,9 @@ const LiveRoomModule = (function () {
     opts = opts || {};
     const room = activeRoom_;
     if (!room || !room.isTeacher) throw new Error('開催中の部屋がありません');
+    if (!room.continueAcrossModes) {
+      throw new Error('先に開催中の授業ライブを閉じるか、モード継続を有効にしてください');
+    }
     const payload = {
       action: 'liveSwitchActivity',
       pin: room.pin,
@@ -721,14 +730,28 @@ const LiveRoomModule = (function () {
         launchOptions.linkMode = linkMode;
       }
       payload.launchOptions = launchOptions;
+      if (opts.timeLimitSec != null) payload.timeLimitSec = opts.timeLimitSec;
+      if (opts.title) payload.title = opts.title;
+      payload.autoSubmitOnTimeout = opts.autoSubmitOnTimeout !== false;
     }
+    if (activity === 'poll' && opts.title) payload.title = opts.title;
     const res = await post_(payload);
     const data = res.data || {};
-    room.activity = data.activity || activity;
+    const current = data.activity || activity;
+    room.activity = current;
+    room.mode = current;
     room.backend = data.backend || room.backend;
     room.pollPublic = data.pollPublic != null ? data.pollPublic : room.pollPublic;
     room.launchOptions = data.launchOptions || room.launchOptions;
+    room.title = data.title || room.title;
+    room.timeLimitSec = data.timeLimitSec != null ? data.timeLimitSec : room.timeLimitSec;
+    room.closesAt = data.closesAt != null ? data.closesAt : room.closesAt;
+    room.autoSubmitOnTimeout = data.autoSubmitOnTimeout !== false;
     room.continueAcrossModes = data.continueAcrossModes !== false;
+    boardDefaultedPin_ = '';
+    boardPrevByKind_ = { achievement: {}, score: {}, speed: {} };
+    boardListSigByKind_ = { achievement: '', score: '', speed: '' };
+    timeoutFired_ = false;
     setActiveRoom_(room);
     if (activity === 'poll') {
       stopBoardUpdates_();
@@ -751,7 +774,8 @@ const LiveRoomModule = (function () {
     if (!isAdminUser_()) throw new Error('管理者のみ部屋を開けます');
     if (!window.VocabSettingsModule) throw new Error('設定モジュールが未初期化です');
     opts = opts || {};
-    if (activeRoom_ && activeRoom_.isTeacher && activeRoom_.continueAcrossModes) {
+    if (activeRoom_ && activeRoom_.isTeacher && (activeRoom_.continueAcrossModes || getContinueChecked_())) {
+      activeRoom_.continueAcrossModes = true;
       return switchActivity_(mode === 'word-link' ? 'word-link' : 'vocab', opts);
     }
     if (activeRoom_ && activeRoom_.isTeacher) {
@@ -911,13 +935,20 @@ const LiveRoomModule = (function () {
     if (!activeRoom_ || activeRoom_.isTeacher) return;
     const prevActivity = activeRoom_.activity || activeRoom_.mode;
     activeRoom_.activity = data.activity || activeRoom_.activity;
+    if (data.mode) activeRoom_.mode = data.mode;
     activeRoom_.pollPublic = data.pollPublic != null ? data.pollPublic : activeRoom_.pollPublic;
     if (data.launchOptions) activeRoom_.launchOptions = data.launchOptions;
+    if (data.title) activeRoom_.title = data.title;
+    if (data.timeLimitSec != null) activeRoom_.timeLimitSec = data.timeLimitSec;
+    if (data.closesAt != null) activeRoom_.closesAt = data.closesAt;
     saveStoredRoom_(activeRoom_);
     const newActivity = activeRoom_.activity || activeRoom_.mode;
     if (prevActivity !== newActivity) {
       if (window.LivePollModule && LivePollModule.isStudentOpen && LivePollModule.isStudentOpen()) {
         if (newActivity !== 'poll') LivePollModule.closeScreens();
+      }
+      if (newActivity !== 'poll') {
+        applyLaunchOptionsToUi_(activeRoom_.launchOptions, newActivity);
       }
       if (typeof showToast_ === 'function') {
         showToast_(newActivity === 'poll'
@@ -965,9 +996,9 @@ const LiveRoomModule = (function () {
     const opts = Object.assign({}, activeRoom_.launchOptions || {});
     opts.homeworkMode = false;
     if (!opts.bookName || !opts.sheetName) throw new Error('出題設定がありません。もう一度参加し直してください。');
-    applyLaunchOptionsToUi_(opts, activeRoom_.mode);
+    applyLaunchOptionsToUi_(opts, currentMode_(activeRoom_));
     const startBtn = el_('live-room-start-attempt-btn');
-    if (activeRoom_.mode === 'word-link') {
+    if (currentMode_(activeRoom_) === 'word-link') {
       if (!window.VocabLinkModule) throw new Error('Word Link モジュールの読み込みに失敗しました');
       if (window.TtsModule && typeof window.TtsModule.prime === 'function') window.TtsModule.prime();
       await BusyButton.run(startBtn, async function () {
@@ -1109,7 +1140,7 @@ const LiveRoomModule = (function () {
 
   function buildAttemptFromSummary_(summary, extra) {
     extra = extra || {};
-    const mode = activeRoom_ ? activeRoom_.mode : '';
+    const mode = activeRoom_ ? currentMode_(activeRoom_) : '';
     if (mode === 'word-link') {
       return normalizeAttempt_('word-link', {
         correct: extra.wordCount || summary.Correct || 0,
@@ -1182,9 +1213,9 @@ const LiveRoomModule = (function () {
     if (activeRoom_) {
       paintLaunchSummary_(
         el_('live-board-settings'),
-        activeRoom_.mode, activeRoom_.launchOptions, activeRoom_.timeLimitSec);
+        currentMode_(activeRoom_), activeRoom_.launchOptions, activeRoom_.timeLimitSec);
     }
-    updateBoardTabLabels_(activeRoom_ && activeRoom_.mode);
+    updateBoardTabLabels_(currentMode_(activeRoom_));
   }
 
   function hideBoardScreen_() {
@@ -1217,23 +1248,27 @@ const LiveRoomModule = (function () {
     if (activeRoom_) {
       if (data.backend) activeRoom_.backend = data.backend;
       if (data.launchOptions) activeRoom_.launchOptions = data.launchOptions;
+      if (data.activity) activeRoom_.activity = data.activity;
+      if (data.mode) activeRoom_.mode = data.mode;
+      if (data.title) activeRoom_.title = data.title;
       saveStoredRoom_(activeRoom_);
     }
     paintLaunchSummary_(
       el_('live-board-settings'),
-      data.mode || (activeRoom_ && activeRoom_.mode),
+      data.activity || data.mode || currentMode_(activeRoom_),
       data.launchOptions || (activeRoom_ && activeRoom_.launchOptions),
       data.timeLimitSec != null ? data.timeLimitSec : (activeRoom_ && activeRoom_.timeLimitSec)
     );
-    updateBoardTabLabels_(data.mode || (activeRoom_ && activeRoom_.mode));
-    renderBoardList_('live-board-list-achievement', data.lists && data.lists.achievement, data.mode, 'achievement');
-    renderBoardList_('live-board-list-score', data.lists && data.lists.scoreRate, data.mode, 'score');
-    renderBoardList_('live-board-list-speed', data.lists && data.lists.speed, data.mode, 'speed');
+    const boardMode = data.activity || data.mode || currentMode_(activeRoom_);
+    updateBoardTabLabels_(boardMode);
+    renderBoardList_('live-board-list-achievement', data.lists && data.lists.achievement, boardMode, 'achievement');
+    renderBoardList_('live-board-list-score', data.lists && data.lists.scoreRate, boardMode, 'score');
+    renderBoardList_('live-board-list-speed', data.lists && data.lists.speed, boardMode, 'speed');
     if (boardDefaultedPin_ !== (data.pin || (activeRoom_ && activeRoom_.pin) || '')) {
       boardDefaultedPin_ = data.pin || (activeRoom_ && activeRoom_.pin) || '';
       boardPrevByKind_ = { achievement: {}, score: {}, speed: {} };
       boardListSigByKind_ = { achievement: '', score: '', speed: '' };
-      switchBoardTab_(data.mode === 'word-link' ? 'score' : 'score');
+      switchBoardTab_(boardMode === 'word-link' ? 'score' : 'score');
     }
   }
 
@@ -1354,9 +1389,11 @@ const LiveRoomModule = (function () {
     if (isFirebaseRoom_() && window.LiveFirebase) {
       LiveFirebase.subscribeBoard(
         activeRoom_.pin,
-        activeRoom_.mode,
+        currentMode_(activeRoom_),
         {
           title: activeRoom_.title,
+          mode: currentMode_(activeRoom_),
+          activity: currentMode_(activeRoom_),
           closesAt: activeRoom_.closesAt,
           timeLimitSec: activeRoom_.timeLimitSec,
           launchOptions: activeRoom_.launchOptions,

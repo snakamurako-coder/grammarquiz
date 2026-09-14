@@ -31,7 +31,7 @@ const LivePollModule = (function () {
 
   function isPollRoom_(room) {
     if (!room) return false;
-    return room.mode === 'poll' || room.activity === 'poll';
+    return (room.activity || room.mode) === 'poll';
   }
 
   function pub_(snap) {
@@ -1174,7 +1174,15 @@ const LivePollModule = (function () {
     await renderPresetList_();
   }
 
+  function persistContinueToRoom_() {
+    const room = window.LiveRoomModule && LiveRoomModule.getActiveRoom && LiveRoomModule.getActiveRoom();
+    if (!room || !room.isTeacher) return;
+    room.continueAcrossModes = getContinueChecked_();
+    if (LiveRoomModule.touchActiveRoom) LiveRoomModule.touchActiveRoom(room);
+  }
+
   function closeSetup() {
+    persistContinueToRoom_();
     setSetupOpen_(false);
     showEditorView_(false);
     editingPreset_ = null;

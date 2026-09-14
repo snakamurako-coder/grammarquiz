@@ -200,7 +200,8 @@ const LiveFirebase = (function () {
     let entries = [];
 
     function emit_() {
-      onData(buildBoardPayload_(pin, mode || meta.mode, meta, entries));
+      const current = meta.activity || meta.mode || mode;
+      onData(buildBoardPayload_(pin, current, meta, entries));
     }
 
     const unsubRoom = onSnapshot(roomRef, function (snap) {
@@ -253,7 +254,9 @@ const LiveFirebase = (function () {
         mode: meta.mode,
         pollPublic: meta.pollPublic || null,
         launchOptions: meta.launchOptions || null,
-        title: meta.title
+        title: meta.title,
+        timeLimitSec: meta.timeLimitSec,
+        closesAt: meta.closesAt
       });
     }, function (err) {
       if (onError) onError(err);
