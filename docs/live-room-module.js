@@ -1061,10 +1061,15 @@ const LiveRoomModule = (function () {
     timeoutFired_ = false;
     localBest_ = room.localBest;
     setActiveRoom_(room);
-    if (!isPollRoom_(room) && !isTeamRoom_(room)) {
+    if (isTeamRoom_(room)) {
+      applyLaunchOptionsToUi_(room.launchOptions, 'vocab');
+    } else if (!isPollRoom_(room)) {
       applyLaunchOptionsToUi_(room.launchOptions, room.activity || room.mode);
     }
     startStudentRoomMetaWatch_();
+    if (isTeamRoom_(room) && window.LiveTeamModule) {
+      await LiveTeamModule.openStudent();
+    }
     return room;
   }
 
@@ -1100,6 +1105,10 @@ const LiveRoomModule = (function () {
       }
       if (window.LiveTeamModule && LiveTeamModule.isStudentOpen && LiveTeamModule.isStudentOpen()) {
         if (newActivity !== 'vocab-team') LiveTeamModule.closeScreens();
+      } else if (newActivity === 'vocab-team' && window.LiveTeamModule) {
+        LiveTeamModule.openStudent().catch(function (e) {
+          console.warn('チームN択画面:', e.message || e);
+        });
       }
       if (newActivity !== 'poll' && newActivity !== 'vocab-team') {
         applyLaunchOptionsToUi_(activeRoom_.launchOptions, newActivity);
@@ -1108,7 +1117,7 @@ const LiveRoomModule = (function () {
         if (newActivity === 'poll') {
           showToast_('投票が始まりました。「参加する（投票）」から入れます');
         } else if (newActivity === 'vocab-team') {
-          showToast_('チームN択が始まりました。「参加する（チームN択）」から入れます');
+          showToast_('チームN択が始まりました。画面が開きます');
         } else {
           showToast_('取り組みが再開できます。「参加する（取り組む）」から開始できます');
         }
@@ -1687,7 +1696,7 @@ const LiveRoomModule = (function () {
             showToast_(isPollRoom_(room)
               ? '授業ライブに参加しました。「参加する（投票）」で投票画面を開けます'
               : (isTeamRoom_(room)
-                ? '授業ライブに参加しました。「参加する（チームN択）」で開始できます'
+                ? 'チームN択に参加しました。待機中はミニ学習ができます'
                 : '授業ライブに参加しました。「参加する（取り組む）」で開始できます'));
           }
         }).catch(function (e) {

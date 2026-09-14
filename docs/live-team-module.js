@@ -17,6 +17,8 @@ const LiveTeamModule = (function () {
   let miniIndex_ = 0;
   let miniRunning_ = false;
   let markFinishedSent_ = false;
+  let studentPollId_ = 0;
+  let raceSig_ = '';
 
   function el_(id) {
     return document.getElementById(id);
@@ -159,23 +161,30 @@ const LiveTeamModule = (function () {
   }
 
   async function fetchWordsForTeam_(launchOptions) {
-    const bookType = (document.getElementById('vocab-book-type') || {}).value;
-    if (bookType === 'user' && window.AuthGateService && AuthGateService.isValid()) {
-      if (!window.UserVocabCacheModule) throw new Error('ユーザー単語キャッシュが未初期化です');
-      const result = UserVocabCacheModule.getWordsForStart(launchOptions.sheetName, launchOptions.filters);
-      if (result.status !== 'success') throw new Error(result.message || '単語取得失敗');
-      return result.data;
+    if (!launchOptions || !launchOptions.bookName || !launchOptions.sheetName) {
+      throw new Error('教材設定がありません');
     }
-    if (!window.PresetModule) throw new Error('PresetModule が未初期化です');
-    const result = await PresetModule.getVocabWords(
-      launchOptions.bookName,
-      launchOptions.sheetName,
-      JSON.stringify(launchOptions.filters || {}),
-      true,
-      false
-    );
-    if (result.status !== 'success') throw new Error(result.message || '単語取得失敗');
-    return result.data;
+    if (window.PresetModule && typeof PresetModule.getVocabWords === 'function') {
+      try {
+        const result = await PresetModule.getVocabWords(
+          launchOptions.bookName,
+          launchOptions.sheetName,
+          JSON.stringify(launchOptions.filters || {}),
+          true,
+          false
+        );
+        if (result && result.status === 'success' && result.data && (result.data.words || []).length) {
+          return result.data;
+        }
+      } catch (e) {
+        console.warn('チーム教材の取得:', e.message || e);
+      }
+    }
+    if (window.UserVocabCacheModule) {
+      const result = UserVocabCacheModule.getWordsForStart(launchOptions.sheetName, launchOptions.filters);
+      if (result && result.status === 'success') return result.data;
+    }
+    throw new Error('単語を取得できませんでした');
   }
 
   async function buildHostQuestions_(launchOptions, questionCount, choiceCount) {
@@ -404,12 +413,14 @@ const LiveTeamModule = (function () {
     const statusEl = el_('live-team-student-status');
     if (!promptEl || !choicesEl) return;
     if (!hands || hands.waiting) {
+      raceSig_ = '';
       promptEl.textContent = '';
       choicesEl.innerHTML = '';
       if (statusEl) statusEl.textContent = 'ホストがチームを組むまで、下のミニ学習ができます';
       return;
     }
     if (hands.phase !== 'racing') {
+      raceSig_ = '';
       promptEl.textContent = '';
       choicesEl.innerHTML = '';
       if (statusEl) statusEl.textContent = '開始待ちです。下のミニ学習ができます';
@@ -418,12 +429,21 @@ const LiveTeamModule = (function () {
     hideMini_();
     if (hands.finished || parseInt(hands.finishedAt, 10) > 0
       || (hands.totalQuestions > 0 && hands.currentIndex >= hands.totalQuestions)) {
+      raceSig_ = 'done';
       promptEl.textContent = '完走しました！';
       choicesEl.innerHTML = '';
       statusEl.textContent = hands.finishedAt
         ? ('タイム ' + formatRaceTime_(hands.finishedAt, hands.startedAt)) : '';
       return;
     }
+    const sig = [hands.questionId, hands.currentIndex, hands.lockUntil, (hands.hand || []).length].join('|');
+    if (sig === raceSig_ && choicesEl.childNodes.length) {
+      updateLockUi_(hands.lockUntil);
+      const lockedNow = (parseInt(hands.lockUntil, 10) || 0) > Date.now();
+      choicesEl.querySelectorAll('.live-team-choice-btn').forEach(function (b) { b.disabled = lockedNow; });
+      return;
+    }
+    raceSig_ = sig;
     promptEl.textContent = hands.prompt || '';
     statusEl.textContent = '問 ' + (hands.currentIndex + 1) + ' / ' + hands.totalQuestions;
     updateLockUi_(hands.lockUntil);
@@ -567,22 +587,65 @@ const LiveTeamModule = (function () {
 
   function subscribeStudent_() {
     const room = LiveRoomModule.getActiveRoom();
-    if (!room || !window.LiveFirebase) return;
+    if (!room) return;
     if (window.AuthGateService && AuthGateService.getUser) {
-      const u = AuthGateService.getUser();
-      if (u && u.account) room.myAccount = u.account;
+      const u = AuthGateService.getUser() || {};
+      room.myAccount = String(u.account || u.email || '').trim().toLowerCase();
     }
+    if (!window.LiveFirebase || typeof LiveFirebase.subscribeTeam !== 'function') return;
     LiveFirebase.subscribeTeam(room.pin, true, {
       title: room.title,
       teamPublic: room.teamPublic,
       launchOptions: room.launchOptions
     }, function (snap) {
       room.teamPublic = snap.teamPublic;
+      if (snap.launchOptions) room.launchOptions = snap.launchOptions;
       LiveRoomModule.touchActiveRoom(room);
       renderStudent_(snap);
     }, function (err) {
       console.warn('チーム生徒購読:', err.message || err);
+      const statusEl = el_('live-team-student-status');
+      if (statusEl && !statusEl.textContent) statusEl.textContent = '接続を再試行しています…';
     });
+  }
+
+  function stopStudentPoll_() {
+    if (studentPollId_) {
+      clearInterval(studentPollId_);
+      studentPollId_ = 0;
+    }
+  }
+
+  function startStudentPoll_() {
+    stopStudentPoll_();
+    studentPollId_ = setInterval(function () {
+      if (!studentOpen_) return;
+      tickStudentFromApi_().catch(function () { /* ignore */ });
+    }, 1500);
+  }
+
+  async function tickStudentFromApi_() {
+    const room = LiveRoomModule.getActiveRoom();
+    if (!room) return;
+    const hands = await refreshHands_();
+    const snap = lastSnap_ || {
+      teamPublic: room.teamPublic || {},
+      launchOptions: room.launchOptions,
+      entries: [],
+      teams: (room.teamPublic && room.teamPublic.roster) || []
+    };
+    if (hands.phase === 'racing' && hands.teamId && !hands.waiting) {
+      renderStudentRace_(hands);
+      return;
+    }
+    renderStudentRace_({ waiting: true, phase: hands.phase });
+    const statusEl = el_('live-team-student-status');
+    if (statusEl) {
+      if (hands.phase === 'racing') statusEl.textContent = 'チーム未所属です。下のミニ学習ができます';
+      else if (hands.phase === 'ready') statusEl.textContent = '開始待ちです。下のミニ学習ができます';
+      else statusEl.textContent = 'チーム編成待ちです。下のミニ学習ができます';
+    }
+    showMiniIfNeeded_(snap);
   }
 
   function showStudentScreen_(on) {
@@ -594,18 +657,37 @@ const LiveTeamModule = (function () {
       screen.style.display = studentOpen_ ? 'flex' : 'none';
     }
     if (!on) {
+      stopStudentPoll_();
       if (window.LiveFirebase && LiveFirebase.unsubscribeTeam) LiveFirebase.unsubscribeTeam();
       clearLockTimer_();
       miniQuestions_ = [];
       miniIndex_ = 0;
       miniRunning_ = false;
       hands_ = null;
+      raceSig_ = '';
     }
   }
 
   async function openStudent() {
     showStudentScreen_(true);
+    const room = LiveRoomModule.getActiveRoom();
+    const statusEl = el_('live-team-student-status');
+    if (statusEl) statusEl.textContent = '接続中…ミニ学習を準備しています';
+    const infoEl = el_('live-team-student-team-info');
+    if (infoEl && !infoEl.innerHTML) {
+      infoEl.innerHTML = '<p class="filter-axis-hint">部屋に参加しました。チーム編成と開始を待っています。</p>';
+    }
+    showMiniIfNeeded_({
+      launchOptions: room && room.launchOptions,
+      teamPublic: room && room.teamPublic,
+      entries: [],
+      teams: (room && room.teamPublic && room.teamPublic.roster) || []
+    });
     subscribeStudent_();
+    startStudentPoll_();
+    tickStudentFromApi_().catch(function (e) {
+      if (statusEl) statusEl.textContent = e.message || String(e);
+    });
   }
 
   function closeScreens() {
@@ -768,17 +850,15 @@ const LiveTeamModule = (function () {
         const btn = ev.target.closest('.live-team-choice-btn');
         if (!btn || btn.disabled) return;
         const choiceId = btn.getAttribute('data-choice-id');
-        const isCorrect = btn.getAttribute('data-is-correct') === '1';
-        if (!hands_ || !LiveFirebase || !LiveFirebase.submitTeamPick) return;
-        const room = LiveRoomModule.getActiveRoom();
+        if (!hands_) return;
         btn.disabled = true;
-        LiveFirebase.submitTeamPick(room.pin, hands_.teamId, {
+        control_({
+          command: 'pick',
+          teamId: hands_.teamId,
           choiceId: choiceId,
-          isCorrect: isCorrect,
-          expectedIndex: hands_.currentIndex,
-          totalQuestions: hands_.totalQuestions
+          expectedIndex: hands_.currentIndex
         }).then(function (res) {
-          if (res.blocked || res.stale) return refreshHands_().then(renderStudentRace_);
+          if (res && res.lockUntil) updateLockUi_(res.lockUntil);
           return refreshHands_().then(renderStudentRace_);
         }).catch(function (e) {
           alert(e.message || e);

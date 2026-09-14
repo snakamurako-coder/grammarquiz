@@ -419,7 +419,8 @@ const LiveFirebase = (function () {
       });
       emit_();
     }, function (err) {
-      if (onError) onError(err);
+      console.warn('teams 購読:', err && err.message ? err.message : err);
+      emit_();
     });
 
     teamUnsub_ = function () {

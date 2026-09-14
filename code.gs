@@ -5789,6 +5789,27 @@ function firebaseWriteTeam_(pin, teamId, data) {
   firestoreRequest_('PATCH', docPath, { fields: firestoreEncodeFields_(data) });
 }
 
+function firebasePatchTeam_(pin, teamId, fields) {
+  teamId = String(teamId || '').trim();
+  const keys = Object.keys(fields || {});
+  if (!teamId || !keys.length) return;
+  const docPath = '/liveRooms/' + encodeURIComponent(pin) + '/teams/' + encodeURIComponent(teamId);
+  firestoreRequest_('PATCH', docPath, { fields: firestoreEncodeFields_(fields) }, {
+    'updateMask.fieldPaths': keys
+  });
+}
+
+function firebaseReadTeam_(pin, teamId) {
+  teamId = String(teamId || '').trim();
+  if (!teamId) return null;
+  const docPath = '/liveRooms/' + encodeURIComponent(pin) + '/teams/' + encodeURIComponent(teamId);
+  const res = firestoreRequest_('GET', docPath, null, null);
+  if (!res || !res.fields) return null;
+  const data = firestoreDecodeFields_(res.fields);
+  data.id = teamId;
+  return data;
+}
+
 function firebaseDeleteAllTeams_(pin) {
   const teams = firebaseReadLiveTeams_(pin);
   teams.forEach(function (team) {
@@ -5927,6 +5948,76 @@ function apiLiveTeamControl_(requestData) {
         startedAt: parseInt(teamPublic.startedAt, 10) || 0
       }
     };
+  }
+
+  if (cmd === 'pick') {
+    const authReq = requireAuthToken_(requestData);
+    if (!authReq.ok) return { status: 'error', message: authReq.error };
+    const pin = String(requestData.pin || '').trim();
+    const meta = getLiveMeta_(pin);
+    if (!meta) return { status: 'error', message: '部屋が見つかりません' };
+    if (liveCurrentMode_(meta) !== 'vocab-team') return { status: 'error', message: 'この部屋はチームN択ではありません' };
+    const user = resolveAuthUserFromRequest_(authReq);
+    const account = String(user.account || authReq.auth.email || '').trim().toLowerCase();
+    if (!account) return { status: 'error', message: 'アカウント情報を取得できません' };
+    const choiceId = String(requestData.choiceId || '').trim();
+    if (!choiceId) return { status: 'error', message: 'choiceId が必要です' };
+    const entry = firebaseReadLiveEntry_(pin, account);
+    const teamId = String((requestData.teamId || (entry && entry.teamId) || '')).trim();
+    if (!teamId) return { status: 'error', message: 'チーム未所属です' };
+    const team = firebaseReadTeam_(pin, teamId);
+    if (!team) return { status: 'error', message: 'チームが見つかりません' };
+    const secrets = getLiveTeamSecrets_(pin);
+    const assign = secrets.assignments && secrets.assignments[teamId] ? secrets.assignments[teamId] : null;
+    if (!assign) return { status: 'error', message: '手札が未設定です' };
+    const now = Date.now();
+    const lockUntil = parseInt(team.lockUntil, 10) || 0;
+    if (lockUntil > now) {
+      return { status: 'success', data: { blocked: true, lockUntil: lockUntil } };
+    }
+    const currentIndex = parseInt(team.currentIndex, 10) || 0;
+    const expectedIndex = parseInt(requestData.expectedIndex, 10);
+    if (!isNaN(expectedIndex) && String(requestData.expectedIndex) !== '' && expectedIndex !== currentIndex) {
+      return { status: 'success', data: { stale: true, currentIndex: currentIndex } };
+    }
+    if (parseInt(team.finishedAt, 10) > 0) {
+      return { status: 'success', data: { stale: true, finished: true } };
+    }
+    const qOrder = team.qOrder || assign.qOrder || [];
+    const questionId = qOrder[currentIndex];
+    const rawHand = (assign.handsByAccount && assign.handsByAccount[account] && assign.handsByAccount[account][questionId])
+      ? assign.handsByAccount[account][questionId] : [];
+    const handIds = (rawHand || []).map(function (x) {
+      return (x && typeof x === 'object') ? String(x.id) : String(x);
+    });
+    if (handIds.indexOf(choiceId) < 0) {
+      return { status: 'error', message: 'その選択肢は担当ではありません' };
+    }
+    const correctId = secrets.correctByQ && secrets.correctByQ[questionId] ? String(secrets.correctByQ[questionId]) : '';
+    const isCorrect = choiceId === correctId;
+    if (!isCorrect) {
+      const nextLock = now + 2000;
+      firebasePatchTeam_(pin, teamId, {
+        lockUntil: nextLock,
+        wrongCount: (parseInt(team.wrongCount, 10) || 0) + 1
+      });
+      return { status: 'success', data: { ok: false, wrong: true, lockUntil: nextLock } };
+    }
+    const nextIndex = currentIndex + 1;
+    const totalQuestions = qOrder.length;
+    if (totalQuestions > 0 && nextIndex >= totalQuestions) {
+      firebasePatchTeam_(pin, teamId, {
+        currentIndex: nextIndex,
+        lockUntil: 0,
+        finishedAt: now
+      });
+      return { status: 'success', data: { ok: true, finished: true, finishedAt: now } };
+    }
+    firebasePatchTeam_(pin, teamId, {
+      currentIndex: nextIndex,
+      lockUntil: 0
+    });
+    return { status: 'success', data: { ok: true, currentIndex: nextIndex } };
   }
 
   const req = requireLiveTeamAdmin_(requestData);
