@@ -201,7 +201,16 @@ const LiveFirebase = (function () {
       updated = true;
     }
     entry.status = entry.best ? 'finished' : entry.status;
-    await setDoc(ref, entry, { merge: true });
+    const payload = {
+      account: entry.account,
+      name: entry.name || '',
+      number: entry.number || '',
+      class: entry.class || '',
+      attempts: entry.attempts,
+      status: entry.status,
+      best: entry.best || null
+    };
+    await setDoc(ref, payload, { merge: true });
     return { updated: updated, entry: entry, localBest: entry.best };
   }
 

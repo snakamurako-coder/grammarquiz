@@ -4820,8 +4820,50 @@ function getLiveMeta_(pin) {
   }
 }
 
+function compactLiveLaunchOptions_(opts) {
+  opts = opts || {};
+  return {
+    bookName: opts.bookName || '',
+    sheetName: opts.sheetName || '',
+    linkMode: opts.linkMode || '',
+    linkQuestionCount: opts.linkQuestionCount || 0
+  };
+}
+
+function slimLiveMetaForCache_(meta, dropRoster) {
+  meta = meta || {};
+  const out = {
+    pin: meta.pin,
+    backend: meta.backend,
+    title: meta.title,
+    mode: meta.mode,
+    activity: meta.activity,
+    timeLimitSec: meta.timeLimitSec || 0,
+    autoSubmitOnTimeout: meta.autoSubmitOnTimeout !== false,
+    createdAt: meta.createdAt,
+    closesAt: meta.closesAt || 0,
+    createdBy: meta.createdBy,
+    targetClass: meta.targetClass || '',
+    continueAcrossModes: meta.continueAcrossModes !== false,
+    pollPublic: meta.pollPublic || null,
+    launchOptions: compactLiveLaunchOptions_(meta.launchOptions)
+  };
+  if (!dropRoster && meta.roster && meta.roster.length) out.roster = meta.roster;
+  else out.rosterCount = (meta.roster && meta.roster.length) || meta.rosterCount || 0;
+  return out;
+}
+
 function putLiveMeta_(pin, meta, ttlSec) {
-  const raw = JSON.stringify(meta);
+  let payload = meta;
+  let raw = JSON.stringify(payload || {});
+  if (raw.length > 90000 && liveCurrentMode_(meta) === 'poll') {
+    payload = slimLiveMetaForCache_(meta, false);
+    raw = JSON.stringify(payload);
+    if (raw.length > 90000) {
+      payload = slimLiveMetaForCache_(meta, true);
+      raw = JSON.stringify(payload);
+    }
+  }
   if (raw.length > 90000) {
     throw new Error('出題設定が大きすぎて部屋を開けません。区分の指定を減らしてください。');
   }
@@ -4844,6 +4886,7 @@ function putLiveEntry_(pin, account, entry, ttlSec) {
 
 function isLiveRoomOpen_(meta) {
   if (!meta) return false;
+  if (liveCurrentMode_(meta) === 'poll') return true;
   const closesAt = parseInt(meta.closesAt, 10) || 0;
   return !closesAt || Date.now() <= closesAt;
 }
@@ -5562,7 +5605,7 @@ function putLivePollSecrets_(pin, secrets, ttlSec) {
 }
 
 function livePollTtlSec_(meta) {
-  if (meta && meta.mode === 'poll') return 21600;
+  if (liveCurrentMode_(meta) === 'poll') return 21600;
   return computeLiveRoomTtlSec_(meta && meta.timeLimitSec);
 }
 
@@ -5570,9 +5613,11 @@ function persistLivePollMeta_(pin, meta) {
   const ttlSec = livePollTtlSec_(meta);
   putLiveMeta_(pin, meta, ttlSec);
   if (isLiveFirebaseBackend_(meta)) {
+    const activity = meta.activity || meta.mode || 'poll';
     firebasePatchLiveRoom_(pin, {
       pollPublic: meta.pollPublic || emptyLivePollPublic_(),
-      activity: meta.activity || meta.mode || 'poll'
+      activity: activity,
+      mode: meta.mode || activity
     });
   }
   return ttlSec;
@@ -5889,9 +5934,9 @@ function apiLivePollControl_(requestData) {
   if (!req.ok) return { status: 'error', message: req.error };
   const lock = LockService.getScriptLock();
   try {
-    lock.waitLock(8000);
+    lock.waitLock(20000);
   } catch (e) {
-    return { status: 'error', message: 'ほかの操作と重なりました。少し待って再試行してください' };
+    return { status: 'error', message: 'ほかの操作と重なりました。数秒待ってからもう一度押してください' };
   }
   try {
     const pin = req.pin;
@@ -6160,6 +6205,7 @@ function apiLiveSwitchActivity_(requestData) {
   if (!meta.continueAcrossModes) {
     return { status: 'error', message: 'この部屋はモード継続が無効です。部屋を閉じてから新しく開いてください' };
   }
+  const prevActivity = liveCurrentMode_(meta);
   const activity = String(requestData.activity || '').trim();
   if (activity !== 'poll' && activity !== 'vocab' && activity !== 'word-link') {
     return { status: 'error', message: 'activity は poll / vocab / word-link が必要です' };
@@ -6172,13 +6218,16 @@ function apiLiveSwitchActivity_(requestData) {
       return { status: 'error', message: '投票への切替は Firebase β で開いた部屋のみ可能です' };
     }
     meta.backend = 'firebase';
-    if (!meta.pollPublic) meta.pollPublic = emptyLivePollPublic_();
+    if (prevActivity !== 'poll' || !meta.pollPublic) {
+      meta.pollPublic = emptyLivePollPublic_();
+      putLivePollSecrets_(pin, { answers: {} }, 21600);
+    }
     meta.timeLimitSec = 0;
     meta.closesAt = 0;
     meta.autoSubmitOnTimeout = false;
     const pollTitle = String(requestData.title || '').trim();
     if (pollTitle) meta.title = pollTitle;
-    else if (!meta.title || meta.mode !== 'poll') meta.title = 'リアルタイム投票';
+    else if (!meta.title || prevActivity !== 'poll') meta.title = 'リアルタイム投票';
   }
   if (activity === 'vocab' || activity === 'word-link') {
     const launchOptions = requestData.launchOptions || meta.launchOptions || {};
@@ -6201,6 +6250,10 @@ function apiLiveSwitchActivity_(requestData) {
     meta.closesAt = meta.timeLimitSec > 0 ? (nowMs + meta.timeLimitSec * 1000) : 0;
     const title = String(requestData.title || '').trim();
     meta.title = title || (launchOptions.bookName + ' / ' + launchOptions.sheetName);
+    if (prevActivity === 'poll' && meta.pollPublic) {
+      meta.pollPublic.phase = 'idle';
+      meta.pollPublic.collectEndsAt = 0;
+    }
   }
   meta.activity = activity;
   meta.mode = activity;
@@ -6218,6 +6271,7 @@ function apiLiveSwitchActivity_(requestData) {
       autoSubmitOnTimeout: meta.autoSubmitOnTimeout !== false
     };
     if (activity === 'poll') patch.pollPublic = meta.pollPublic || emptyLivePollPublic_();
+    else if (prevActivity === 'poll' && meta.pollPublic) patch.pollPublic = meta.pollPublic;
     firebasePatchLiveRoom_(pin, patch);
   }
   return {

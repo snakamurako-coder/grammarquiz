@@ -4,6 +4,10 @@
 const LivePollModule = (function () {
   const PIE_COLORS = ['#1976d2', '#fb8c00', '#43a047', '#e53935', '#8e24aa', '#00838f', '#f9a825', '#5d4037', '#546e7a', '#c2185b'];
   const SEC_OPTIONS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+  const FONT_KEY = 'dd_live_board_font_pt';
+  const FONT_MIN = 1;
+  const FONT_MAX = 50;
+  const FONT_DEFAULT = 18;
 
   let hostOpen_ = false;
   let studentOpen_ = false;
@@ -19,6 +23,32 @@ const LivePollModule = (function () {
 
   function el_(id) {
     return document.getElementById(id);
+  }
+
+  function loadFontPt_() {
+    try {
+      const n = parseInt(localStorage.getItem(FONT_KEY), 10);
+      if (isNaN(n)) return FONT_DEFAULT;
+      return Math.min(FONT_MAX, Math.max(FONT_MIN, n));
+    } catch (e) {
+      return FONT_DEFAULT;
+    }
+  }
+
+  function applyFontPt_(pt, persist) {
+    pt = Math.min(FONT_MAX, Math.max(FONT_MIN, parseInt(pt, 10) || FONT_DEFAULT));
+    const screen = el_('live-poll-host-screen');
+    if (screen) screen.style.setProperty('--live-poll-pt', String(pt));
+    const input = el_('live-poll-font-input');
+    if (input && String(input.value) !== String(pt)) input.value = String(pt);
+    const board = el_('live-room-board-screen');
+    if (board) board.style.setProperty('--live-list-pt', String(pt));
+    const boardInput = el_('live-board-font-input');
+    if (boardInput && String(boardInput.value) !== String(pt)) boardInput.value = String(pt);
+    if (persist !== false) {
+      try { localStorage.setItem(FONT_KEY, String(pt)); } catch (e) { /* ignore */ }
+    }
+    return pt;
   }
 
   function escapeHtml_(s) {
@@ -202,64 +232,216 @@ const LivePollModule = (function () {
     return true;
   }
 
-  function pieHtml_(choiceCounts, choices, ownAnswer, totalOverride) {
-    choices = choices || [];
-    choiceCounts = choiceCounts || {};
-    let total = 0;
-    choices.forEach(function (c) {
-      total += parseInt(choiceCounts[c], 10) || 0;
-    });
-    if (totalOverride != null) total = totalOverride;
-    if (!choices.length) return '';
-    let acc = 0;
-    const parts = [];
-    if (total <= 0) {
-      parts.push('#e0e0e0 0 100%');
+  const BLANK_COLOR = '#b0bec5';
+  const INCLUDE_BLANK_KEY = 'dd_live_poll_include_blank';
+
+  function includeBlank_() {
+    const cb = el_('live-poll-include-blank');
+    if (cb) return !!cb.checked;
+    try { return localStorage.getItem(INCLUDE_BLANK_KEY) === '1'; } catch (e) { return false; }
+  }
+
+  function saveIncludeBlank_(on) {
+    try { localStorage.setItem(INCLUDE_BLANK_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
+  }
+
+  function syncIncludeBlankUi_() {
+    const cb = el_('live-poll-include-blank');
+    if (!cb) return includeBlank_();
+    let on = false;
+    try { on = localStorage.getItem(INCLUDE_BLANK_KEY) === '1'; } catch (e) { on = false; }
+    if (cb.checked !== on) cb.checked = on;
+    return !!cb.checked;
+  }
+
+  function shareItems_(q, tally, joined, includeBlank) {
+    q = q || {};
+    tally = tally || {};
+    joined = Math.max(0, parseInt(joined, 10) || 0);
+    const answered = parseInt(tally.total, 10) || 0;
+    const blank = Math.max(0, joined - answered);
+    const items = [];
+    if (q.type === 'written') {
+      (tally.writtenGroups || []).forEach(function (g, i) {
+        items.push({
+          label: g.text || '',
+          count: parseInt(g.count, 10) || 0,
+          color: PIE_COLORS[i % PIE_COLORS.length]
+        });
+      });
     } else {
-      choices.forEach(function (c, i) {
-        const n = parseInt(choiceCounts[c], 10) || 0;
-        const start = (acc / total) * 100;
-        acc += n;
-        const end = (acc / total) * 100;
-        parts.push(PIE_COLORS[i % PIE_COLORS.length] + ' ' + start.toFixed(2) + '% ' + end.toFixed(2) + '%');
+      (q.choices || []).forEach(function (c, i) {
+        items.push({
+          label: String(c),
+          count: parseInt((tally.choiceCounts || {})[c], 10) || 0,
+          color: PIE_COLORS[i % PIE_COLORS.length]
+        });
       });
     }
+    const shown = items.reduce(function (s, it) { return s + it.count; }, 0);
+    const other = Math.max(0, answered - shown);
+    if (other > 0) {
+      items.push({ label: 'その他', count: other, color: '#90a4ae' });
+    }
+    if (includeBlank) {
+      items.push({ label: '未回答', count: blank, color: BLANK_COLOR, isBlank: true });
+    }
+    const base = includeBlank ? joined : answered;
+    items.forEach(function (it) {
+      it.pct = base > 0 ? (it.count / base) * 100 : 0;
+    });
+    return {
+      items: items,
+      base: base,
+      answered: answered,
+      blank: blank,
+      joined: joined
+    };
+  }
+
+  function chartHeadHtml_(q, share) {
+    return '<div class="live-poll-chart-head">'
+      + '<span class="live-poll-q-label">' + escapeHtml_((q && q.label) || '') + '</span>'
+      + '<span class="live-poll-answered-count" title="この設問の解答済み / 参加者数">'
+      + share.answered + ' / ' + share.joined + '</span>'
+      + '</div>';
+  }
+
+  function barLegendHtml_(share) {
+    let html = '<div class="live-poll-bar-legend">';
+    (share.items || []).forEach(function (it) {
+      html += '<span class="live-poll-bar-legend-item' + (it.isBlank ? ' is-blank' : '') + '">'
+        + '<span class="live-poll-swatch" style="background:' + it.color + '"></span>'
+        + '<strong>' + escapeHtml_(it.label) + '</strong>'
+        + '<span>' + Math.round(it.pct || 0) + '%（' + it.count + '）</span>'
+        + '</span>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function legendHtml_(share, ownAnswer) {
+    const own = ownAnswer == null ? '' : String(ownAnswer);
     let legend = '<ul class="live-poll-legend">';
-    choices.forEach(function (c, i) {
-      const n = parseInt(choiceCounts[c], 10) || 0;
-      const pct = total > 0 ? Math.round((n / total) * 100) : 0;
-      const isOwn = ownAnswer != null && String(ownAnswer) === String(c);
-      legend += '<li class="' + (isOwn ? 'is-own' : '') + '">'
-        + '<span class="live-poll-swatch" style="background:' + PIE_COLORS[i % PIE_COLORS.length] + '"></span>'
-        + '<strong>' + escapeHtml_(c) + '</strong>'
-        + '<span>' + pct + '%（' + n + '）</span>'
+    (share.items || []).forEach(function (it) {
+      const pct = Math.round(it.pct || 0);
+      const isOwn = !it.isBlank && own && own === String(it.label);
+      legend += '<li class="' + (isOwn ? 'is-own' : '') + (it.isBlank ? ' is-blank' : '') + '">'
+        + '<span class="live-poll-swatch" style="background:' + it.color + '"></span>'
+        + '<strong>' + escapeHtml_(it.label) + '</strong>'
+        + '<span>' + pct + '%（' + it.count + '）</span>'
         + (isOwn ? '<em>あなたの回答</em>' : '')
         + '</li>';
     });
     legend += '</ul>';
+    return legend;
+  }
+
+  function pieFromShare_(share, ownAnswer) {
+    const items = share.items || [];
+    const base = share.base || 0;
+    let acc = 0;
+    const parts = [];
+    if (base <= 0) {
+      parts.push('#e0e0e0 0 100%');
+    } else {
+      items.forEach(function (it) {
+        const start = (acc / base) * 100;
+        acc += it.count;
+        const end = (acc / base) * 100;
+        if (end > start) {
+          parts.push(it.color + ' ' + start.toFixed(2) + '% ' + end.toFixed(2) + '%');
+        }
+      });
+      if (!parts.length) parts.push('#e0e0e0 0 100%');
+    }
     return '<div class="live-poll-pie-wrap">'
       + '<div class="live-poll-pie" style="background:conic-gradient(' + parts.join(',') + ')"></div>'
-      + legend
+      + legendHtml_(share, ownAnswer)
       + '</div>';
   }
 
-  function writtenListHtml_(groups, ownAnswer, revealed) {
-    groups = groups || [];
-    const ownNorm = normalizeText_(ownAnswer);
-    if (!groups.length) {
-      return '<p class="filter-axis-hint">記述回答はまだありません</p>';
+  function barFromShare_(share) {
+    const items = (share.items || []).filter(function (it) { return it.count > 0; });
+    let html = '';
+    if (!items.length) {
+      html = '<div class="live-poll-bar live-poll-bar-empty" aria-label="まだ回答がありません"></div>';
+    } else {
+      html = '<div class="live-poll-bar" role="img" aria-label="回答の割合">';
+      items.forEach(function (it) {
+        const pct = it.pct || 0;
+        const show = pct >= 8;
+        html += '<span class="live-poll-bar-seg' + (it.isBlank ? ' is-blank' : '') + '" style="flex:'
+          + it.count + ' 0 0;background:' + it.color + '" title="'
+          + escapeHtml_(it.label + ' ' + Math.round(pct) + '%（' + it.count + '）') + '">'
+          + (show ? escapeHtml_(it.label + ' ' + Math.round(pct) + '%') : '')
+          + '</span>';
+      });
+      html += '</div>';
     }
-    let html = '<ul class="live-poll-written-list">';
-    groups.forEach(function (g) {
-      const text = g.text || '';
-      const isOwn = ownNorm && normalizeText_(text) === ownNorm;
-      html += '<li class="' + (isOwn ? 'is-own' : '') + '">'
-        + '<span class="live-poll-written-text">' + escapeHtml_(text) + '</span>'
-        + '<span class="live-poll-written-count">' + (g.count || 0) + '件</span>'
-        + (isOwn ? '<em>あなたの回答</em>' : '')
-        + '</li>';
+    return html + barLegendHtml_(share);
+  }
+
+  function pieHtml_(choiceCounts, choices, ownAnswer, totalOverride, opts) {
+    choices = choices || [];
+    choiceCounts = choiceCounts || {};
+    opts = opts || {};
+    let answered = 0;
+    choices.forEach(function (c) {
+      answered += parseInt(choiceCounts[c], 10) || 0;
     });
-    html += '</ul>';
+    if (totalOverride != null) answered = parseInt(totalOverride, 10) || 0;
+    const q = { type: 'choice', choices: choices };
+    const tally = { total: answered, choiceCounts: choiceCounts };
+    const joined = opts.joined != null ? opts.joined : answered;
+    const share = shareItems_(q, tally, joined, !!opts.includeBlank);
+    return pieFromShare_(share, ownAnswer);
+  }
+
+  function hostQuestionTallyHtml_(q, tally, joined, includeBlank, mode) {
+    const share = shareItems_(q, tally, joined, includeBlank);
+    let html = '<div class="live-poll-chart-block">' + chartHeadHtml_(q, share);
+    if (mode === 'bar') html += barFromShare_(share);
+    else if (q.type === 'written') {
+      html += writtenListHtml_(tally && tally.writtenGroups, null, null, {
+        includeBlank: includeBlank,
+        joined: joined,
+        answered: share.answered
+      });
+    } else html += pieFromShare_(share, null);
+    html += '</div>';
+    return html;
+  }
+
+  function writtenListHtml_(groups, ownAnswer, revealed, opts) {
+    groups = groups || [];
+    opts = opts || {};
+    const ownNorm = normalizeText_(ownAnswer);
+    let html = '';
+    if (!groups.length) {
+      html = '<p class="filter-axis-hint">記述回答はまだありません</p>';
+    } else {
+      html = '<ul class="live-poll-written-list">';
+      groups.forEach(function (g) {
+        const text = g.text || '';
+        const isOwn = ownNorm && normalizeText_(text) === ownNorm;
+        html += '<li class="' + (isOwn ? 'is-own' : '') + '">'
+          + '<span class="live-poll-written-text">' + escapeHtml_(text) + '</span>'
+          + '<span class="live-poll-written-count">' + (g.count || 0) + '件</span>'
+          + (isOwn ? '<em>あなたの回答</em>' : '')
+          + '</li>';
+      });
+      html += '</ul>';
+    }
+    if (opts.includeBlank && opts.joined != null) {
+      const answered = opts.answered != null ? opts.answered : groups.reduce(function (s, g) {
+        return s + (parseInt(g.count, 10) || 0);
+      }, 0);
+      const blank = Math.max(0, (parseInt(opts.joined, 10) || 0) - answered);
+      const base = parseInt(opts.joined, 10) || 0;
+      const pct = base > 0 ? Math.round((blank / base) * 100) : 0;
+      html += '<p class="live-poll-blank-note">未回答 ' + blank + '名（' + pct + '%）</p>';
+    }
     return html;
   }
 
@@ -510,6 +692,7 @@ const LivePollModule = (function () {
       screen.setAttribute('aria-hidden', open ? 'false' : 'true');
     }
     document.body.classList.toggle('live-poll-host-active', !!open);
+    if (open) applyFontPt_(loadFontPt_(), false);
     if (!open) stopCollectTimer_();
   }
 
@@ -715,6 +898,12 @@ const LivePollModule = (function () {
           + escapeHtml_(JSON.stringify(answers)) + '">'
           + '<div class="live-poll-q-editor-top">'
           + '<input type="text" class="live-poll-written-input" data-field="label" value="' + escapeHtml_(q.label || '') + '" placeholder="Q1.">'
+          + '<div class="live-poll-q-editor-answers">'
+          + '<p class="live-poll-q-editor-hint" data-field="answer-hint"></p>'
+          + '<div class="live-poll-q-editor-choices" data-field="answer-picks"></div>'
+          + '<input type="text" class="live-poll-written-input" data-field="answer" value="'
+          + escapeHtml_(kind === 'WRITTEN' ? (q.answer || '') : '') + '" placeholder="模範解答" style="display:none;">'
+          + '</div>'
           + '<select data-field="choiceSet">' + choiceSetOptionsHtml_(kind) + '</select>'
           + '<input type="number" class="live-poll-written-input" data-field="choiceCount" min="2" max="26" value="'
           + escapeHtml_(count) + '" aria-label="選択肢の数">'
@@ -722,10 +911,6 @@ const LivePollModule = (function () {
           + escapeHtml_(q.customChoices || '') + '" placeholder="独自（,区切り）" aria-label="独自の選択肢">'
           + '<button type="button" class="btn-secondary" data-action="remove-q">削除</button>'
           + '</div>'
-          + '<div class="live-poll-q-editor-choices" data-field="answer-picks"></div>'
-          + '<input type="text" class="live-poll-written-input" data-field="answer" value="'
-          + escapeHtml_(kind === 'WRITTEN' ? (q.answer || '') : '') + '" placeholder="模範解答" style="margin-top:8px;display:none;">'
-          + '<p class="live-poll-q-editor-hint" data-field="answer-hint"></p>'
           + '</div>';
       }).join('');
       return '<div class="live-poll-editor-section" data-sec-index="' + si + '">'
@@ -835,7 +1020,7 @@ const LivePollModule = (function () {
     if (!window.LiveRoomModule) throw new Error('授業ライブモジュールが未初期化です');
     const room = LiveRoomModule.getActiveRoom();
     if (room && room.isTeacher) {
-      if (room.continueAcrossModes && room.activity !== 'poll') {
+      if (room.continueAcrossModes && !isPollRoom_(room)) {
         return LiveRoomModule.switchActivity('poll', { continueAcrossModes: getContinueChecked_() });
       }
       if (isPollRoom_(room)) return room;
@@ -963,19 +1148,21 @@ const LivePollModule = (function () {
 
     const q = currentQuestion_(pub);
     const visibleQs = visibleQuestions_(pub);
+    const includeBlank = syncIncludeBlankUi_();
+    const joinedN = (snap.entries && snap.entries.length) || snap.joinedCount || 0;
+    const showBars = visibleQs.length && (pub.phase === 'collecting' || pub.phase === 'prompt' || pub.phase === 'waiting');
     if (qEl) {
+      const qPanel = qEl.closest('.live-poll-panel');
+      if (qPanel) qPanel.hidden = !!showBars;
       if (!visibleQs.length) {
         qEl.innerHTML = pub.runMode === 'preset'
           ? '<p class="filter-axis-hint">「このセクションを出す」で設問をまとめて提示します。問題文はスライド側に出してください。</p>'
           : '<p class="filter-axis-hint">記号セットを選んで「この1問を出す」を押してください。問題文はスライド側に出します。</p>';
-      } else if (pub.runMode === 'preset' && (pub.phase === 'collecting' || pub.phase === 'waiting')) {
+      } else if (showBars) {
+        qEl.innerHTML = '';
+      } else if (pub.runMode === 'preset' && pub.phase === 'waiting') {
         qEl.innerHTML = visibleQs.map(function (item) {
-          return '<div class="live-poll-q-label">' + escapeHtml_(item.label) + '</div>'
-            + (item.type === 'written'
-              ? '<p class="filter-axis-hint">記述</p>'
-              : '<div class="live-poll-choice-row">' + (item.choices || []).map(function (c) {
-                return '<span class="live-poll-chip">' + escapeHtml_(c) + '</span>';
-              }).join('') + '</div>');
+          return '<div class="live-poll-q-label">' + escapeHtml_(item.label) + '</div>';
         }).join('');
       } else if (!q) {
         qEl.innerHTML = '';
@@ -989,18 +1176,23 @@ const LivePollModule = (function () {
       }
     }
 
-    const tallySource = (pub.phase === 'collecting')
+    const liveTally = (pub.phase === 'collecting' || pub.phase === 'prompt')
       ? tallyFromEntries_(pub, snap.entries)
       : (pub.frozenTally || {});
     if (tallyEl) {
-      if (!q || pub.phase === 'idle' || pub.phase === 'prompt' || pub.phase === 'sectionWait') {
+      if (!visibleQs.length || pub.phase === 'idle' || pub.phase === 'sectionWait') {
         tallyEl.innerHTML = '';
+      } else if (showBars) {
+        tallyEl.innerHTML = visibleQs.map(function (item) {
+          return hostQuestionTallyHtml_(item, liveTally[item.id], joinedN, includeBlank, 'bar');
+        }).join('');
       } else if (pub.runMode === 'preset' && pub.phase === 'waiting') {
         tallyEl.innerHTML = '<p class="filter-axis-hint">打ち切り済み。問ごとに「集計を表示」へ進んでください。</p>';
+      } else if (!q) {
+        tallyEl.innerHTML = '';
       } else {
-        const t = tallySource[q.id] || { total: 0, choiceCounts: {}, writtenGroups: [] };
-        if (q.type === 'written') tallyEl.innerHTML = writtenListHtml_(t.writtenGroups, null, pub.revealed && pub.revealed[q.id]);
-        else tallyEl.innerHTML = pieHtml_(t.choiceCounts, q.choices, null, t.total);
+        const t = liveTally[q.id] || { total: 0, choiceCounts: {}, writtenGroups: [] };
+        tallyEl.innerHTML = hostQuestionTallyHtml_(q, t, joinedN, includeBlank, 'review');
       }
     }
 
@@ -1424,6 +1616,29 @@ const LivePollModule = (function () {
         }, '終了中…').catch(function (e) { alert(e.message || e); });
       });
     }
+    const fontMinus = el_('live-poll-font-minus');
+    const fontPlus = el_('live-poll-font-plus');
+    const fontInput = el_('live-poll-font-input');
+    applyFontPt_(loadFontPt_(), false);
+    if (fontMinus) {
+      fontMinus.addEventListener('click', function () {
+        applyFontPt_(loadFontPt_() - 1, true);
+      });
+    }
+    if (fontPlus) {
+      fontPlus.addEventListener('click', function () {
+        applyFontPt_(loadFontPt_() + 1, true);
+      });
+    }
+    if (fontInput) {
+      fontInput.addEventListener('change', function () {
+        applyFontPt_(fontInput.value, true);
+      });
+      fontInput.addEventListener('input', function () {
+        const n = parseInt(fontInput.value, 10);
+        if (!isNaN(n)) applyFontPt_(n, true);
+      });
+    }
     const bestSelect = el_('live-poll-best-n-select');
     const bestInput = el_('live-poll-best-n');
     function applyPollBestN_(value) {
@@ -1445,6 +1660,15 @@ const LivePollModule = (function () {
       });
       bestInput.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') applyPollBestN_(bestInput.value);
+      });
+    }
+    const blankCb = el_('live-poll-include-blank');
+    if (blankCb && !blankCb.dataset.bound) {
+      blankCb.dataset.bound = '1';
+      syncIncludeBlankUi_();
+      blankCb.addEventListener('change', function () {
+        saveIncludeBlank_(blankCb.checked);
+        if (lastHostSnap_) renderHost_(lastHostSnap_);
       });
     }
     const stuBack = el_('live-poll-student-back-btn');

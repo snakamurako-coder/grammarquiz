@@ -276,6 +276,10 @@ const LiveRoomModule = (function () {
     if (screen) screen.style.setProperty('--live-list-pt', String(pt));
     const input = el_('live-board-font-input');
     if (input && String(input.value) !== String(pt)) input.value = String(pt);
+    const pollScreen = el_('live-poll-host-screen');
+    if (pollScreen) pollScreen.style.setProperty('--live-poll-pt', String(pt));
+    const pollInput = el_('live-poll-font-input');
+    if (pollInput && String(pollInput.value) !== String(pt)) pollInput.value = String(pt);
     if (persist !== false) {
       try { localStorage.setItem(FONT_KEY, String(pt)); } catch (e) { /* ignore */ }
     }
@@ -499,6 +503,7 @@ const LiveRoomModule = (function () {
 
   async function onRoomTimeout_() {
     if (!activeRoom_ || activeRoom_.isTeacher) return;
+    if (!isQuizActivity_(activeRoom_)) return;
     if (!activeRoom_.autoSubmitOnTimeout) return;
     if (typeof window.forceLiveRoomTimeoutSubmit_ === 'function') {
       try {
@@ -722,6 +727,14 @@ const LiveRoomModule = (function () {
     if (!room.continueAcrossModes) {
       throw new Error('先に開催中の授業ライブを閉じるか、モード継続を有効にしてください');
     }
+    if (activity === 'poll') {
+      stopBoardUpdates_();
+      stopBoardClock_();
+      lastBoardData_ = null;
+      hideBoardScreen_();
+    } else if (window.LivePollModule) {
+      LivePollModule.closeScreens();
+    }
     const payload = {
       action: 'liveSwitchActivity',
       pin: room.pin,
@@ -767,6 +780,8 @@ const LiveRoomModule = (function () {
     setActiveRoom_(room);
     if (activity === 'poll') {
       stopBoardUpdates_();
+      stopBoardClock_();
+      lastBoardData_ = null;
       hideBoardScreen_();
       if (window.LivePollModule) {
         if (LivePollModule.openSetup) await LivePollModule.openSetup();
@@ -956,6 +971,13 @@ const LiveRoomModule = (function () {
     saveStoredRoom_(activeRoom_);
     const newActivity = activeRoom_.activity || activeRoom_.mode;
     if (prevActivity !== newActivity) {
+      if (newActivity === 'poll') {
+        clearRoomTimer_();
+        timeoutFired_ = true;
+      } else {
+        timeoutFired_ = false;
+        if (activeRoom_.closesAt) startRoomTimer_(activeRoom_.closesAt);
+      }
       if (window.LivePollModule && LivePollModule.isStudentOpen && LivePollModule.isStudentOpen()) {
         if (newActivity !== 'poll') LivePollModule.closeScreens();
       }
@@ -1241,6 +1263,11 @@ const LiveRoomModule = (function () {
   }
 
   function renderBoard_(data) {
+    if (activeRoom_ && isPollRoom_(activeRoom_)) return;
+    if (window.LivePollModule && (
+      (typeof LivePollModule.isHostOpen === 'function' && LivePollModule.isHostOpen())
+      || (typeof LivePollModule.isSetupOpen === 'function' && LivePollModule.isSetupOpen())
+    )) return;
     const titleEl = el_('live-board-title');
     const pinEl = el_('live-board-pin');
     const metaEl = el_('live-board-meta');
@@ -1254,7 +1281,7 @@ const LiveRoomModule = (function () {
     }
     lastBoardData_ = data;
     if (activeRoom_) {
-      if (data.closesAt) activeRoom_.closesAt = data.closesAt;
+      if (data.closesAt != null) activeRoom_.closesAt = data.closesAt;
       if (data.timeLimitSec != null) activeRoom_.timeLimitSec = data.timeLimitSec;
     }
     startBoardClock_();

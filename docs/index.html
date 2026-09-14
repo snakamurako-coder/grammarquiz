@@ -1232,12 +1232,35 @@ body.live-poll-student-active #live-room-board-screen { display: none !important
   position: fixed;
   inset: 0;
   z-index: 12010;
+  width: 100vw;
+  height: 100dvh;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+#live-poll-student-screen {
   background: #f4f7fb;
   color: #1a237e;
   flex-direction: column;
   overflow: auto;
-  width: 100vw;
-  height: 100dvh;
+}
+#live-poll-host-screen {
+  --live-poll-pt: 18;
+  --live-poll-scale: calc(var(--live-poll-pt) / 18);
+  background: #0f172a;
+  color: #1a237e;
+  overflow: hidden;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+}
+.live-poll-host-frame {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
   box-sizing: border-box;
 }
 .live-poll-top {
@@ -1245,6 +1268,12 @@ body.live-poll-student-active #live-room-board-screen { display: none !important
   background: #0f172a;
   color: #f8fafc;
   padding: 12px 16px 14px;
+}
+#live-poll-host-screen .live-poll-top {
+  padding: 4px 8px 6px;
+}
+#live-poll-host-screen .live-poll-top-row {
+  align-items: center;
 }
 .live-poll-top-row {
   display: flex;
@@ -1263,6 +1292,161 @@ body.live-poll-student-active #live-room-board-screen { display: none !important
 .live-poll-meta { color: #cbd5e1; font-size: 0.92em; margin-top: 4px; }
 .live-poll-top-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .live-poll-body { padding: 16px; max-width: 720px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+.live-poll-host-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 0.9fr);
+  overflow: hidden;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  background: #fff;
+}
+.live-poll-host-ops {
+  padding: 4px 0 8px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.live-poll-host-stage-main,
+.live-poll-host-stage-side {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 10px;
+}
+.live-poll-host-stage-side { border-left: 1px solid #e2e8f0; }
+#live-poll-host-screen .live-poll-panel {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 4px 0 8px;
+  margin: 0;
+}
+#live-poll-host-screen .live-poll-pin {
+  font-size: calc(36pt * var(--live-poll-scale));
+}
+#live-poll-host-screen .live-poll-meta {
+  font-size: calc(var(--live-poll-pt) * 0.85pt);
+}
+#live-poll-host-screen .subsection-title {
+  font-size: calc(var(--live-poll-pt) * 0.95pt);
+  margin: 0 0 6px;
+}
+#live-poll-host-screen .live-poll-include-blank {
+  font-size: calc(var(--live-poll-pt) * 0.9pt);
+}
+#live-poll-host-screen .live-poll-answered-count {
+  font-size: calc(var(--live-poll-pt) * 1.25pt);
+}
+#live-poll-host-screen .live-poll-chart-head .live-poll-q-label {
+  font-size: calc(var(--live-poll-pt) * 1.35pt);
+}
+#live-poll-host-screen .live-poll-bar {
+  height: calc(52px * var(--live-poll-scale));
+}
+#live-poll-host-screen .live-poll-bar-seg {
+  font-size: calc(var(--live-poll-pt) * 0.95pt);
+}
+#live-poll-host-screen .live-poll-choice-grid {
+  grid-template-columns: repeat(auto-fit, minmax(calc(140px * var(--live-poll-scale)), 1fr));
+  gap: calc(12px * var(--live-poll-scale));
+}
+#live-poll-host-screen .live-poll-chip {
+  font-size: calc(var(--live-poll-pt) * 1.1pt);
+  padding: calc(8px * var(--live-poll-scale)) calc(14px * var(--live-poll-scale));
+}
+#live-poll-host-screen .live-poll-choice-btn,
+#live-poll-host-screen button.live-poll-choice-btn {
+  min-height: calc(104px * var(--live-poll-scale));
+  font-size: calc(var(--live-poll-pt) * 1.35pt);
+}
+#live-poll-host-screen .btn-primary,
+#live-poll-host-screen .btn-secondary {
+  width: auto;
+  min-height: calc(72px * var(--live-poll-scale));
+  min-width: calc(160px * var(--live-poll-scale));
+  padding: calc(10px * var(--live-poll-scale)) calc(16px * var(--live-poll-scale));
+  font-size: calc(var(--live-poll-pt) * 1.05pt);
+}
+#live-poll-host-screen .live-poll-top .btn-primary,
+#live-poll-host-screen .live-poll-top .btn-secondary {
+  min-height: 36px;
+  min-width: 0;
+  padding: 6px 12px;
+  font-size: 0.88rem;
+}
+#live-poll-host-screen .live-poll-actions .btn-primary,
+#live-poll-host-screen .live-poll-actions .btn-secondary {
+  min-width: calc(180px * var(--live-poll-scale));
+}
+#live-poll-host-screen .live-poll-pie-wrap {
+  display: flex;
+  gap: calc(20px * var(--live-poll-scale));
+  align-items: center;
+}
+#live-poll-host-screen .live-poll-bar-legend {
+  font-size: calc(var(--live-poll-pt) * 0.9pt);
+}
+#live-poll-host-screen .live-poll-pie {
+  width: min(calc(360px * var(--live-poll-scale)), 46vmin);
+  height: min(calc(360px * var(--live-poll-scale)), 46vmin);
+  box-shadow: inset 0 0 0 calc(14px * var(--live-poll-scale)) #fff, 0 0 0 1px #e2e8f0;
+}
+#live-poll-host-screen .live-poll-legend {
+  font-size: calc(var(--live-poll-pt) * 1.15pt);
+  min-width: calc(220px * var(--live-poll-scale));
+}
+#live-poll-host-screen .live-poll-legend li {
+  padding: 0.4em 0;
+  gap: 0.45em;
+}
+#live-poll-host-screen .live-poll-swatch {
+  width: calc(22px * var(--live-poll-scale));
+  height: calc(22px * var(--live-poll-scale));
+}
+#live-poll-host-screen .live-poll-roster-table {
+  font-size: calc(var(--live-poll-pt) * 1pt);
+}
+#live-poll-host-screen .live-poll-roster-table th,
+#live-poll-host-screen .live-poll-roster-table td {
+  padding: 0.35em 0.5em;
+}
+#live-poll-host-screen .live-poll-rest,
+#live-poll-host-screen .filter-axis-hint,
+#live-poll-host-screen .live-poll-timer-hint,
+#live-poll-host-screen .live-poll-choice-preview {
+  font-size: calc(var(--live-poll-pt) * 0.85pt);
+}
+#live-poll-host-screen #live-poll-host-timer {
+  font-size: calc(var(--live-poll-pt) * 1.8pt);
+}
+#live-poll-host-screen .live-poll-choice-config label {
+  font-size: calc(var(--live-poll-pt) * 0.8pt);
+}
+#live-poll-host-screen .live-poll-choice-config select,
+#live-poll-host-screen .live-poll-choice-config input[type="number"],
+#live-poll-host-screen .live-poll-choice-config input[type="text"],
+#live-poll-host-screen .live-poll-timer-input,
+#live-poll-host-screen input.live-poll-timer-input,
+#live-poll-host-screen select.live-poll-timer-input {
+  min-height: calc(48px * var(--live-poll-scale));
+  height: calc(48px * var(--live-poll-scale));
+  max-height: none;
+  font-size: calc(var(--live-poll-pt) * 1pt);
+  width: auto;
+  min-width: calc(4.5em * var(--live-poll-scale));
+  max-width: none;
+}
+#live-poll-host-screen .live-poll-written-input,
+#live-poll-host-screen .live-poll-model-input {
+  min-height: calc(56px * var(--live-poll-scale));
+  font-size: calc(var(--live-poll-pt) * 1.1pt);
+}
+@media (max-width: 640px) {
+  .live-poll-host-body { grid-template-columns: 1fr; }
+  .live-poll-host-stage-side { border-left: none; border-top: 1px solid #e2e8f0; }
+}
 .live-poll-panel {
   background: #fff;
   border: 1px solid #e2e8f0;
@@ -1361,7 +1545,7 @@ body.live-poll-setup-active #live-poll-setup-screen { display: flex !important; 
   height: 100dvh;
   box-sizing: border-box;
 }
-.live-poll-setup-body { padding: 16px; max-width: 900px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+.live-poll-setup-body { padding: 16px; max-width: 1100px; margin: 0 auto; width: 100%; box-sizing: border-box; }
 .live-poll-preset-list { list-style: none; margin: 0; padding: 0; }
 .live-poll-preset-list li {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
@@ -1382,17 +1566,28 @@ body.live-poll-setup-active #live-poll-setup-screen { display: flex !important; 
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
 }
 .live-poll-q-editor-top input[data-field="label"] { width: 6em; min-width: 5em; min-height: 40px; }
+.live-poll-q-editor-answers {
+  flex: 1 1 240px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
 .live-poll-q-editor-top select[data-field="choiceSet"] { min-width: 9em; min-height: 40px; }
 .live-poll-q-editor-top input[data-field="choiceCount"] { width: 4.5em; min-height: 40px; text-align: center; }
-.live-poll-q-editor-top input[data-field="customChoices"] { flex: 1; min-width: 160px; min-height: 40px; }
+.live-poll-q-editor-top input[data-field="customChoices"] { flex: 0 1 12em; min-width: 8em; min-height: 40px; }
 .live-poll-q-editor-choices {
-  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+  display: flex; flex-wrap: wrap; gap: 6px; margin: 0;
 }
 .live-poll-q-editor-choices .live-poll-choice-btn {
   min-height: 40px; min-width: 48px; padding: 4px 10px;
   font-size: 1em;
 }
-.live-poll-q-editor-hint { margin: 6px 0 0; font-size: 0.82em; color: #546e7a; }
+.live-poll-q-editor-hint { margin: 0; font-size: 0.82em; color: #546e7a; }
+.live-poll-q-editor-answers input[data-field="answer"] {
+  flex: 1 1 160px; min-width: 120px; margin: 0;
+}
 .live-poll-continue-row {
   margin: 10px 0; padding: 10px 12px; background: #e8f5e9; border-radius: 8px;
   border: 1px solid #a5d6a7;
@@ -1408,6 +1603,7 @@ body.live-poll-setup-active #live-poll-setup-screen { display: flex !important; 
   border-bottom: 1px solid #e0e0e0;
 }
 .live-poll-host-improv-panel.is-hidden { display: none; }
+.live-poll-host-preset-panel { display: none; }
 .live-poll-host-preset-panel.is-open { display: block; }
 .live-poll-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .live-poll-actions .btn-primary,
@@ -1442,7 +1638,48 @@ body.live-poll-setup-active #live-poll-setup-screen { display: flex !important; 
   width: 100%; min-height: 48px; font-size: 1.1em; border: 1px solid #ccc; border-radius: 8px; padding: 8px 10px;
   box-sizing: border-box;
 }
-.live-poll-pie-wrap { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.live-poll-tally-head {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+  margin-bottom: 8px;
+  position: sticky; top: 0; z-index: 2; background: #fff; padding: 4px 0 8px;
+}
+.live-poll-tally-head .subsection-title { margin: 0; }
+.live-poll-include-blank {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-weight: 700; color: #37474f; cursor: pointer; user-select: none;
+}
+.live-poll-include-blank input { width: 1.15em; height: 1.15em; }
+.live-poll-chart-block { margin: 0 0 18px; }
+.live-poll-chart-head {
+  display: flex; align-items: baseline; gap: 10px 14px; flex-wrap: wrap; margin-bottom: 6px;
+}
+.live-poll-chart-head .live-poll-q-label { margin: 0; }
+.live-poll-answered-count {
+  font-weight: 800; font-variant-numeric: tabular-nums; color: #1565c0; white-space: nowrap;
+}
+.live-poll-bar {
+  display: flex; width: 100%; height: 40px;
+  border-radius: 8px; overflow: hidden; background: #eceff1;
+  margin: 6px 0 8px; border: 1px solid #e0e0e0;
+}
+.live-poll-bar-empty { background: repeating-linear-gradient(-45deg, #eceff1, #eceff1 8px, #f5f5f5 8px, #f5f5f5 16px); }
+.live-poll-bar-seg {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 0; overflow: hidden; color: #fff; font-weight: 800; font-size: 0.82em;
+  box-sizing: border-box; padding: 0 4px; white-space: nowrap;
+}
+.live-poll-bar-seg.is-blank { color: #37474f; }
+.live-poll-bar-legend {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+  margin: 0 0 4px; font-size: 0.88em; font-variant-numeric: tabular-nums;
+}
+.live-poll-bar-legend-item {
+  display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: #37474f;
+}
+.live-poll-bar-legend-item.is-blank { color: #546e7a; }
+.live-poll-legend li.is-blank { color: #546e7a; }
+.live-poll-blank-note { margin: 8px 0 0; font-weight: 700; color: #546e7a; }
+.live-poll-pie-wrap { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
 .live-poll-pie {
   width: 180px; height: 180px; border-radius: 50%;
   box-shadow: inset 0 0 0 8px #fff, 0 0 0 1px #e2e8f0;
@@ -3019,6 +3256,7 @@ body.live-room-board-active #login-screen { display: none !important; }
   </div>
 
   <div id="live-poll-host-screen" aria-hidden="true">
+    <div class="live-poll-host-frame">
     <div class="live-poll-top">
       <div class="live-poll-top-row">
         <div>
@@ -3029,6 +3267,13 @@ body.live-room-board-active #login-screen { display: none !important; }
           <div class="live-poll-meta" id="live-poll-host-timer" hidden></div>
         </div>
         <div class="live-poll-top-actions">
+          <label class="live-board-font-ctrl">
+            文字
+            <button type="button" id="live-poll-font-minus" aria-label="文字サイズを小さく">−</button>
+            <input type="number" id="live-poll-font-input" min="1" max="50" step="1" value="18" aria-label="文字サイズ（pt）">
+            <button type="button" id="live-poll-font-plus" aria-label="文字サイズを大きく">+</button>
+            pt
+          </label>
           <label class="live-board-best-n-ctrl">
             ベスト
             <select id="live-poll-best-n-select" aria-label="氏名とタイムを出す人数の候補">
@@ -3045,12 +3290,30 @@ body.live-room-board-active #login-screen { display: none !important; }
           <button type="button" class="btn-secondary" id="live-poll-host-close-btn">部屋を閉じる</button>
         </div>
       </div>
-      <label class="live-poll-continue-row" id="live-poll-host-continue-wrap" style="display:none;margin:8px 16px 0;">
+      <label class="live-poll-continue-row" id="live-poll-host-continue-wrap" style="display:none;margin:6px 0 0;">
         <input type="checkbox" id="live-poll-continue-modes" checked>
         <span>違うモードで LIVE を継続（PIN・入室を維持）</span>
       </label>
     </div>
-    <div class="live-poll-body">
+    <div class="live-poll-host-body">
+      <div class="live-poll-host-stage-main">
+      <div class="live-poll-panel">
+        <div class="subsection-title">いまの設問</div>
+        <div id="live-poll-host-question"></div>
+      </div>
+      <div class="live-poll-panel">
+        <div class="live-poll-tally-head">
+          <div class="subsection-title">集約状況</div>
+          <label class="live-poll-include-blank">
+            <input type="checkbox" id="live-poll-include-blank">
+            <span>未回答を割合に含める</span>
+          </label>
+        </div>
+        <div id="live-poll-host-tally"></div>
+      </div>
+      </div>
+      <div class="live-poll-host-stage-side">
+      <div class="live-poll-host-ops">
       <div class="live-poll-panel live-poll-host-preset-panel" id="live-poll-host-preset-panel">
         <div class="subsection-title">プリセット実施</div>
         <p class="filter-axis-hint" id="live-poll-preset-run-name"></p>
@@ -3067,7 +3330,6 @@ body.live-room-board-active #login-screen { display: none !important; }
       </div>
       <div class="live-poll-panel live-poll-host-improv-panel" id="live-poll-host-improv-panel">
         <div class="subsection-title">即興で1問出す</div>
-        <p class="filter-axis-hint">問題文はスライドに出します。生徒端末には記号ボタンまたは記述欄だけが現れます。</p>
         <div class="live-poll-choice-config" id="live-poll-improv-choice-config">
           <label>選択肢の種類
             <select id="live-poll-choice-kind" aria-label="選択肢の種類"></select>
@@ -3116,13 +3378,6 @@ body.live-room-board-active #login-screen { display: none !important; }
           <button type="button" class="btn-secondary" id="live-poll-reset-btn">次の即興へ</button>
         </div>
       </div>
-      <div class="live-poll-panel">
-        <div class="subsection-title">いまの設問</div>
-        <div id="live-poll-host-question"></div>
-      </div>
-      <div class="live-poll-panel">
-        <div class="subsection-title">集約状況</div>
-        <div id="live-poll-host-tally"></div>
       </div>
       <div class="live-poll-panel">
         <div class="subsection-title">正答の提示</div>
@@ -3132,6 +3387,8 @@ body.live-room-board-active #login-screen { display: none !important; }
         <div class="subsection-title">参加者</div>
         <div id="live-poll-host-roster"></div>
       </div>
+      </div>
+    </div>
     </div>
   </div>
 
