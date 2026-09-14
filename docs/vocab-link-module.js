@@ -531,7 +531,7 @@ const VocabLinkModule = (function () {
         + '<div class="vl-word-stats">' + wrongBadge + ' | 思考: ' + stat.thinkTime.toFixed(2) + 's</div>'
         + '</div>'
         + '<div class="vl-rating-btns">'
-        + '<button type="button" class="vl-btn-rate' + (stat.rating === 'good' ? ' active' : '') + '" data-rate-id="' + escapeHtml_(item.id) + '" data-rate-type="good" title="覚えている（Z）">👍<span class="mark-shortcut-hint">Zキー⌨</span></button>'
+        + '<button type="button" class="vl-btn-rate' + (stat.rating === 'good' ? ' active' : '') + '" data-rate-id="' + escapeHtml_(item.id) + '" data-rate-type="good" title="覚えている（C）">👍<span class="mark-shortcut-hint">Cキー⌨</span></button>'
         + '<button type="button" class="vl-btn-rate' + (stat.rating === 'bad' ? ' active' : '') + '" data-rate-id="' + escapeHtml_(item.id) + '" data-rate-type="bad" title="まだ覚えていない（X）">😱<span class="mark-shortcut-hint">Xキー⌨</span></button>'
         + '</div>';
 
@@ -681,7 +681,7 @@ const VocabLinkModule = (function () {
       if (!result || result.style.display !== 'flex') return;
       const tag = (e.target && e.target.tagName) || '';
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
-      const isKnown = (e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z');
+      const isKnown = (e.code === 'KeyC' || e.key === 'c' || e.key === 'C');
       const isUnknown = (e.code === 'KeyX' || e.key === 'x' || e.key === 'X');
       if (!isKnown && !isUnknown) return;
       const list = el_('vl-result-list');

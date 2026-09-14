@@ -416,7 +416,7 @@ const VocabCardModule = (() => {
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
         nextCard_();
-      } else if (e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z') {
+      } else if (e.code === 'KeyC' || e.key === 'c' || e.key === 'C') {
         e.preventDefault();
         markCard_(true);
       } else if (e.code === 'KeyX' || e.key === 'x' || e.key === 'X') {
