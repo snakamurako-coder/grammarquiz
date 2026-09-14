@@ -20,6 +20,27 @@ const LivePollModule = (function () {
   let studentSig_ = '';
   let selectedPresetId_ = '';
   let editingPreset_ = null;
+  let actionBusy_ = false;
+
+  const HOST_LOCK_BTN_IDS = [
+    'live-poll-start-improv-btn',
+    'live-poll-start-collect-btn',
+    'live-poll-end-collect-btn',
+    'live-poll-show-results-btn',
+    'live-poll-undo-reveal-btn',
+    'live-poll-reset-btn',
+    'live-poll-start-section-btn',
+    'live-poll-preset-start-collect-btn',
+    'live-poll-preset-end-collect-btn',
+    'live-poll-preset-show-results-btn',
+    'live-poll-preset-next-review-btn',
+    'live-poll-preset-next-section-btn',
+    'live-poll-preset-undo-reveal-btn',
+    'live-poll-host-back-btn',
+    'live-poll-host-close-btn',
+    'live-poll-run-improv-btn',
+    'live-poll-run-preset-btn'
+  ];
 
   function el_(id) {
     return document.getElementById(id);
@@ -1073,24 +1094,109 @@ const LivePollModule = (function () {
       paintTimer_(endsAt);
       const left = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
       if (left <= 0) {
-        stopCollectTimer_();
         if (autoEnd && hostOpen_) {
           const pub = pub_(lastHostSnap_);
           const round = parseInt(pub.ballotRound, 10) || 0;
           if (pub.phase === 'collecting' && hostEndedForRound_ !== round) {
+            if (actionBusy_) return;
             hostEndedForRound_ = round;
-            control_('endCollect').catch(function (e) {
-              console.warn('投票 自動打ち切り:', e.message || e);
-            });
+            stopCollectTimer_();
+            const endBtn = el_('live-poll-preset-end-collect-btn') || el_('live-poll-end-collect-btn');
+            runLocked_(endBtn, function () {
+              return control_('endCollect');
+            }, '打ち切り中…');
+            return;
           }
         }
+        stopCollectTimer_();
       }
     }
     tick();
     collectTimerId_ = setInterval(tick, 250);
   }
 
+  function collectLockButtons_() {
+    const list = [];
+    const seen = {};
+    HOST_LOCK_BTN_IDS.forEach(function (id) {
+      const btn = el_(id);
+      if (btn) {
+        list.push(btn);
+        seen[id] = true;
+      }
+    });
+    const reveal = el_('live-poll-host-reveal');
+    if (reveal) {
+      reveal.querySelectorAll('button').forEach(function (btn) {
+        if (btn && !seen[btn.id]) list.push(btn);
+      });
+    }
+    return list;
+  }
+
+  function applyHostActionButtons_(pub) {
+    if (actionBusy_) return;
+    pub = pub || {};
+    const collecting = pub.phase === 'collecting';
+    const hasQ = !!(pub.questions && pub.questions.length);
+    const isPreset = pub.runMode === 'preset';
+    setBtnEnabled_('live-poll-start-improv-btn', !isPreset && pub.phase !== 'collecting');
+    setBtnEnabled_('live-poll-start-collect-btn', !isPreset && hasQ && pub.phase !== 'collecting');
+    setBtnEnabled_('live-poll-end-collect-btn', !isPreset && collecting);
+    setBtnEnabled_('live-poll-show-results-btn', !isPreset && hasQ && pub.phase !== 'idle' && pub.phase !== 'prompt');
+    setBtnEnabled_('live-poll-undo-reveal-btn', !isPreset && pub.phase === 'reveal');
+    setBtnEnabled_('live-poll-reset-btn', !isPreset && pub.phase !== 'collecting');
+    setBtnEnabled_('live-poll-start-section-btn', isPreset && (pub.phase === 'idle' || pub.phase === 'sectionWait'));
+    setBtnEnabled_('live-poll-preset-start-collect-btn', isPreset && pub.phase === 'prompt');
+    setBtnEnabled_('live-poll-preset-end-collect-btn', isPreset && collecting);
+    setBtnEnabled_('live-poll-preset-show-results-btn', isPreset && hasQ && (pub.phase === 'waiting' || pub.phase === 'results' || pub.phase === 'reveal'));
+    setBtnEnabled_('live-poll-preset-next-review-btn', isPreset && pub.phase === 'reveal');
+    setBtnEnabled_('live-poll-preset-next-section-btn', isPreset && pub.phase === 'sectionWait'
+      && (parseInt(pub.sectionIndex, 10) || 0) + 1 < (parseInt(pub.sectionCount, 10) || 0));
+    setBtnEnabled_('live-poll-preset-undo-reveal-btn', isPreset && pub.phase === 'reveal');
+    ['live-poll-host-back-btn', 'live-poll-host-close-btn', 'live-poll-run-improv-btn', 'live-poll-run-preset-btn'].forEach(function (id) {
+      const btn = el_(id);
+      if (btn) btn.disabled = false;
+    });
+  }
+
+  function setActionBusy_(on, busyBtn, label) {
+    const host = el_('live-poll-host-screen');
+    const setup = el_('live-poll-setup-screen');
+    if (on) {
+      actionBusy_ = true;
+      if (host) host.classList.add('is-action-busy');
+      if (setup) setup.classList.add('is-action-busy');
+      collectLockButtons_().forEach(function (btn) {
+        btn.disabled = true;
+      });
+      if (busyBtn && window.BusyButton) BusyButton.start(busyBtn, label || '処理中…');
+      return;
+    }
+    if (busyBtn && window.BusyButton) BusyButton.end(busyBtn);
+    actionBusy_ = false;
+    if (host) host.classList.remove('is-action-busy');
+    if (setup) setup.classList.remove('is-action-busy');
+    applyHostActionButtons_(pub_(lastHostSnap_));
+  }
+
+  function runLocked_(btn, fn, label) {
+    if (actionBusy_) return Promise.resolve();
+    setActionBusy_(true, btn, label);
+    return Promise.resolve()
+      .then(fn)
+      .catch(function (e) {
+        alert(e.message || e);
+      })
+      .then(function (result) {
+        setActionBusy_(false, btn);
+        if (hostOpen_ && lastHostSnap_) renderHost_(lastHostSnap_);
+        return result;
+      });
+  }
+
   function setBtnEnabled_(id, on) {
+    if (actionBusy_) return;
     const btn = el_(id);
     if (!btn) return;
     btn.disabled = !on;
@@ -1198,7 +1304,9 @@ const LivePollModule = (function () {
 
     if (revealEl) {
       const typingModel = document.activeElement && document.activeElement.id === 'live-poll-model-input';
-      if (typingModel) {
+      if (actionBusy_) {
+        /* 進行中のボタンを消さない */
+      } else if (typingModel) {
         /* keep focus */
       } else if (!q || (pub.phase !== 'results' && pub.phase !== 'reveal')) {
         revealEl.innerHTML = '';
@@ -1208,9 +1316,9 @@ const LivePollModule = (function () {
         const btn = el_('live-poll-reveal-written-btn');
         if (btn) {
           btn.onclick = function () {
-            BusyButton.run(btn, function () {
+            runLocked_(btn, function () {
               return control_('reveal', { questionId: q.id });
-            }, '提示中…').catch(function (e) { alert(e.message || e); });
+            }, '提示中…');
           };
         }
       } else if (q.type === 'written') {
@@ -1223,9 +1331,9 @@ const LivePollModule = (function () {
         if (btn) {
           btn.onclick = function () {
             const input = el_('live-poll-model-input');
-            BusyButton.run(btn, function () {
+            runLocked_(btn, function () {
               return control_('reveal', { questionId: q.id, answer: (input && input.value) || '' });
-            }, '提示中…').catch(function (e) { alert(e.message || e); });
+            }, '提示中…');
           };
         }
       } else {
@@ -1243,9 +1351,9 @@ const LivePollModule = (function () {
         const presetBtn = el_('live-poll-reveal-preset-choice-btn');
         if (presetBtn) {
           presetBtn.onclick = function () {
-            BusyButton.run(presetBtn, function () {
+            runLocked_(presetBtn, function () {
               return control_('reveal', { questionId: q.id, fromPreset: true });
-            }, '提示中…').catch(function (e) { alert(e.message || e); });
+            }, '提示中…');
           };
         }
         revealEl.querySelectorAll('[data-poll-answer]').forEach(function (btn) {
@@ -1255,33 +1363,17 @@ const LivePollModule = (function () {
             const i = next.indexOf(val);
             if (i >= 0) next.splice(i, 1);
             else next.push(val);
-            BusyButton.run(btn, function () {
+            runLocked_(btn, function () {
               return control_('reveal', { questionId: q.id, answers: next });
-            }, '提示中…').catch(function (e) { alert(e.message || e); });
+            }, '提示中…');
           });
         });
       }
     }
 
+    applyHostActionButtons_(pub);
+
     const collecting = pub.phase === 'collecting';
-    const hasQ = !!(pub.questions && pub.questions.length);
-    const isPreset = pub.runMode === 'preset';
-
-    setBtnEnabled_('live-poll-start-improv-btn', !isPreset && pub.phase !== 'collecting');
-    setBtnEnabled_('live-poll-start-collect-btn', !isPreset && hasQ && pub.phase !== 'collecting');
-    setBtnEnabled_('live-poll-end-collect-btn', !isPreset && collecting);
-    setBtnEnabled_('live-poll-show-results-btn', !isPreset && hasQ && pub.phase !== 'idle' && pub.phase !== 'prompt');
-    setBtnEnabled_('live-poll-undo-reveal-btn', !isPreset && pub.phase === 'reveal');
-    setBtnEnabled_('live-poll-reset-btn', !isPreset && pub.phase !== 'collecting');
-
-    setBtnEnabled_('live-poll-start-section-btn', isPreset && (pub.phase === 'idle' || pub.phase === 'sectionWait'));
-    setBtnEnabled_('live-poll-preset-end-collect-btn', isPreset && collecting);
-    setBtnEnabled_('live-poll-preset-show-results-btn', isPreset && hasQ && (pub.phase === 'waiting' || pub.phase === 'results' || pub.phase === 'reveal'));
-    setBtnEnabled_('live-poll-preset-next-review-btn', isPreset && pub.phase === 'reveal');
-    setBtnEnabled_('live-poll-preset-next-section-btn', isPreset && pub.phase === 'sectionWait'
-      && (parseInt(pub.sectionIndex, 10) || 0) + 1 < (parseInt(pub.sectionCount, 10) || 0));
-    setBtnEnabled_('live-poll-preset-undo-reveal-btn', isPreset && pub.phase === 'reveal');
-
     if (collecting && pub.collectEndsAt) startCollectTimer_(pub.collectEndsAt, true);
     else if (collecting) paintTimer_(0);
     else {
@@ -1602,18 +1694,20 @@ const LivePollModule = (function () {
     const back = el_('live-poll-host-back-btn');
     if (back) {
       back.addEventListener('click', function () {
-        setHostOpen_(false);
-        unsubscribe_();
-        openSetup().catch(function (e) { alert(e.message || e); });
+        runLocked_(back, function () {
+          setHostOpen_(false);
+          unsubscribe_();
+          return openSetup();
+        }, '切替中…');
       });
     }
     const closeBtn = el_('live-poll-host-close-btn');
     if (closeBtn) {
       closeBtn.addEventListener('click', function () {
         if (!window.confirm('投票ライブの部屋を閉じますか？（参加コードは無効になります）')) return;
-        BusyButton.run(closeBtn, function () {
+        runLocked_(closeBtn, function () {
           return LiveRoomModule.closeRoom();
-        }, '終了中…').catch(function (e) { alert(e.message || e); });
+        }, '終了中…');
       });
     }
     const fontMinus = el_('live-poll-font-minus');
@@ -1685,7 +1779,7 @@ const LivePollModule = (function () {
     const btn = el_(id);
     if (!btn) return;
     btn.addEventListener('click', function () {
-      BusyButton.run(btn, fn, busyLabel || '処理中…').catch(function (e) { alert(e.message || e); });
+      runLocked_(btn, fn, busyLabel || '処理中…');
     });
   }
 

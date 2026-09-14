@@ -1308,6 +1308,22 @@ body.live-poll-student-active #live-room-board-screen { display: none !important
   padding: 4px 0 8px;
   border-bottom: 1px solid #e2e8f0;
 }
+#live-poll-host-screen.is-action-busy .live-poll-host-ops,
+#live-poll-host-screen.is-action-busy #live-poll-host-reveal,
+#live-poll-host-screen.is-action-busy #live-poll-host-back-btn,
+#live-poll-host-screen.is-action-busy #live-poll-host-close-btn {
+  pointer-events: none;
+}
+#live-poll-host-screen.is-action-busy .live-poll-host-ops button:not(.is-busy),
+#live-poll-host-screen.is-action-busy #live-poll-host-reveal button:not(.is-busy),
+#live-poll-host-screen.is-action-busy #live-poll-host-back-btn:not(.is-busy),
+#live-poll-host-screen.is-action-busy #live-poll-host-close-btn:not(.is-busy) {
+  opacity: 0.55;
+}
+#live-poll-setup-screen.is-action-busy button:not(.is-busy) {
+  pointer-events: none;
+  opacity: 0.55;
+}
 .live-poll-host-stage-main,
 .live-poll-host-stage-side {
   min-width: 0;
