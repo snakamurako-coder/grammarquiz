@@ -452,20 +452,36 @@ body.live-board-open .live-dash-section {
 
 <script>
 const PAGES_URL = '<?= PAGES_URL ?>';
+var gasRunQueue_ = [];
+var gasRunActive_ = 0;
+var GAS_RUN_MAX_ = 1;
+
+function pumpGasRun_() {
+  if (gasRunActive_ >= GAS_RUN_MAX_ || !gasRunQueue_.length) return;
+  var job = gasRunQueue_.shift();
+  gasRunActive_++;
+  google.script.run
+    .withSuccessHandler(function(res) {
+      gasRunActive_--;
+      if (res == null) {
+        job.reject(new Error('サーバーから応答がありません。GAS を再デプロイするか、提出データが多い場合は課題IDで絞り込んでください。'));
+      } else {
+        job.resolve(res);
+      }
+      pumpGasRun_();
+    })
+    .withFailureHandler(function(err) {
+      gasRunActive_--;
+      job.reject(new Error(typeof err === 'object' && err.message ? err.message : String(err)));
+      pumpGasRun_();
+    })[job.fnName].apply(google.script.run, job.args);
+}
+
 function gasRun(fnName) {
   var args = Array.prototype.slice.call(arguments, 1);
   return new Promise(function(resolve, reject) {
-    google.script.run
-      .withSuccessHandler(function(res) {
-        if (res == null) {
-          reject(new Error('サーバーから応答がありません。GAS を再デプロイするか、提出データが多い場合は課題IDで絞り込んでください。'));
-          return;
-        }
-        resolve(res);
-      })
-      .withFailureHandler(function(err) {
-        reject(new Error(typeof err === 'object' && err.message ? err.message : String(err)));
-      })[fnName].apply(google.script.run, args);
+    gasRunQueue_.push({ fnName: fnName, args: args, resolve: resolve, reject: reject });
+    pumpGasRun_();
   });
 }
 
@@ -1011,7 +1027,15 @@ function fillLiveSheets_() {
 }
 
 async function initLiveCatalog_() {
-  var res = await gasRun('apiAdminGetVocabCatalog');
+  var shared = window.AssignmentSectionBuilder && AssignmentSectionBuilder.getVocabCatalog
+    ? AssignmentSectionBuilder.getVocabCatalog()
+    : null;
+  if (shared && (shared.presets || []).length) {
+    liveCatalog_ = shared;
+    fillLiveBooks_();
+    return;
+  }
+  var res = await gasRun('apiAdminGetVocabCatalog', true);
   if (res.status !== 'success') throw new Error(res.message || '単語カタログ取得失敗');
   liveCatalog_ = res.data || { presets: [] };
   fillLiveBooks_();
@@ -1537,31 +1561,36 @@ function bindLiveFontControls_() {
   }
 }
 
+function bindIf_(id, ev, fn) {
+  var el = document.getElementById(id);
+  if (el) el.addEventListener(ev, fn);
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   var pagesLink = document.getElementById('pages-link');
   if (pagesLink && PAGES_URL) pagesLink.href = PAGES_URL;
 
-  document.getElementById('asg-save-btn').addEventListener('click', saveAssignment);
-  document.getElementById('asg-refresh-btn').addEventListener('click', loadAssignments);
-  document.getElementById('asg-clone-btn').addEventListener('click', startNewAssignmentFromChecked_);
-  document.getElementById('asg-delete-btn').addEventListener('click', deleteSelectedAssignments);
-  document.getElementById('sub-refresh-btn').addEventListener('click', loadSubmissions);
-  document.getElementById('refresh-summaries-btn').addEventListener('click', loadSummaries);
-  document.getElementById('check-save-btn').addEventListener('click', saveCheckSheetSettings);
-  document.getElementById('check-sync-btn').addEventListener('click', syncCheckSheetsNow);
-  document.getElementById('check-agg-add-btn').addEventListener('click', addCheckAggregationRow_);
-  document.getElementById('live-open-btn').addEventListener('click', openLiveRoom_);
-  document.getElementById('live-refresh-btn').addEventListener('click', function () {
+  bindIf_('asg-save-btn', 'click', saveAssignment);
+  bindIf_('asg-refresh-btn', 'click', loadAssignments);
+  bindIf_('asg-clone-btn', 'click', startNewAssignmentFromChecked_);
+  bindIf_('asg-delete-btn', 'click', deleteSelectedAssignments);
+  bindIf_('sub-refresh-btn', 'click', loadSubmissions);
+  bindIf_('refresh-summaries-btn', 'click', loadSummaries);
+  bindIf_('check-save-btn', 'click', saveCheckSheetSettings);
+  bindIf_('check-sync-btn', 'click', syncCheckSheetsNow);
+  bindIf_('check-agg-add-btn', 'click', addCheckAggregationRow_);
+  bindIf_('live-open-btn', 'click', openLiveRoom_);
+  bindIf_('live-refresh-btn', 'click', function () {
     refreshLiveBoard_().catch(function (e) { showBanner(e.message || String(e), false); });
   });
-  document.getElementById('live-export-btn').addEventListener('click', function () {
+  bindIf_('live-export-btn', 'click', function () {
     exportLiveRoom_().catch(function (e) { showBanner(e.message || String(e), false); });
   });
-  document.getElementById('live-close-btn').addEventListener('click', function () {
+  bindIf_('live-close-btn', 'click', function () {
     closeLiveRoom_().catch(function (e) { showBanner(e.message || String(e), false); });
   });
-  document.getElementById('live-book').addEventListener('change', fillLiveSheets_);
-  document.getElementById('live-mode').addEventListener('change', syncLiveModeFields_);
+  bindIf_('live-book', 'change', fillLiveSheets_);
+  bindIf_('live-mode', 'change', syncLiveModeFields_);
   document.querySelectorAll('#live-dash-board .live-board-tab').forEach(function (btn) {
     btn.addEventListener('click', function () {
       switchLiveDashTab_(btn.getAttribute('data-live-tab'));
@@ -1570,17 +1599,18 @@ document.addEventListener('DOMContentLoaded', function() {
   bindLiveFontControls_();
   syncLiveModeFields_();
 
+  loadAssignments();
+  loadSubmissions();
   AssignmentSectionBuilder.init().catch(function (e) {
     showBanner('教材カタログの読込に失敗: ' + (e.message || e), false);
-  });
-  initLiveCatalog_().catch(function (e) {
+  }).then(function () {
+    return initLiveCatalog_();
+  }).catch(function (e) {
     showBanner('授業ライブ用カタログの読込に失敗: ' + (e.message || e), false);
   });
   initLiveBackendUi_().catch(function (e) {
     showBanner('授業ライブ設定の読込に失敗: ' + (e.message || e), false);
   });
-  loadAssignments();
-  loadSubmissions();
   loadSummaries();
   loadWhitelist();
   loadCheckSheetSettings();

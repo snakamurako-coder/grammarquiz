@@ -2108,7 +2108,8 @@ function fillBlankVocabSerials_(sheet) {
   sheet.getRange(2, 1, nums.length, 1).setValues(nums);
 }
 
-function fetchVocabCatalogFromDrive_() {
+function fetchVocabCatalogFromDrive_(opts) {
+  const light = !!(opts && opts.light);
   const vocabularyFolder = getVocabularyFolder();
   const presets = [];
 
@@ -2120,6 +2121,14 @@ function fetchVocabCatalogFromDrive_() {
     const ss = SpreadsheetApp.open(file);
     const sheets = ss.getSheets();
     const sheetInfos = sheets.map(function (sheet) {
+      if (light) {
+        return {
+          sheetName: sheet.getName(),
+          wordCount: Math.max(0, sheet.getLastRow() - 1),
+          divisions: { dai: [], chu: [], sho: [] },
+          light: true
+        };
+      }
       return buildVocabSheetInfo_(sheet);
     });
 
@@ -2451,7 +2460,7 @@ function apiAdminGetWhitelist() {
     for (let i = 1; i < data.length; i++) {
       const obj = {};
       for (let j = 0; j < headers.length; j++) {
-        if (headers[j]) obj[headers[j]] = data[i][j];
+        if (headers[j]) obj[headers[j]] = serializeCellForClient_(data[i][j]);
       }
       rows.push(obj);
     }
@@ -2726,7 +2735,7 @@ function normalizeAssignmentRow_(row) {
       : JSON.stringify(parseSectionsJson_(row.Sections_JSON)),
     Active: String(row.Active || '0') === '1' || row.Active === true || row.Active === 1 ? 1 : 0,
     Created_By: String(row.Created_By || ''),
-    Updated_At: String(row.Updated_At || '')
+    Updated_At: serializeCellForClient_(row.Updated_At)
   };
 }
 
@@ -2838,7 +2847,11 @@ function apiAdminListAssignments_(requestData) {
   const admin = requireAssignmentAdminFromRequest_(requestData || {});
   if (!admin.ok) return { status: 'error', message: admin.error };
   const ss = openAppSpreadsheet_();
-  const rows = sheetRowsToObjects_(ss.getSheetByName('assignments')).map(normalizeAssignmentRow_);
+  const rows = sheetRowsToObjects_(ss.getSheetByName('assignments')).map(function (row) {
+    const a = normalizeAssignmentRow_(row);
+    delete a.Sections_JSON;
+    return a;
+  });
   rows.sort(function (a, b) {
     return String(b.Updated_At).localeCompare(String(a.Updated_At));
   });
@@ -4514,7 +4527,11 @@ function apiAdminSyncCheckSheetsNow() {
 
 /** dashboard.html 用（google.script.run） */
 function apiAdminListAssignments() {
-  return apiAdminListAssignments_({});
+  try {
+    return apiAdminListAssignments_({});
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
 }
 function apiAdminUpsertAssignment(assignment) {
   try {
@@ -4595,15 +4612,40 @@ function apiAdminLiveConfig() {
   }
 }
 
-/** dashboard: 単語プリセットカタログ */
-function apiAdminGetVocabCatalog() {
+/** dashboard: 単語プリセットカタログ（既定はシート名のみ。区分は apiAdminGetVocabDivisions） */
+function apiAdminGetVocabCatalog(light) {
   try {
     const access = checkDashboardAccess_();
     if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
       return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
     }
     ensureEnvironment();
-    return { status: 'success', data: fetchVocabCatalogFromDrive_() };
+    return { status: 'success', data: fetchVocabCatalogFromDrive_({ light: light !== false }) };
+  } catch (e) {
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+/** dashboard: 単語シートの大/中/小区分（絞り込みUI用・1シートだけ読む） */
+function apiAdminGetVocabDivisions(bookName, sheetName) {
+  try {
+    const access = checkDashboardAccess_();
+    if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
+      return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
+    }
+    ensureEnvironment();
+    const book = String(bookName || '').trim();
+    const sheetWant = String(sheetName || '').trim();
+    if (!book || !sheetWant) return { status: 'error', message: 'ブックとシートが必要です' };
+    const files = getVocabularyFolder().getFilesByType(MimeType.GOOGLE_SHEETS);
+    while (files.hasNext()) {
+      const file = files.next();
+      if (file.getName() !== book) continue;
+      const sh = SpreadsheetApp.open(file).getSheetByName(sheetWant);
+      if (!sh) return { status: 'error', message: 'シートが見つかりません' };
+      return { status: 'success', data: buildVocabSheetInfo_(sh) };
+    }
+    return { status: 'error', message: 'ブックが見つかりません' };
   } catch (e) {
     return { status: 'error', message: e.toString() };
   }

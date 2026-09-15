@@ -8,7 +8,9 @@ const AssignmentSectionBuilder = (function () {
   var vocabCatalog = { presets: [] };
   var sections = [];
   var divisionsCache = {};
+  var vocabDivCache = {};
   var pendingPayload = null;
+  var eventsBound = false;
 
   var GRAMMAR_FORMATS = [
     { key: 'A', label: '和文英訳', difficultyLabel: '10' },
@@ -222,7 +224,11 @@ const AssignmentSectionBuilder = (function () {
       return '<option value="' + escapeHtml(s.sheetName) + '"' + (s.sheetName === sec.sheetName ? ' selected' : '') + '>' + escapeHtml(s.sheetName) + ' (' + (s.wordCount || 0) + '語)</option>';
     }).join('');
     var sheet = sheets.filter(function (s) { return s.sheetName === sec.sheetName; })[0];
-    var div = sheet && sheet.divisions ? sheet.divisions : { dai: [], chu: [], sho: [] };
+    var divKey = sec.bookName + '|' + sec.sheetName;
+    var cachedDiv = vocabDivCache[divKey];
+    var div = (cachedDiv && cachedDiv.divisions)
+      || (sheet && sheet.divisions)
+      || { dai: [], chu: [], sho: [] };
     function dirCh(v) { return sec.directions.indexOf(v) >= 0 ? ' checked' : ''; }
     function grainCh(v) { return sec.grains.indexOf(v) >= 0 ? ' checked' : ''; }
     var isChoice = sec.response === 'choice';
@@ -438,6 +444,37 @@ const AssignmentSectionBuilder = (function () {
     renderAll();
   }
 
+  function applyVocabDivisions_(bookName, sheetName, info) {
+    if (!info) return;
+    vocabDivCache[bookName + '|' + sheetName] = info;
+    var book = vocabBooks().filter(function (b) { return b.bookName === bookName; })[0];
+    if (!book) return;
+    (book.sheets || []).forEach(function (s) {
+      if (s.sheetName !== sheetName) return;
+      if (info.divisions) s.divisions = info.divisions;
+      if (info.wordCount != null) s.wordCount = info.wordCount;
+      s.light = false;
+    });
+  }
+
+  async function loadVocabDivisionsFor(idx) {
+    var sec = sections[idx];
+    if (!sec || sec.mode !== 'vocab' || !sec.bookName || !sec.sheetName) return;
+    var key = sec.bookName + '|' + sec.sheetName;
+    if (vocabDivCache[key]) {
+      applyVocabDivisions_(sec.bookName, sec.sheetName, vocabDivCache[key]);
+      return;
+    }
+    try {
+      var result = await gasRun('apiAdminGetVocabDivisions', sec.bookName, sec.sheetName);
+      if (result.status !== 'success') throw new Error(result.message);
+      applyVocabDivisions_(sec.bookName, sec.sheetName, result.data || {});
+    } catch (e) {
+      vocabDivCache[key] = { divisions: { dai: [], chu: [], sho: [] } };
+    }
+    renderAll();
+  }
+
   function buildPayloadSection(sec, idx) {
     if (sec.mode === 'grammar') {
       if (!sec.subject) throw new Error('セクション' + (idx + 1) + ': 学年・区分を選んでください');
@@ -494,6 +531,7 @@ const AssignmentSectionBuilder = (function () {
     renderAll();
     sections.forEach(function (sec, i) {
       if (sec.mode === 'grammar' && sec.subject && sec.units.length) loadDivisionsFor(i);
+      if (sec.mode === 'vocab' && sec.bookName && sec.sheetName) loadVocabDivisionsFor(i);
     });
   }
 
@@ -525,6 +563,8 @@ const AssignmentSectionBuilder = (function () {
   }
 
   function bindEvents() {
+    if (eventsBound) return;
+    eventsBound = true;
     var list = document.getElementById('asg-sections-list');
     var addBtn = document.getElementById('asg-add-section-btn');
     if (addBtn) addBtn.addEventListener('click', addSection);
@@ -569,6 +609,7 @@ const AssignmentSectionBuilder = (function () {
         }
         renderAll();
         if (sections[idx].mode === 'grammar') loadDivisionsFor(idx);
+        if (sections[idx].mode === 'vocab') loadVocabDivisionsFor(idx);
         return;
       }
       if (field === 'subject' || field === 'bookName' || field === 'sheetName') {
@@ -579,6 +620,7 @@ const AssignmentSectionBuilder = (function () {
         }
         renderAll();
         if (sections[idx].mode === 'grammar') loadDivisionsFor(idx);
+        if (sections[idx].mode === 'vocab') loadVocabDivisionsFor(idx);
         return;
       }
       if (e.target.classList.contains('asg-fmt-cb')) { syncGrammarFmtOpts(card); return; }
@@ -591,22 +633,51 @@ const AssignmentSectionBuilder = (function () {
   }
 
   async function initCatalogs() {
-    var gRes = await gasRun('apiAdminGetGrammarCatalog');
-    if (gRes.status !== 'success') throw new Error(gRes.message || '文法カタログ取得失敗');
-    grammarCatalog = gRes.data || {};
-    var vRes = await gasRun('apiAdminGetVocabCatalog');
-    if (vRes.status !== 'success') throw new Error(vRes.message || '単語カタログ取得失敗');
-    vocabCatalog = vRes.data || { presets: [] };
+    var errors = [];
+    try {
+      var gRes = await gasRun('apiAdminGetGrammarCatalog');
+      if (gRes.status !== 'success') throw new Error(gRes.message || '文法カタログ取得失敗');
+      grammarCatalog = gRes.data || {};
+    } catch (e) {
+      grammarCatalog = grammarCatalog || {};
+      errors.push(e.message || String(e));
+    }
+    try {
+      var vRes = await gasRun('apiAdminGetVocabCatalog', true);
+      if (vRes.status !== 'success') throw new Error(vRes.message || '単語カタログ取得失敗');
+      vocabCatalog = vRes.data || { presets: [] };
+    } catch (e) {
+      vocabCatalog = vocabCatalog || { presets: [] };
+      errors.push(e.message || String(e));
+    }
+    if (errors.length) throw new Error(errors.join(' / '));
+  }
+
+  function finishUi_() {
+    if (pendingPayload) setSectionsFromPayload(pendingPayload);
+    else if (!sections.length) addSection();
+    renderAll();
+    sections.forEach(function (sec, i) {
+      if (sec.mode === 'vocab' && sec.bookName && sec.sheetName) loadVocabDivisionsFor(i);
+    });
   }
 
   async function init() {
-    await initCatalogs();
-    if (pendingPayload) setSectionsFromPayload(pendingPayload);
-    else if (!sections.length) addSection();
     bindEvents();
-    renderAll();
+    try {
+      await initCatalogs();
+      finishUi_();
+    } catch (e) {
+      finishUi_();
+      throw e;
+    }
   }
 
-  return { init: init, collectSections: collectSections, setSectionsFromPayload: setSectionsFromPayload };
+  return {
+    init: init,
+    collectSections: collectSections,
+    setSectionsFromPayload: setSectionsFromPayload,
+    getVocabCatalog: function () { return vocabCatalog; }
+  };
 })();
 </script>
