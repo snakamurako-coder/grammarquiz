@@ -2453,7 +2453,7 @@ function apiAdminGetWhitelist() {
     const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
     const ss = SpreadsheetApp.openById(spreadId);
     const sheet = ss.getSheetByName('whitelist');
-    ensureWhitelistColumns_(sheet);
+    if (!sheet) return { status: 'success', data: [], emails: emails };
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
     const rows = [];
@@ -2606,11 +2606,13 @@ function ensureSheetWithHeaders_(ss, name, headers) {
 
 let APP_SS_CACHE_ = null;
 
-function openAppSpreadsheet_() {
-  if (APP_SS_CACHE_) return APP_SS_CACHE_;
+function openAppSpreadsheet_(opts) {
+  opts = opts || {};
+  if (!opts.skipEnsure && APP_SS_CACHE_) return APP_SS_CACHE_;
   const spreadId = PropertiesService.getScriptProperties().getProperty(PROP.SPREADSHEET_ID);
   if (!spreadId) throw new Error('SPREADSHEET_ID が未設定です');
   const ss = SpreadsheetApp.openById(spreadId);
+  if (opts.skipEnsure) return ss;
   APP_SS_CACHE_ = ss;
   const wl = ss.getSheetByName('whitelist');
   if (wl) ensureWhitelistColumns_(wl);
@@ -2846,7 +2848,7 @@ function handleAssignmentApi_(action, requestData) {
 function apiAdminListAssignments_(requestData) {
   const admin = requireAssignmentAdminFromRequest_(requestData || {});
   if (!admin.ok) return { status: 'error', message: admin.error };
-  const ss = openAppSpreadsheet_();
+  const ss = openAppSpreadsheet_({ skipEnsure: true });
   const rows = sheetRowsToObjects_(ss.getSheetByName('assignments')).map(function (row) {
     const a = normalizeAssignmentRow_(row);
     delete a.Sections_JSON;
@@ -2989,7 +2991,7 @@ function apiAdminListSubmissions_(requestData) {
   const admin = requireAssignmentAdminFromRequest_(requestData || {});
   if (!admin.ok) return { status: 'error', message: admin.error };
   const assignmentId = String((requestData && requestData.assignmentId) || '').trim();
-  const ss = openAppSpreadsheet_();
+  const ss = openAppSpreadsheet_({ skipEnsure: true });
   let rows = sheetRowsToObjects_(ss.getSheetByName('assignment_submissions'));
   if (assignmentId) {
     rows = rows.filter(function (r) { return String(r.Assignment_ID) === assignmentId; });
@@ -3778,9 +3780,9 @@ function seedCheckAggregationsFromLegacy_(ss) {
 
 function listCheckAggregations_(opts) {
   opts = opts || {};
-  const ss = openAppSpreadsheet_();
-  const sheet = findSheetByName_(ss, 'check_aggregations')
-    || ensureSheetWithHeaders_(ss, 'check_aggregations', CHECK_AGGREGATION_HEADERS);
+  const ss = openAppSpreadsheet_({ skipEnsure: true });
+  const sheet = findSheetByName_(ss, 'check_aggregations');
+  if (!sheet) return [];
   const rows = sheetRowsToObjects_(sheet).map(normalizeCheckAggregationRow_);
   if (opts.activeOnly) {
     return rows.filter(function (c) { return c.Active === 1 && c.Config_ID && c.Kind !== 'quiz_score'; });
@@ -4562,7 +4564,6 @@ function apiAdminGetGrammarCatalog() {
     if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
       return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
     }
-    ensureEnvironment();
     return { status: 'success', data: fetchCatalogFromDrive() };
   } catch (e) {
     return { status: 'error', message: e.toString() };
@@ -4619,7 +4620,6 @@ function apiAdminGetVocabCatalog(light) {
     if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
       return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
     }
-    ensureEnvironment();
     return { status: 'success', data: fetchVocabCatalogFromDrive_({ light: light !== false }) };
   } catch (e) {
     return { status: 'error', message: e.toString() };
@@ -4633,7 +4633,6 @@ function apiAdminGetVocabDivisions(bookName, sheetName) {
     if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
       return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
     }
-    ensureEnvironment();
     const book = String(bookName || '').trim();
     const sheetWant = String(sheetName || '').trim();
     if (!book || !sheetWant) return { status: 'error', message: 'ブックとシートが必要です' };

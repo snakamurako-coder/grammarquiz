@@ -452,36 +452,49 @@ body.live-board-open .live-dash-section {
 
 <script>
 const PAGES_URL = '<?= PAGES_URL ?>';
-var gasRunQueue_ = [];
-var gasRunActive_ = 0;
-var GAS_RUN_MAX_ = 1;
-
-function pumpGasRun_() {
-  if (gasRunActive_ >= GAS_RUN_MAX_ || !gasRunQueue_.length) return;
-  var job = gasRunQueue_.shift();
-  gasRunActive_++;
-  google.script.run
-    .withSuccessHandler(function(res) {
-      gasRunActive_--;
-      if (res == null) {
-        job.reject(new Error('サーバーから応答がありません。GAS を再デプロイするか、提出データが多い場合は課題IDで絞り込んでください。'));
-      } else {
-        job.resolve(res);
-      }
-      pumpGasRun_();
-    })
-    .withFailureHandler(function(err) {
-      gasRunActive_--;
-      job.reject(new Error(typeof err === 'object' && err.message ? err.message : String(err)));
-      pumpGasRun_();
-    })[job.fnName].apply(google.script.run, job.args);
-}
 
 function gasRun(fnName) {
   var args = Array.prototype.slice.call(arguments, 1);
   return new Promise(function(resolve, reject) {
-    gasRunQueue_.push({ fnName: fnName, args: args, resolve: resolve, reject: reject });
-    pumpGasRun_();
+    if (typeof google === 'undefined' || !google.script || !google.script.run) {
+      reject(new Error('管理画面の通信機能が使えません。GAS① の URL から開き直してください。'));
+      return;
+    }
+    var settled = false;
+    var timer = setTimeout(function () {
+      finish(function () {
+        reject(new Error('読み込みが時間切れです。再読込してください（' + fnName + '）'));
+      });
+    }, 25000);
+    function finish(cb) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cb();
+    }
+    var runner = google.script.run
+      .withSuccessHandler(function (res) {
+        finish(function () {
+          if (res == null) {
+            reject(new Error('サーバーから応答がありません。GAS を再デプロイするか、提出データが多い場合は課題IDで絞り込んでください。'));
+          } else {
+            resolve(res);
+          }
+        });
+      })
+      .withFailureHandler(function (err) {
+        finish(function () {
+          reject(new Error(typeof err === 'object' && err.message ? err.message : String(err)));
+        });
+      });
+    var fn = runner[fnName];
+    if (typeof fn !== 'function') {
+      finish(function () {
+        reject(new Error('未知の管理APIです: ' + fnName + '（GAS の再デプロイが必要です）'));
+      });
+      return;
+    }
+    fn.apply(runner, args);
   });
 }
 
