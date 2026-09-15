@@ -5622,7 +5622,8 @@ function emptyLiveTeamPublic_() {
     startedAt: 0,
     questions: [],
     roster: [],
-    waitingCount: 0
+    waitingCount: 0,
+    results: []
   };
 }
 
@@ -5673,6 +5674,65 @@ function persistLiveTeamMeta_(pin, meta) {
     });
   }
   return ttlSec;
+}
+
+function rankLiveTeams_(teams, startedAt) {
+  startedAt = parseInt(startedAt, 10) || 0;
+  const arr = (teams || []).slice().sort(function (a, b) {
+    const fa = parseInt(a.finishedAt, 10) || 0;
+    const fb = parseInt(b.finishedAt, 10) || 0;
+    if (fa && fb) {
+      if (fa !== fb) return fa - fb;
+      return String(a.name || a.id).localeCompare(String(b.name || b.id), 'ja');
+    }
+    if (fa && !fb) return -1;
+    if (!fa && fb) return 1;
+    const ia = parseInt(a.currentIndex, 10) || 0;
+    const ib = parseInt(b.currentIndex, 10) || 0;
+    if (ib !== ia) return ib - ia;
+    return String(a.name || a.id).localeCompare(String(b.name || b.id), 'ja');
+  });
+  let prevRank = 0;
+  let prevFinish = 0;
+  arr.forEach(function (team, idx) {
+    const fin = parseInt(team.finishedAt, 10) || 0;
+    if (fin && fin === prevFinish) team.rank = prevRank;
+    else {
+      team.rank = idx + 1;
+      prevRank = team.rank;
+      prevFinish = fin;
+    }
+    team.timeMs = (fin && startedAt && fin >= startedAt) ? (fin - startedAt) : 0;
+  });
+  return arr;
+}
+
+function syncTeamPublicStandings_(pin, meta) {
+  if (!meta) return emptyLiveTeamPublic_();
+  if (!meta.teamPublic) meta.teamPublic = emptyLiveTeamPublic_();
+  const teamPublic = meta.teamPublic;
+  const teams = firebaseReadLiveTeams_(pin);
+  const ranked = rankLiveTeams_(teams, teamPublic.startedAt);
+  teamPublic.results = ranked.map(function (t) {
+    return {
+      id: t.id,
+      name: t.name || t.id,
+      color: t.color || '#1976d2',
+      memberAccounts: t.memberAccounts || [],
+      memberNames: t.memberNames || [],
+      currentIndex: parseInt(t.currentIndex, 10) || 0,
+      finishedAt: parseInt(t.finishedAt, 10) || 0,
+      wrongCount: parseInt(t.wrongCount, 10) || 0,
+      rank: t.rank || 0,
+      timeMs: t.timeMs || 0
+    };
+  });
+  if (teams.length && teams.every(function (t) { return parseInt(t.finishedAt, 10) > 0; })) {
+    teamPublic.phase = 'finished';
+  }
+  meta.teamPublic = teamPublic;
+  persistLiveTeamMeta_(pin, meta);
+  return teamPublic;
 }
 
 function shuffleLiveArray_(arr) {
@@ -5890,7 +5950,8 @@ function apiLiveTeamControl_(requestData) {
         data: {
           phase: teamPublic.phase,
           teamId: '',
-          waiting: true
+          waiting: true,
+          results: teamPublic.results || []
         }
       };
     }
@@ -5917,7 +5978,8 @@ function apiLiveTeamControl_(requestData) {
           finished: true,
           finishedAt: finishedAt,
           lockUntil: parseInt(team.lockUntil, 10) || 0,
-          startedAt: parseInt(teamPublic.startedAt, 10) || 0
+          startedAt: parseInt(teamPublic.startedAt, 10) || 0,
+          results: teamPublic.results || []
         }
       };
     }
@@ -5945,7 +6007,8 @@ function apiLiveTeamControl_(requestData) {
         prompt: prompt,
         hand: hand,
         lockUntil: parseInt(team.lockUntil, 10) || 0,
-        startedAt: parseInt(teamPublic.startedAt, 10) || 0
+        startedAt: parseInt(teamPublic.startedAt, 10) || 0,
+        results: teamPublic.results || []
       }
     };
   }
@@ -6001,7 +6064,8 @@ function apiLiveTeamControl_(requestData) {
         lockUntil: nextLock,
         wrongCount: (parseInt(team.wrongCount, 10) || 0) + 1
       });
-      return { status: 'success', data: { ok: false, wrong: true, lockUntil: nextLock } };
+      const tp = syncTeamPublicStandings_(pin, meta);
+      return { status: 'success', data: { ok: false, wrong: true, lockUntil: nextLock, phase: tp.phase, results: tp.results } };
     }
     const nextIndex = currentIndex + 1;
     const totalQuestions = qOrder.length;
@@ -6011,13 +6075,15 @@ function apiLiveTeamControl_(requestData) {
         lockUntil: 0,
         finishedAt: now
       });
-      return { status: 'success', data: { ok: true, finished: true, finishedAt: now } };
+      const tp = syncTeamPublicStandings_(pin, meta);
+      return { status: 'success', data: { ok: true, finished: true, finishedAt: now, phase: tp.phase, results: tp.results } };
     }
     firebasePatchTeam_(pin, teamId, {
       currentIndex: nextIndex,
       lockUntil: 0
     });
-    return { status: 'success', data: { ok: true, currentIndex: nextIndex } };
+    const tp = syncTeamPublicStandings_(pin, meta);
+    return { status: 'success', data: { ok: true, currentIndex: nextIndex, phase: tp.phase, results: tp.results } };
   }
 
   const req = requireLiveTeamAdmin_(requestData);
@@ -6154,6 +6220,7 @@ function apiLiveTeamControl_(requestData) {
     teamPublic.questions = [];
     teamPublic.roster = roster;
     teamPublic.waitingCount = parts.waiting.length;
+    teamPublic.results = [];
     meta.teamPublic = teamPublic;
     persistLiveTeamMeta_(pin, meta);
     return {
@@ -6175,6 +6242,7 @@ function apiLiveTeamControl_(requestData) {
     const nowMs = Date.now();
     teamPublic.phase = 'racing';
     teamPublic.startedAt = nowMs;
+    teamPublic.results = [];
     teams.forEach(function (team) {
       const teamId = String(team.id || '').trim();
       if (!teamId) return;
@@ -6191,21 +6259,13 @@ function apiLiveTeamControl_(requestData) {
       });
     });
     meta.teamPublic = teamPublic;
-    persistLiveTeamMeta_(pin, meta);
-    return { status: 'success', data: { teamPublic: teamPublic, startedAt: nowMs } };
+    const tp = syncTeamPublicStandings_(pin, meta);
+    return { status: 'success', data: { teamPublic: tp, startedAt: nowMs } };
   }
 
   if (cmd === 'markFinished') {
-    const teams = firebaseReadLiveTeams_(pin);
-    if (!teams.length) return { status: 'error', message: 'チームがありません' };
-    const allDone = teams.every(function (team) {
-      return parseInt(team.finishedAt, 10) > 0;
-    });
-    if (!allDone) return { status: 'success', data: { teamPublic: teamPublic, finished: false } };
-    teamPublic.phase = 'finished';
-    meta.teamPublic = teamPublic;
-    persistLiveTeamMeta_(pin, meta);
-    return { status: 'success', data: { teamPublic: teamPublic, finished: true } };
+    const tp = syncTeamPublicStandings_(pin, meta);
+    return { status: 'success', data: { teamPublic: tp, finished: tp.phase === 'finished' } };
   }
 
   if (cmd === 'resetRace') {
@@ -6229,6 +6289,7 @@ function apiLiveTeamControl_(requestData) {
     }
     teamPublic.phase = firebaseReadLiveTeams_(pin).length ? 'ready' : 'lobby';
     teamPublic.startedAt = 0;
+    teamPublic.results = [];
     meta.teamPublic = teamPublic;
     persistLiveTeamMeta_(pin, meta);
     return { status: 'success', data: { teamPublic: teamPublic } };

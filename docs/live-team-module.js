@@ -220,32 +220,81 @@ const LiveTeamModule = (function () {
     });
   }
 
+  function liveTeamsForDisplay_(snap) {
+    const pub = teamPub_(snap);
+    if (pub.results && pub.results.length && (pub.phase === 'finished' || pub.phase === 'racing')) {
+      const fromSnap = snap.teams || [];
+      const snapHasFinish = fromSnap.some(function (t) { return parseInt(t.finishedAt, 10) > 0; });
+      if (!snapHasFinish) return pub.results;
+    }
+    if (snap.teams && snap.teams.length) return snap.teams;
+    if (pub.results && pub.results.length) return pub.results;
+    return pub.roster || [];
+  }
+
+  function formatResultTime_(team, startedAt) {
+    if (team.timeMs) return (team.timeMs / 1000).toFixed(2) + ' 秒';
+    return formatRaceTime_(team.finishedAt, startedAt);
+  }
+
+  function renderResultsBoard_(wrap, teams, pub, entries, opts) {
+    opts = opts || {};
+    const ranked = sortTeamsForRank_(teams, pub);
+    const startedAt = parseInt(pub.startedAt, 10) || 0;
+    let html = '<div class="live-team-results">';
+    html += '<div class="live-team-results-title">' + (opts.title || '結果') + '</div>';
+    ranked.forEach(function (team) {
+      const done = parseInt(team.finishedAt, 10) > 0;
+      const rank = team.rank || team._rank || '—';
+      const time = done ? formatResultTime_(team, startedAt) : '未完走';
+      const progress = done ? time : ('問 ' + (parseInt(team.currentIndex, 10) || 0) + ' / ' + (pub.questionCount || '—'));
+      html += '<div class="live-team-result-row" style="--team-color:' + escapeHtml_(team.color || '#1976d2') + '">';
+      html += '<div class="live-team-result-rank">' + escapeHtml_(String(rank)) + '</div>';
+      html += '<div class="live-team-result-body">';
+      html += '<div class="live-team-result-name">' + escapeHtml_(team.name || team.id) + '</div>';
+      html += '<div class="live-team-result-time">' + escapeHtml_(progress) + '</div>';
+      html += '<ul class="live-team-member-list compact">';
+      memberLabels_(team, entries).forEach(function (label) {
+        html += '<li>' + escapeHtml_(label) + '</li>';
+      });
+      html += '</ul></div></div>';
+    });
+    html += '</div>';
+    wrap.innerHTML = html;
+  }
+
   function renderHostTeams_(snap) {
     const wrap = el_('live-team-host-teams');
     if (!wrap) return;
     const pub = teamPub_(snap);
-    const liveTeams = (snap.teams && snap.teams.length) ? snap.teams : (pub.roster || []);
-    const teams = sortTeamsForRank_(liveTeams, pub);
+    const liveTeams = liveTeamsForDisplay_(snap);
     const entries = snap.entries || [];
-    if (!teams.length) {
+    if (!liveTeams.length) {
       wrap.innerHTML = '<p class="filter-axis-hint">チーム未編成です。「チームを組む」を押してください。</p>';
       return;
     }
+    if (pub.phase === 'finished' || (liveTeams.length && liveTeams.every(function (t) { return parseInt(t.finishedAt, 10) > 0; }))) {
+      const screen = el_('live-team-host-screen');
+      if (screen) screen.classList.add('is-results');
+      renderResultsBoard_(wrap, liveTeams, pub, entries, { title: '結果' });
+      return;
+    }
+    const screen = el_('live-team-host-screen');
+    if (screen) screen.classList.remove('is-results');
+    const teams = sortTeamsForRank_(liveTeams, pub);
     let html = '';
     teams.forEach(function (team) {
       const total = (team.qOrder && team.qOrder.length) || pub.questionCount || 0;
       const cur = parseInt(team.currentIndex, 10) || 0;
+      const done = parseInt(team.finishedAt, 10) > 0;
       const progress = pub.phase === 'racing' || pub.phase === 'finished'
-        ? ('問 ' + Math.min(cur + 1, total) + ' / ' + total)
+        ? (done ? ('完走 ' + (team._timeLabel || formatResultTime_(team, pub.startedAt))) : ('問 ' + Math.min(cur + 1, total) + ' / ' + total))
         : (team.memberAccounts ? team.memberAccounts.length + ' 人' : '');
-      const time = team.finishedAt ? team._timeLabel : '';
-      const rank = team.finishedAt ? ('#' + (team._rank || '—') + ' ') : '';
+      const rank = done ? ('#' + (team._rank || team.rank || '—') + ' ') : '';
       html += '<div class="live-team-card" style="--team-color:' + escapeHtml_(team.color || '#1976d2') + '">';
       html += '<div class="live-team-card-head">';
       html += '<span class="live-team-card-name">' + escapeHtml_(rank + (team.name || team.id)) + '</span>';
-      html += '<span class="live-team-card-meta">' + escapeHtml_(progress);
-      if (time) html += ' · ' + escapeHtml_(time);
-      html += '</span></div>';
+      html += '<span class="live-team-card-meta">' + escapeHtml_(progress) + '</span></div>';
       html += '<ul class="live-team-member-list">';
       memberLabels_(team, entries).forEach(function (label) {
         html += '<li>' + escapeHtml_(label) + '</li>';
@@ -259,7 +308,7 @@ const LiveTeamModule = (function () {
     if (!hostOpen_ || markFinishedSent_) return;
     const pub = teamPub_(snap);
     if (pub.phase !== 'racing') return;
-    const teams = snap.teams || [];
+    const teams = liveTeamsForDisplay_(snap);
     if (!teams.length) return;
     const allDone = teams.every(function (t) { return parseInt(t.finishedAt, 10) > 0; });
     if (!allDone) return;
@@ -383,6 +432,24 @@ const LiveTeamModule = (function () {
     return data;
   }
 
+  function renderStudentResults_(snap, opts) {
+    opts = opts || {};
+    const promptEl = el_('live-team-student-prompt');
+    const choicesEl = el_('live-team-student-choices');
+    const statusEl = el_('live-team-student-status');
+    hideMini_();
+    if (statusEl) statusEl.textContent = opts.title === '途中経過' ? '完走しました。他チームの完走を待っています' : '結果';
+    if (promptEl) promptEl.textContent = '';
+    if (!choicesEl) return;
+    const pub = teamPub_(snap);
+    const teams = liveTeamsForDisplay_(snap);
+    if (!teams.length) {
+      choicesEl.innerHTML = '<p class="filter-axis-hint">結果を集計しています…</p>';
+      return;
+    }
+    renderResultsBoard_(choicesEl, teams, pub, snap.entries || [], { title: opts.title || '結果' });
+  }
+
   function renderStudentTeamInfo_(snap, myEntry) {
     const infoEl = el_('live-team-student-team-info');
     if (!infoEl) return;
@@ -430,10 +497,17 @@ const LiveTeamModule = (function () {
     if (hands.finished || parseInt(hands.finishedAt, 10) > 0
       || (hands.totalQuestions > 0 && hands.currentIndex >= hands.totalQuestions)) {
       raceSig_ = 'done';
-      promptEl.textContent = '完走しました！';
+      const snap = lastSnap_ || {};
+      const pub = teamPub_(snap);
+      if (pub.phase === 'finished' || (pub.results && pub.results.length && pub.results.every(function (t) { return parseInt(t.finishedAt, 10) > 0; }))) {
+        renderStudentResults_(snap);
+        return;
+      }
+      promptEl.textContent = '完走しました！他のチームを待っています';
       choicesEl.innerHTML = '';
       statusEl.textContent = hands.finishedAt
         ? ('タイム ' + formatRaceTime_(hands.finishedAt, hands.startedAt)) : '';
+      renderStudentResults_(snap, { title: '途中経過' });
       return;
     }
     const sig = [hands.questionId, hands.currentIndex, hands.lockUntil, (hands.hand || []).length].join('|');
@@ -469,6 +543,12 @@ const LiveTeamModule = (function () {
       if (u && u.account) myEntry = entryByAccount_(snap.entries, u.account);
     }
     renderStudentTeamInfo_(snap, myEntry);
+
+    if (pub.phase === 'finished') {
+      hideMini_();
+      renderStudentResults_(snap);
+      return;
+    }
 
     const shouldRace = pub.phase === 'racing' && myEntry && myEntry.teamId;
     if (shouldRace) {
@@ -527,6 +607,7 @@ const LiveTeamModule = (function () {
     const miniEl = el_('live-team-mini-quiz');
     if (!miniEl || !q) return;
     miniRunning_ = true;
+    miniEl.classList.remove('is-correct', 'is-wrong');
     let html = '<div class="subsection-title">待機ミニ学習（4択・個人練習・何度でも）</div>';
     html += '<p class="live-team-mini-prompt">' + escapeHtml_(questionPromptText_(q)) + '</p>';
     html += '<div class="live-team-mini-choices">';
@@ -540,10 +621,14 @@ const LiveTeamModule = (function () {
       btn.addEventListener('click', function () {
         const idx = parseInt(btn.getAttribute('data-mini-idx'), 10) || 0;
         const choice = (q.choices || [])[idx];
+        const ok = !!(choice && choice.isCorrect);
+        miniEl.classList.toggle('is-correct', ok);
+        miniEl.classList.toggle('is-wrong', !ok);
         const fb = el_('live-team-mini-feedback');
-        if (fb) fb.textContent = choice && choice.isCorrect ? '正解！' : '不正解';
+        if (fb) fb.textContent = ok ? '正解！' : '不正解';
         miniEl.querySelectorAll('.live-team-mini-choice').forEach(function (b) { b.disabled = true; });
         setTimeout(function () {
+          miniEl.classList.remove('is-correct', 'is-wrong');
           miniIndex_ += 1;
           miniRunning_ = false;
           if (miniIndex_ >= miniQuestions_.length) {
@@ -551,7 +636,7 @@ const LiveTeamModule = (function () {
             miniIndex_ = 0;
           }
           renderMiniQuiz_(lastSnap_);
-        }, 550);
+        }, 1000);
       });
     });
   }
@@ -624,16 +709,31 @@ const LiveTeamModule = (function () {
     }, 1500);
   }
 
+  function applyHandsToSnap_(hands, room) {
+    const snap = lastSnap_ || {
+      teamPublic: (room && room.teamPublic) || {},
+      launchOptions: room && room.launchOptions,
+      entries: [],
+      teams: []
+    };
+    snap.teamPublic = Object.assign({}, snap.teamPublic || {}, {
+      phase: hands.phase || (snap.teamPublic && snap.teamPublic.phase),
+      startedAt: hands.startedAt || (snap.teamPublic && snap.teamPublic.startedAt) || 0,
+      results: hands.results || (snap.teamPublic && snap.teamPublic.results) || []
+    });
+    lastSnap_ = snap;
+    return snap;
+  }
+
   async function tickStudentFromApi_() {
     const room = LiveRoomModule.getActiveRoom();
     if (!room) return;
     const hands = await refreshHands_();
-    const snap = lastSnap_ || {
-      teamPublic: room.teamPublic || {},
-      launchOptions: room.launchOptions,
-      entries: [],
-      teams: (room.teamPublic && room.teamPublic.roster) || []
-    };
+    const snap = applyHandsToSnap_(hands, room);
+    if (hands.phase === 'finished') {
+      renderStudentResults_(snap);
+      return;
+    }
     if (hands.phase === 'racing' && hands.teamId && !hands.waiting) {
       renderStudentRace_(hands);
       return;
@@ -858,6 +958,16 @@ const LiveTeamModule = (function () {
           choiceId: choiceId,
           expectedIndex: hands_.currentIndex
         }).then(function (res) {
+          if (res && lastSnap_) {
+            lastSnap_.teamPublic = Object.assign({}, lastSnap_.teamPublic || {}, {
+              phase: res.phase || (lastSnap_.teamPublic && lastSnap_.teamPublic.phase),
+              results: res.results || (lastSnap_.teamPublic && lastSnap_.teamPublic.results) || []
+            });
+          }
+          if (res && res.phase === 'finished') {
+            renderStudentResults_(lastSnap_ || {});
+            return;
+          }
           if (res && res.lockUntil) updateLockUi_(res.lockUntil);
           return refreshHands_().then(renderStudentRace_);
         }).catch(function (e) {
