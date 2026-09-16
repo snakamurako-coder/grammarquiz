@@ -596,10 +596,13 @@ body.vocab-card-active #vocab-card-screen { display: flex !important; }
   width: 34px; height: 34px; font-size: 16px; display: flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .vocab-card-header-icon.playing { background: #e53e3e; color: #fff; border-color: #e53e3e; }
-.vocab-card-content-selector { display: flex; flex-wrap: wrap; background: #e2e8f0; padding: 2px; border-radius: 10px; gap: 2px; }
+.vocab-card-content-selector {
+  display: flex; flex-wrap: wrap; flex-shrink: 0; background: #e2e8f0; padding: 2px; border-radius: 10px; gap: 2px;
+  position: relative; z-index: 1;
+}
 .vocab-card-content-btn {
-  flex: 1 1 18%; min-width: 4.2em; padding: 5px 2px; font-size: 11px; font-weight: bold; border: none; background: transparent;
-  color: #4a5568; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  flex: 1 1 18%; min-width: 4.2em; padding: 5px 2px; font-size: 10px; font-weight: bold; border: none; background: transparent;
+  color: #4a5568; border-radius: 8px; cursor: pointer; white-space: nowrap; pointer-events: auto;
 }
 .vocab-card-content-btn.active { background: #fff; color: #2b6cb0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 .vocab-card-cloze-ja { font-size: clamp(14px, 3.6vw, 20px); font-weight: 700; color: #4a5568; text-align: center; margin-bottom: 10px; line-height: 1.4; }
@@ -3344,7 +3347,7 @@ body.live-room-board-active #login-screen { display: none !important; }
         <button type="button" class="vocab-card-content-btn active" data-vc-type="word">単語</button>
         <button type="button" class="vocab-card-content-btn" data-vc-type="phrase">句</button>
         <button type="button" class="vocab-card-content-btn" data-vc-type="example">例文</button>
-        <button type="button" class="vocab-card-content-btn" data-vc-type="phrase-blank">句：空欄</button>
+        <button type="button" class="vocab-card-content-btn" data-vc-type="phrase-blank">句：空欄：句</button>
         <button type="button" class="vocab-card-content-btn" data-vc-type="example-blank">例文：空欄</button>
       </div>
       <div class="vocab-card-status-bar" id="vc-status-bar">
@@ -4147,14 +4150,25 @@ const TtsModule = (() => {
     return normalizeLang(lang).indexOf('ja') === 0;
   }
 
-  function normalizeSpeakText(text) {
-    return String(text || '')
+  function looksJapaneseText_(text) {
+    return /[\u3040-\u30ff\u3400-\u9fff]/.test(String(text || ''));
+  }
+
+  function normalizeSpeakText(text, lang) {
+    var s = String(text || '')
       .replace(/[📢⭕️❌⚠️✅]/g, ' ')
       .replace(/[(\uFF08]\s*_{2,}\s*[)\uFF09]/g, ', ')
       .replace(/_{3,}/g, ', ')
       .replace(/[()（）]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+      .replace(/[’‘]/g, "'")
+      .replace(/[～〜∼⁓]/g, ' ')
+      .replace(/[\u2025\u2026\u22EF]/g, ' ')
+      .replace(/\.{2,}/g, ' ');
+    var ja = lang ? isJapaneseLang_(lang) : looksJapaneseText_(s);
+    if (!ja) {
+      s = s.replace(/[^A-Za-z0-9'\s]/g, ' ');
+    }
+    return s.replace(/\s+/g, ' ').trim();
   }
 
   function textFromElement(el) {
@@ -4167,10 +4181,11 @@ const TtsModule = (() => {
       alert('このブラウザは音声読み上げに対応していません。');
       return;
     }
-    const utterText = normalizeSpeakText(text);
+    const locale = load().locale;
+    const utterText = normalizeSpeakText(text, locale);
     if (!utterText) return;
     document.querySelectorAll('.tts-btn').forEach(function (b) { b.classList.add('speaking'); });
-    speakText(utterText, load().locale, { force: true }).then(function () {
+    speakText(utterText, locale, { force: true }).then(function () {
       document.querySelectorAll('.tts-btn').forEach(function (b) { b.classList.remove('speaking'); });
     });
   }
@@ -4189,7 +4204,7 @@ const TtsModule = (() => {
         if (isJa && !settings.speechJa) { resolve(); return; }
         if (!isJa && !settings.speechEn) { resolve(); return; }
       }
-      const utterText = normalizeSpeakText(text);
+      const utterText = normalizeSpeakText(text, lang);
       if (!utterText) {
         resolve();
         return;
@@ -4283,7 +4298,7 @@ const TtsModule = (() => {
   function setResultSpeakText(text) {
     const btn = document.getElementById('result-tts-btn');
     if (!btn) return;
-    const cleaned = normalizeSpeakText(text);
+    const cleaned = normalizeSpeakText(text, load().locale);
     if (!cleaned) {
       btn.hidden = true;
       btn.removeAttribute('data-tts-text');
@@ -4428,7 +4443,8 @@ const TtsModule = (() => {
 
   return {
     load, save, speak, speakText, prime, stop, pickVoice, pickVoiceForLang,
-    refreshTargetButtons, setResultSpeakText, refreshSettingsUi, syncVocabCardTtsForm_, readTtsForm_, bindUi, supported
+    refreshTargetButtons, setResultSpeakText, refreshSettingsUi, syncVocabCardTtsForm_, readTtsForm_, bindUi, supported,
+    normalizeSpeakText
   };
 })();
 window.TtsModule = TtsModule;
@@ -6719,12 +6735,16 @@ GRAMMAR_FORMATS.forEach(function (f) { GRAMMAR_FORMAT_MAP[f.key] = f; });
 window.GRAMMAR_FORMATS = GRAMMAR_FORMATS;
 window.GRAMMAR_FORMAT_MAP = GRAMMAR_FORMAT_MAP;
 
-/** 英文比較用の正規化（空白圧縮・小文字化・引用符統一・文末句読点の無視） */
+/** 英文比較用の正規化（記号は空白扱い・連続空白は1つ・小文字化・引用符統一・文末句読点の無視） */
 function normalizeEnglish(s) {
   return (s || '').toString()
     .replace(/[’‘]/g, "'")
     .replace(/[“”]/g, '"')
-    .replace(/\s+/g, ' ')
+    .replace(/[～〜∼⁓]/g, ' ')
+    .replace(/[\u2025\u2026\u22EF]/g, ' ')
+    .replace(/\.{2,}/g, ' ')
+    .replace(/[^A-Za-z0-9'\s]/g, ' ')
+    .replace(/[\s\u00A0\u3000]+/g, ' ')
     .trim()
     .toLowerCase()
     .replace(/[.,!?;:]+$/, '');
@@ -13971,7 +13991,7 @@ function formatSessionSettingsText_(log) {
       }
     }
   } else if (settings.kind === 'vocab-card') {
-    const contentMap = { word: '語', phrase: '句', example: '例文', 'phrase-blank': '句：空欄', 'example-blank': '例文：空欄' };
+    const contentMap = { word: '語', phrase: '句', example: '例文', 'phrase-blank': '句：空欄：句', 'example-blank': '例文：空欄' };
     const langMap = { ja: '日本語→英語', en: '英語→日本語' };
     lines.push('教材種別: ' + (settings.bookType === 'user' ? 'マイ単語帳' : 'プリセット'));
     lines.push('ブック: ' + (settings.bookName || '（不明）'));

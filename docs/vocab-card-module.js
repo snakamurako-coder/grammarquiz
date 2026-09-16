@@ -331,7 +331,7 @@ const VocabCardModule = (() => {
     }
     const typeSel = el_('vc-cfg-content-type');
     if (typeSel && !typeSel.options.length) {
-      [['word', '単語'], ['phrase', '句 (フレーズ)'], ['example', '例文'], ['phrase-blank', '句：空欄'], ['example-blank', '例文：空欄']].forEach(function (pair) {
+      [['word', '単語'], ['phrase', '句 (フレーズ)'], ['example', '例文'], ['phrase-blank', '句：空欄：句'], ['example-blank', '例文：空欄']].forEach(function (pair) {
         typeSel.add(new Option(pair[1], pair[0]));
       });
     }
@@ -360,7 +360,9 @@ const VocabCardModule = (() => {
     el_('vc-card-container').addEventListener('click', flipCard_);
 
     document.querySelectorAll('.vocab-card-content-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
         setContentType_(btn.getAttribute('data-vc-type'));
       });
     });
