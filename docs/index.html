@@ -7054,11 +7054,16 @@ const ChoiceModule = (() => {
       const key = choice.poolKey || choice.text;
       return !VocabPoolSession.isUsed(key);
     });
+    const prevAns = assignmentQuizDeferFeedback_() && (sessionAnswerLog || []).find(function (a) { return a.index === currentQuestionIndex + 1; });
     visibleChoices.forEach((choice) => {
       const btn = document.createElement('button');
       btn.className = 'choice-btn';
       btn.textContent = choice.text;
       if (choice.isSpecial) btn.classList.add('unknown');
+      if (prevAns && prevAns.userAnswer === choice.text) {
+        btn.classList.add('selected');
+        pendingChoice = choice;
+      }
       btn.onclick = () => handleChoice(choice, btn);
       buttonsContainer.appendChild(btn);
     });
@@ -8339,6 +8344,12 @@ const GameSessionPlay = (() => {
     renderSectionNav_();
     const next = firstIncompleteSegment_();
     if (next < 0) {
+      if (typeof assignmentQuizDeferFeedback_ === 'function' && assignmentQuizDeferFeedback_()) {
+        if (typeof showAssignmentReviewModal_ === 'function') {
+          showAssignmentReviewModal_();
+          return;
+        }
+      }
       active = false;
       showResultScreen();
       return;
@@ -8511,7 +8522,23 @@ const GameSessionPlay = (() => {
     if (window.KeyboardModule) KeyboardModule.deactivate();
   }
 
-  return { start, reset, isActive, advanceLinear, jumpToSegment, flushPendingForTimeout, navigateLinear };
+  function syncToGlobalIndex(globalIdx) {
+    if (!active) return false;
+    for (let s = 0; s < segments.length; s++) {
+      const seg = segments[s];
+      if (seg.indices && seg.indices.indexOf(globalIdx) >= 0) {
+        segmentIndex = s;
+        if (seg.type === 'linear') {
+          linearPos = seg.indices.indexOf(globalIdx);
+        }
+        renderSectionNav_();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  return { start, reset, isActive, advanceLinear, jumpToSegment, flushPendingForTimeout, navigateLinear, syncToGlobalIndex };
 })();
 window.GameSessionPlay = GameSessionPlay;
 
@@ -10160,11 +10187,16 @@ const VocabQuizModule = (() => {
       if (!qData.sharedPool) return true;
       return !VocabPoolSession.isUsed(choice.poolKey || choice.text);
     });
+    const prevAns = assignmentQuizDeferFeedback_() && (sessionAnswerLog || []).find(function (a) { return a.index === currentQuestionIndex + 1; });
     visible.forEach(function (choice) {
       const btn = document.createElement('button');
       btn.className = 'choice-btn';
       btn.textContent = choice.text;
       if (choice.isSpecial) btn.classList.add('unknown');
+      if (prevAns && prevAns.userAnswer === choice.text) {
+        btn.classList.add('selected');
+        pendingChoice = choice;
+      }
       btn.onclick = function () { handleChoice(choice, btn); };
       buttonsEl.appendChild(btn);
     });
@@ -12624,6 +12656,8 @@ const QUESTION_HANDLERS = {
   PEX: { ui: 'choice-ui', module: ChoiceModule }
 };
 
+let pendingAdvanceTimer_ = null;
+
 function commitCurrentModulePending_() {
   const currentQ = currentQuestionDataList && currentQuestionDataList[currentQuestionIndex];
   if (!currentQ) return;
@@ -12632,15 +12666,32 @@ function commitCurrentModulePending_() {
     handler.module.commitPending();
   }
 }
+window.commitCurrentModulePending_ = commitCurrentModulePending_;
 
 window.notifyPendingAnswered_ = function() {
+  if (pendingAdvanceTimer_) {
+    clearTimeout(pendingAdvanceTimer_);
+    pendingAdvanceTimer_ = null;
+  }
   const auto = window.QuizNavSettings && window.QuizNavSettings.autoAdvance();
+  const total = (currentQuestionDataList && currentQuestionDataList.length) || 0;
+  const isLast = (total > 0 && currentQuestionIndex >= total - 1);
+
   if (auto) {
-    setTimeout(function() {
-      if (typeof window.tryAdvanceToNextQuestion_ === 'function') {
-        window.tryAdvanceToNextQuestion_();
-      }
-    }, 200);
+    if (!isLast) {
+      pendingAdvanceTimer_ = setTimeout(function() {
+        pendingAdvanceTimer_ = null;
+        goToNextQuestion_();
+      }, 250);
+    } else {
+      commitCurrentModulePending_();
+      pendingAdvanceTimer_ = setTimeout(function() {
+        pendingAdvanceTimer_ = null;
+        if (typeof showAssignmentReviewModal_ === 'function') {
+          showAssignmentReviewModal_();
+        }
+      }, 350);
+    }
   } else {
     const nextBtn = document.getElementById('next-btn');
     if (nextBtn) nextBtn.style.display = 'block';
@@ -13075,7 +13126,7 @@ window.onQuestionCompleted = (isCorrect, meta) => {
     const answerFeedback = document.getElementById('answer-feedback');
     if (answerFeedback) answerFeedback.classList.add('is-visible');
   }
-  const autoGo = !meta.fromTimeout && window.QuizNavSettings && QuizNavSettings.autoAdvance();
+  const autoGo = !meta.fromTimeout && !deferQuizFeedback && window.QuizNavSettings && QuizNavSettings.autoAdvance();
   document.getElementById('next-btn').style.display = (meta.fromTimeout || autoGo) ? 'none' : 'block';
   if (window.persistSessionDraft_) window.persistSessionDraft_();
   if (autoGo) {
@@ -13255,6 +13306,10 @@ function tryAdvanceToNextQuestion_() {
 window.tryAdvanceToNextQuestion_ = tryAdvanceToNextQuestion_;
 
 function goToNextQuestion_() {
+  if (pendingAdvanceTimer_) {
+    clearTimeout(pendingAdvanceTimer_);
+    pendingAdvanceTimer_ = null;
+  }
   commitCurrentModulePending_();
   const nextBtn = document.getElementById('next-btn');
   if (nextBtn) nextBtn.style.display = 'none';
@@ -13269,11 +13324,23 @@ function goToNextQuestion_() {
     loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
     if (window.persistSessionDraft_) window.persistSessionDraft_();
   } else {
+    if (typeof assignmentQuizDeferFeedback_ === 'function' && assignmentQuizDeferFeedback_()) {
+      currentQuestionIndex = (currentQuestionDataList && currentQuestionDataList.length) ? currentQuestionDataList.length - 1 : 0;
+      if (typeof showAssignmentReviewModal_ === 'function') {
+        showAssignmentReviewModal_();
+        return;
+      }
+    }
     showResultScreen();
   }
 }
+window.goToNextQuestion_ = goToNextQuestion_;
 
 function navigateQuizQuestion_(delta) {
+  if (pendingAdvanceTimer_) {
+    clearTimeout(pendingAdvanceTimer_);
+    pendingAdvanceTimer_ = null;
+  }
   commitCurrentModulePending_();
   if (window.GameSessionPlay && GameSessionPlay.isActive() && typeof GameSessionPlay.navigateLinear === 'function') {
     if (GameSessionPlay.navigateLinear(delta)) return;
@@ -13339,9 +13406,16 @@ function showAssignmentReviewModal_() {
 }
 
 window.jumpToQuestionFromReview_ = function(index) {
+  if (pendingAdvanceTimer_) {
+    clearTimeout(pendingAdvanceTimer_);
+    pendingAdvanceTimer_ = null;
+  }
   document.getElementById('assignment-answers-modal').style.display = 'none';
   if (index >= 0 && index < currentQuestionDataList.length) {
     currentQuestionIndex = index;
+    if (window.GameSessionPlay && typeof GameSessionPlay.syncToGlobalIndex === 'function') {
+      GameSessionPlay.syncToGlobalIndex(index);
+    }
     loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
     if (window.persistSessionDraft_) window.persistSessionDraft_();
   }
