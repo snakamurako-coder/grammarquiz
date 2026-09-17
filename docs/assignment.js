@@ -1290,6 +1290,8 @@ const AssignmentModule = (function () {
     if (window.GameSessionPlay && typeof GameSessionPlay.flushPendingForTimeout === 'function') {
       GameSessionPlay.flushPendingForTimeout();
     }
+    if (window.commitCurrentModulePending_) window.commitCurrentModulePending_();
+    
     const nextBtn = document.getElementById('next-btn');
     if (nextBtn) nextBtn.style.display = 'none';
     const res = await finishActiveSession_({ timedOut: true });
@@ -1317,6 +1319,7 @@ const AssignmentModule = (function () {
 
   async function finalizeIfActive() {
     if (!activeSession_) return null;
+    if (window.commitCurrentModulePending_) window.commitCurrentModulePending_();
     try {
       return await finishActiveSession_({ timedOut: false });
     } catch (e) {
