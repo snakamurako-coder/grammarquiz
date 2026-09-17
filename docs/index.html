@@ -3133,6 +3133,7 @@ body.live-room-board-active #login-screen { display: none !important; }
       <div class="question-nav-row">
         <button type="button" id="q-prev-btn" class="q-nav-btn" aria-label="前の問題">← 前の問題</button>
         <div class="question-progress" id="question-progress" hidden>問 1 / 1</div>
+        <button type="button" id="q-review-answers-btn" class="q-nav-btn btn-secondary" style="display: none; padding: 4px 8px; font-size: 0.9em; margin: 0 4px;">回答一覧</button>
         <button type="button" id="q-next-btn" class="q-nav-btn" aria-label="次の問題">次の問題 →</button>
       </div>
       <div class="question-ja" id="question-ja"></div>
@@ -7016,10 +7017,12 @@ const ChoiceModule = (() => {
   
   let qData = null;
   let answered = false;
+  let pendingChoice = null;
 
   function initGame(questionData) {
     qData = questionData;
     answered = false;
+    pendingChoice = null;
     buttonsContainer.innerHTML = '';
     resultMsg.textContent = '';
 
@@ -7062,6 +7065,15 @@ const ChoiceModule = (() => {
   }
 
   function handleChoice(choice, btn) {
+    // ── 課題モード: 選び直しを許可し、判定は後回し ──
+    if (assignmentQuizDeferFeedback_()) {
+      Array.from(buttonsContainer.children).forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      pendingChoice = choice;
+      return;
+    }
+
+    // ── 通常モード: 即時判定 ──
     if (answered) return;
     answered = true;
 
@@ -7104,7 +7116,24 @@ const ChoiceModule = (() => {
     });
   }
 
-  return { initGame };
+  function commitPending() {
+    if (!pendingChoice || !qData) return;
+    const choice = pendingChoice;
+    pendingChoice = null;
+    answered = true;
+    if (qData.sharedPool) {
+      VocabPoolSession.mark(choice.poolKey || choice.text);
+    }
+    if (window.onQuestionCompleted) {
+      window.onQuestionCompleted(choice.isCorrect, {
+        isUnknown: !!choice.isUnknown,
+        userAnswer: choice.text,
+        correctAnswer: qData.correctText
+      });
+    }
+  }
+
+  return { initGame, commitPending };
 })();
 
 window.ChoiceModule = ChoiceModule;
@@ -7121,6 +7150,7 @@ const TypingModule = (() => {
   let qData = null;
   let answered = false;
   let sttRec = null;
+  let pendingAnswer_ = null;
 
   function stopStt_() {
     if (sttRec) {
@@ -7223,6 +7253,14 @@ const TypingModule = (() => {
 
   // 入力を空所に当てはめた英文が受理リストのいずれかと一致すれば正解
   function checkAnswer(userAnswer) {
+    // ── 課題モード: 入力内容を保持するだけ（判定しない） ──
+    if (assignmentQuizDeferFeedback_()) {
+      pendingAnswer_ = userAnswer;
+      submitBtn.textContent = '✔ 回答を変更できます';
+      return;
+    }
+
+    // ── 通常モード: 即時判定 ──
     if (answered) return;
     answered = true;
 
@@ -7243,7 +7281,23 @@ const TypingModule = (() => {
   }
 
   function commitPending() {
-    if (answered || !qData) return;
+    if (!qData) return;
+    // 課題モード: 保持していた回答で最終判定
+    if (assignmentQuizDeferFeedback_()) {
+      const text = pendingAnswer_ != null ? pendingAnswer_
+        : ((window.KeyboardModule ? KeyboardModule.getInput() : (inputDisplay && inputDisplay.getAttribute('data-kb-value'))) || '').trim();
+      pendingAnswer_ = null;
+      if (!text) return;
+      answered = true;
+      const assembled = joinEnglish(qData.answerPrefix, text, qData.answerSuffix);
+      const ok = matchesAcceptedSentences(assembled, qData.acceptedSentences);
+      if (window.onQuestionCompleted) {
+        window.onQuestionCompleted(ok, { userAnswer: text, correctAnswer: qData.expectedInner });
+      }
+      return;
+    }
+    // 通常モード（タイムアウト時など）
+    if (answered) return;
     const text = (window.KeyboardModule ? KeyboardModule.getInput() : (inputDisplay && inputDisplay.getAttribute('data-kb-value'))) || '';
     checkAnswer(text);
   }
@@ -7345,8 +7399,14 @@ const CorrectionModule = (() => {
   }
 
   noErrorBtn.onclick = () => {
-    if (phase !== 'judge') return;
+    if (phase !== 'judge' && phase !== 'pending') return;
     finalSentence = presentedSentence;
+    // 課題モード: 回答を保持するだけ
+    if (assignmentQuizDeferFeedback_()) {
+      phase = 'pending';
+      hintEl.textContent = '✔ 「正しい文」として保持中（変更可）';
+      return;
+    }
     judge();
   };
 
@@ -7389,6 +7449,15 @@ const CorrectionModule = (() => {
   function submitEdit() {
     if (phase !== 'edit') return;
     updateLivePreview();
+    // 課題モード: 回答を保持するだけ
+    if (assignmentQuizDeferFeedback_()) {
+      phase = 'pending';
+      hintEl.textContent = '✔ 修正内容を保持中（変更可）';
+      editArea.style.display = 'none';
+      if (livePreviewWrap) livePreviewWrap.style.display = 'none';
+      judgeArea.style.display = 'flex';
+      return;
+    }
     judge();
   }
 
@@ -7424,7 +7493,18 @@ const CorrectionModule = (() => {
     }
   }
 
-  return { initGame };
+  function commitPending() {
+    if (phase === 'done' || !qData) return;
+    // 課題モード: pending 状態のものを最終判定
+    if (phase === 'pending' || phase === 'judge' || phase === 'locate' || phase === 'edit') {
+      // pending 以外は finalSentence が未確定かもしれない
+      if (phase === 'judge') finalSentence = presentedSentence;
+      else if (phase === 'edit' || phase === 'locate') updateLivePreview();
+      judge();
+    }
+  }
+
+  return { initGame, commitPending };
 })();
 
 window.CorrectionModule = CorrectionModule;
@@ -10060,10 +10140,12 @@ const VocabQuizModule = (() => {
   const resultMsg = document.getElementById('result-msg');
   let qData = null;
   let questionStartTime = null;
+  let pendingChoice = null;
 
   function initGame(questionData) {
     qData = questionData;
     questionStartTime = Date.now();
+    pendingChoice = null;
     wordEl.textContent = qData.word;
     const pos = qData.posLabel ? '（' + qData.posLabel + '）' : '';
     promptEl.textContent = pos + 'の意味として正しいものを選んでください。';
@@ -10085,6 +10167,15 @@ const VocabQuizModule = (() => {
   }
 
   function handleChoice(choice, btn) {
+    // ── 課題モード: 選び直し可能 ──
+    if (assignmentQuizDeferFeedback_()) {
+      Array.from(buttonsEl.children).forEach(function (b) { b.classList.remove('selected'); });
+      btn.classList.add('selected');
+      pendingChoice = choice;
+      return;
+    }
+
+    // ── 通常モード: 即時判定 ──
     if (resultMsg.textContent !== '') return;
     Array.from(buttonsEl.children).forEach(function (b) { b.classList.remove('selected'); });
     btn.classList.add('selected');
@@ -10118,7 +10209,23 @@ const VocabQuizModule = (() => {
     }
   }
 
-  return { initGame };
+  function commitPending() {
+    if (!pendingChoice || !qData) return;
+    const choice = pendingChoice;
+    pendingChoice = null;
+    if (qData.sharedPool) VocabPoolSession.mark(choice.poolKey || choice.text);
+    const answerMs = questionStartTime ? Date.now() - questionStartTime : 0;
+    if (window.onQuestionCompleted) {
+      window.onQuestionCompleted(choice.isCorrect, {
+        answerMs: answerMs,
+        isUnknown: choice.text === VOCAB_OPTION_UNKNOWN,
+        userAnswer: choice.text,
+        correctAnswer: qData.correctAnswer
+      });
+    }
+  }
+
+  return { initGame, commitPending };
 })();
 
 window.VocabQuizModule = VocabQuizModule;
@@ -10133,10 +10240,12 @@ const VocabJaModule = (() => {
   const resultMsg = document.getElementById('result-msg');
   let qData = null;
   let answered = false;
+  let pendingAnswer_ = null;
 
   function initGame(questionData) {
     qData = questionData;
     answered = false;
+    pendingAnswer_ = null;
     resultMsg.textContent = '';
     inputEl.value = '';
 
@@ -10150,9 +10259,18 @@ const VocabJaModule = (() => {
     if (ttsBtn) ttsBtn.style.display = (qData.format === 'W4' || qData.promptEn) ? '' : 'none';
 
     submitBtn.onclick = function () {
-      if (answered) return;
       const user = inputEl.value.trim();
       if (!user) return;
+
+      // ── 課題モード: 入力内容を保持するだけ ──
+      if (assignmentQuizDeferFeedback_()) {
+        pendingAnswer_ = user;
+        submitBtn.textContent = '✔ 回答を変更できます';
+        return;
+      }
+
+      // ── 通常モード ──
+      if (answered) return;
       commitAnswer_(user);
     };
   }
@@ -10176,7 +10294,22 @@ const VocabJaModule = (() => {
   }
 
   function commitPending() {
-    if (answered || !qData) return;
+    if (!qData) return;
+    // 課題モード: 保持していた回答で最終判定
+    if (assignmentQuizDeferFeedback_()) {
+      const text = pendingAnswer_ != null ? pendingAnswer_
+        : ((inputEl && inputEl.value) ? inputEl.value.trim() : '');
+      pendingAnswer_ = null;
+      if (!text) return;
+      answered = true;
+      const ok = vocabJapaneseMatch(text, qData.expectedAnswer);
+      if (window.onQuestionCompleted) {
+        window.onQuestionCompleted(ok, { userAnswer: text, correctAnswer: qData.expectedAnswer });
+      }
+      return;
+    }
+    // 通常モード（タイムアウト時など）
+    if (answered) return;
     commitAnswer_((inputEl && inputEl.value) ? inputEl.value.trim() : '');
   }
 
@@ -11241,10 +11374,12 @@ const SortingModule = (() => {
   let qData = null;
   let answered = false;
   let createdCard = null;
+  let pendingInner_ = null;
 
   function initGame(questionData) {
     qData = questionData;
     answered = false;
+    pendingInner_ = null;
 
     answerSlot.innerHTML = '';
     wordPool.innerHTML = '';
@@ -11356,9 +11491,11 @@ const SortingModule = (() => {
   new Sortable(trashSlot, sortOptions);
 
   function checkSubmitVisibility() {
-    if (!qData || answered) return;
+    if (!qData) return;
+    // 課題モード: answered でも並び替え可能
+    if (!assignmentQuizDeferFeedback_() && answered) return;
     submitBtn.style.display = (answerSlot.children.length === qData.slotCount) ? 'block' : 'none';
-    resultMsg.textContent = "";
+    if (!answered) resultMsg.textContent = "";
   }
 
   moveAllBtn.addEventListener('click', () => {
@@ -11368,7 +11505,17 @@ const SortingModule = (() => {
 
   // 空所に当てはめた英文が受理リストのいずれかと一致すれば正解（同じ語句のカードが複数あっても判定できる）
   submitBtn.addEventListener('click', () => {
-    if (!qData || answered) return;
+    if (!qData) return;
+
+    // ── 課題モード: 並べた内容を保持するだけ ──
+    if (assignmentQuizDeferFeedback_()) {
+      pendingInner_ = Array.from(answerSlot.children).map(c => c.textContent).join(' ');
+      submitBtn.textContent = '✔ 回答を変更できます';
+      return;
+    }
+
+    // ── 通常モード: 即時判定 ──
+    if (answered) return;
     answered = true;
     submitBtn.style.display = 'none';
 
@@ -11386,7 +11533,22 @@ const SortingModule = (() => {
     }
   });
 
-  return { initGame };
+  function commitPending() {
+    if (!qData) return;
+    // 課題モード: 保持していた並び順、またはその時点の並び順で最終判定
+    const inner = pendingInner_ != null ? pendingInner_
+      : Array.from(answerSlot.children).map(c => c.textContent).join(' ');
+    pendingInner_ = null;
+    if (!inner.trim()) return;
+    answered = true;
+    const assembled = joinEnglish(qData.answerPrefix, inner, qData.answerSuffix);
+    const ok = matchesAcceptedSentences(assembled, qData.acceptedSentences);
+    if (window.onQuestionCompleted) {
+      window.onQuestionCompleted(ok, { userAnswer: inner, correctAnswer: qData.expectedInner });
+    }
+  }
+
+  return { initGame, commitPending };
 })();
 
 // エクスポート（グローバルスコープ）
@@ -12455,6 +12617,15 @@ const QUESTION_HANDLERS = {
   PEX: { ui: 'choice-ui', module: ChoiceModule }
 };
 
+function commitCurrentModulePending_() {
+  const currentQ = currentQuestionDataList && currentQuestionDataList[currentQuestionIndex];
+  if (!currentQ) return;
+  const handler = QUESTION_HANDLERS[currentQ.format];
+  if (handler && handler.module && typeof handler.module.commitPending === 'function') {
+    handler.module.commitPending();
+  }
+}
+
 const FEEDBACK_SLOT_BY_FORMAT = {
   A: 'typing-feedback-slot',
   B: 'typing-feedback-slot',
@@ -12507,8 +12678,12 @@ function updateQuestionProgressDisplay_() {
   }
   const prev = document.getElementById('q-prev-btn');
   const next = document.getElementById('q-next-btn');
+  const reviewBtn = document.getElementById('q-review-answers-btn');
   if (prev) prev.disabled = currentQuestionIndex <= 0;
   if (next) next.disabled = total > 0 && currentQuestionIndex >= total - 1;
+  if (reviewBtn) {
+    reviewBtn.style.display = assignmentQuizDeferFeedback_() ? 'inline-block' : 'none';
+  }
 }
 
 function syncPostAnswerNextButton_() {
@@ -12815,8 +12990,17 @@ window.onQuestionCompleted = (isCorrect, meta) => {
   meta = meta || {};
   const currentQ = currentQuestionDataList[currentQuestionIndex];
   const logIndex = currentQuestionIndex + 1;
-  if ((sessionAnswerLog || []).some(function (item) { return item.index === logIndex; })) {
-    return;
+  const existingIdx = (sessionAnswerLog || []).findIndex(function (item) { return item.index === logIndex; });
+  if (existingIdx >= 0) {
+    // 課題モード: 回答上書きを許可（スコア差分を補正）
+    if (assignmentQuizDeferFeedback_()) {
+      const prev = sessionAnswerLog[existingIdx];
+      if (prev.isCorrect && !isCorrect) currentScore = Math.max(0, currentScore - 1);
+      else if (!prev.isCorrect && isCorrect) currentScore++;
+      sessionAnswerLog.splice(existingIdx, 1);
+    } else {
+      return;
+    }
   }
   sessionAnswerLog.push({
     index: currentQuestionIndex + 1,
@@ -13050,6 +13234,7 @@ function tryAdvanceToNextQuestion_() {
 window.tryAdvanceToNextQuestion_ = tryAdvanceToNextQuestion_;
 
 function goToNextQuestion_() {
+  commitCurrentModulePending_();
   const nextBtn = document.getElementById('next-btn');
   if (nextBtn) nextBtn.style.display = 'none';
   if (window.GameSessionPlay && GameSessionPlay.isActive()) {
@@ -13068,6 +13253,7 @@ function goToNextQuestion_() {
 }
 
 function navigateQuizQuestion_(delta) {
+  commitCurrentModulePending_();
   if (window.GameSessionPlay && GameSessionPlay.isActive() && typeof GameSessionPlay.navigateLinear === 'function') {
     if (GameSessionPlay.navigateLinear(delta)) return;
   }
@@ -13101,13 +13287,69 @@ function handleQuizArrowNav_(key) {
 }
 window.handleQuizArrowNav_ = handleQuizArrowNav_;
 
+function showAssignmentReviewModal_() {
+  commitCurrentModulePending_();
+  const listEl = document.getElementById('assignment-answers-list');
+  let html = '';
+  
+  if (!currentQuestionDataList || !currentQuestionDataList.length) {
+    listEl.innerHTML = '<p>問題がありません。</p>';
+  } else {
+    currentQuestionDataList.forEach((q, i) => {
+      const ansItem = (sessionAnswerLog || []).find(a => a.index === (i + 1));
+      let userAnswerText = '<span style="color:#d32f2f; font-weight:bold;">（未回答）</span>';
+      if (ansItem && ansItem.userAnswer !== undefined && ansItem.userAnswer !== null && ansItem.userAnswer !== '') {
+        userAnswerText = escapeHtml_(String(ansItem.userAnswer));
+      } else if (ansItem && ansItem.isUnknown) {
+        userAnswerText = '（わからない）';
+      }
+      
+      html += '<div style="border-bottom: 1px solid #ddd; padding: 12px 0;">';
+      html += '<div style="font-weight: bold; color: var(--c-primary); margin-bottom: 4px;">Q' + (i + 1) + '</div>';
+      html += '<div style="font-size: 0.95em; margin-bottom: 8px;">' + escapeHtml_(getQuestionPrompt_(q)) + '</div>';
+      html += '<div style="background: #f4f6f8; padding: 8px; border-radius: 4px;">あなたの回答: ' + userAnswerText + '</div>';
+      html += '<div style="text-align: right; margin-top: 8px;"><button type="button" class="btn-secondary btn-sm" onclick="jumpToQuestionFromReview_(' + i + ')" style="padding: 4px 12px; font-size: 0.85em;">この問題へ戻る</button></div>';
+      html += '</div>';
+    });
+    listEl.innerHTML = html;
+  }
+  
+  document.getElementById('assignment-answers-modal').style.display = 'flex';
+}
+
+window.jumpToQuestionFromReview_ = function(index) {
+  document.getElementById('assignment-answers-modal').style.display = 'none';
+  if (index >= 0 && index < currentQuestionDataList.length) {
+    currentQuestionIndex = index;
+    loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
+    if (window.persistSessionDraft_) window.persistSessionDraft_();
+  }
+};
+
 document.getElementById('next-btn').addEventListener('click', function () {
   goToNextQuestion_();
 });
 const qPrevBtn = document.getElementById('q-prev-btn');
 const qNextBtn = document.getElementById('q-next-btn');
+const qReviewBtn = document.getElementById('q-review-answers-btn');
+const earlySubmitBtn = document.getElementById('assignment-early-submit-btn');
+
 if (qPrevBtn) qPrevBtn.addEventListener('click', function () { navigateQuizQuestion_(-1); });
 if (qNextBtn) qNextBtn.addEventListener('click', function () { navigateQuizQuestion_(1); });
+if (qReviewBtn) qReviewBtn.addEventListener('click', showAssignmentReviewModal_);
+
+if (earlySubmitBtn) {
+  earlySubmitBtn.addEventListener('click', function() {
+    if (confirm('現在の内容で提出して終了します。よろしいですか？')) {
+      document.getElementById('assignment-answers-modal').style.display = 'none';
+      if (window.AssignmentModule && typeof window.AssignmentModule.forceSubmitActiveSession === 'function') {
+        window.AssignmentModule.forceSubmitActiveSession().catch(function(e){ console.warn(e); });
+      } else {
+        showResultScreen();
+      }
+    }
+  });
+}
 
 function getResultSavedMessage_(saveResult) {
   if (saveResult && saveResult.reproduce) {
@@ -14774,5 +15016,16 @@ window.forceLiveRoomTimeoutSubmit_ = async function () {
 };
 </script>
 <script src="paper-quiz-module.js"></script>
+  <div id="assignment-answers-modal" class="modal-overlay" style="display: none; z-index: 9999;">
+    <div class="modal-content" style="max-width: 800px; max-height: 80vh; overflow-y: auto;">
+      <h2>現在の回答一覧</h2>
+      <p style="margin-bottom: 10px; color: #666; font-size: 0.9em;">現在の回答状況です。空欄や間違いがないか確認してください。</p>
+      <div id="assignment-answers-list" style="margin-bottom: 20px;"></div>
+      <div style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="button" class="btn-secondary" onclick="document.getElementById('assignment-answers-modal').style.display='none'">戻る</button>
+        <button type="button" class="btn-primary" id="assignment-early-submit-btn" style="background-color: var(--c-success);">この内容で提出する</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

@@ -1351,6 +1351,7 @@ const AssignmentModule = (function () {
     getActive: getActive,
     onAnswered: onAnswered,
     finalizeIfActive: finalizeIfActive,
+    forceSubmitActiveSession: forceSubmitActiveSession_,
     reproduceById: reproduceById_,
     buildQuestionsFromSections: buildQuestionsFromSections_,
     buildQuestionsForAssignment: buildQuestionsForAssignment_,
