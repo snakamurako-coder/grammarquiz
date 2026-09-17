@@ -967,7 +967,11 @@ const AssignmentModule = (function () {
     totalQuestionsCount = built.questions.length;
     currentQuestionIndex = 0;
     currentScore = 0;
-    sessionAnswerLog = [];
+    if (window.clearQuizSessionAnswers_) {
+      window.clearQuizSessionAnswers_();
+    } else {
+      sessionAnswerLog = [];
+    }
     sessionPersistedToServer = false;
     sessionStartTime = Date.now();
 
@@ -1003,6 +1007,7 @@ const AssignmentModule = (function () {
   function abandonActiveSession_() {
     clearTimer_();
     activeSession_ = null;
+    if (window.clearQuizSessionAnswers_) window.clearQuizSessionAnswers_();
     const banner = document.getElementById('assignment-session-banner');
     if (banner) banner.hidden = true;
   }

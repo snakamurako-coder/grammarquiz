@@ -7218,6 +7218,7 @@ const TypingModule = (() => {
   function initGame(questionData) {
     qData = questionData;
     answered = false;
+    pendingAnswer_ = null;
     resultMsg.textContent = '';
     inputDisplay.textContent = '';
     submitBtn.style.display = 'none';
@@ -11596,25 +11597,40 @@ window.SortingModule = SortingModule;
 // app.js
 // データと画面遷移の管理
 
-let currentQuestionDataList = [];
-let currentQuestionIndex = 0;
-let totalQuestionsCount = 0;
-let currentScore = 0;
-let currentUserId = "Guest";
-let sessionStartTime = null;
-let sessionAnswerLog = [];
-let vocabResultMarks_ = {};
+var currentQuestionDataList = [];
+var currentQuestionIndex = 0;
+var totalQuestionsCount = 0;
+var currentScore = 0;
+var currentUserId = "Guest";
+var sessionStartTime = null;
+var sessionAnswerLog = [];
+var vocabResultMarks_ = {};
 /** 現在の演習結果がサーバーへ保存済みか（sessionAnswerLog が空なら true 扱い） */
-let sessionPersistedToServer = true;
-let currentAppMode = 'grammar';
-let currentVocabSetName = '';
-let currentVocabBookName = '';
-let currentVocabSheetName = '';
+var sessionPersistedToServer = true;
+var currentAppMode = 'grammar';
+var currentVocabSetName = '';
+var currentVocabBookName = '';
+var currentVocabSheetName = '';
 /** 現在セッションが管理者プリセット教材か（Form 集約対象） */
-let currentSessionIsPreset = true;
+var currentSessionIsPreset = true;
 /** セッション開始時の出題設定スナップショット（学習記録の詳細・再現用。問題そのものは含まない） */
-let currentSessionSettings = null;
-let currentReviewSetId = null;
+var currentSessionSettings = null;
+var currentReviewSetId = null;
+
+function clearQuizSessionAnswers_() {
+  sessionAnswerLog = [];
+  window.sessionAnswerLog = sessionAnswerLog;
+  vocabResultMarks_ = {};
+  if (typeof pendingAdvanceTimer_ !== 'undefined' && pendingAdvanceTimer_) {
+    clearTimeout(pendingAdvanceTimer_);
+    pendingAdvanceTimer_ = null;
+  }
+  const modalEl = document.getElementById('assignment-answers-modal');
+  if (modalEl) modalEl.style.display = 'none';
+  const listEl = document.getElementById('assignment-answers-list');
+  if (listEl) listEl.innerHTML = '';
+}
+window.clearQuizSessionAnswers_ = clearQuizSessionAnswers_;
 /** fetchUserLogs の直近結果（再現ボタン用） */
 let lastFetchedLearningLogs_ = [];
 /** マイページ学習記録の取得中 Promise（重複起動防止） */
@@ -12274,7 +12290,7 @@ elements.startBtn.addEventListener('click', async () => {
         totalQuestionsCount = questions.length;
         currentQuestionIndex = 0;
         currentScore = 0;
-        sessionAnswerLog = [];
+        clearQuizSessionAnswers_();
         sessionPersistedToServer = true;
         sessionStartTime = Date.now();
         currentSessionIsPreset = true;
@@ -12388,8 +12404,7 @@ async function runVocabQuizSession_(options, btn, reviewSetId) {
       totalQuestionsCount = questions.length;
       currentQuestionIndex = 0;
       currentScore = 0;
-      sessionAnswerLog = [];
-      vocabResultMarks_ = {};
+      clearQuizSessionAnswers_();
       sessionPersistedToServer = true;
       sessionStartTime = Date.now();
       currentSessionIsPreset = bookType === 'preset';
@@ -13032,6 +13047,7 @@ const SessionSave = (function () {
         const mode = currentAppMode;
         const title = (act && act.assignment && act.assignment.Title) || '';
         const res = await AssignmentModule.finalizeIfActive();
+        sessionPersistedToServer = true;
         const out = Object.assign({ status: 'success', assignment: true }, res || {});
         if (!practice && out.status !== 'error' && title) {
           try {
@@ -13496,6 +13512,14 @@ function showResultScreen() {
   const resultScreen = document.getElementById('result-screen');
   resultScreen.style.display = 'block';
 
+  // 回答一覧モーダルを非表示化・中身をリセット
+  const modalEl = document.getElementById('assignment-answers-modal');
+  if (modalEl) modalEl.style.display = 'none';
+  const listEl = document.getElementById('assignment-answers-list');
+  if (listEl) listEl.innerHTML = '';
+  const qReviewBtn = document.getElementById('q-review-answers-btn');
+  if (qReviewBtn) qReviewBtn.style.display = 'none';
+
   document.getElementById('result-score').textContent = `スコア: ${currentScore} / ${totalQuestionsCount}`;
   renderResultReviewList_();
 
@@ -13503,6 +13527,7 @@ function showResultScreen() {
   if (!AuthGateService.isValid()) {
     detailsEl.textContent = getResultSavedMessage_();
     BackendSyncStatus.refresh();
+    clearQuizSessionAnswers_();
     return;
   }
 
@@ -13526,11 +13551,13 @@ function showResultScreen() {
     if (!uiSettled && resultScreen.style.display !== 'none') {
       setResultDetails(getResultSavedMessage_(saveResult));
     }
+    clearQuizSessionAnswers_();
   }).catch(function () {
     clearTimeout(uiTimer);
     if (!uiSettled && resultScreen.style.display !== 'none') {
       setResultDetails('演習が終了しました。(一部通信エラーあり)');
     }
+    clearQuizSessionAnswers_();
   });
 }
 
@@ -13578,10 +13605,7 @@ document.getElementById('return-settings-btn').addEventListener('click', () => {
   if (window.VocabSettingsModule && VocabSettingsModule.refreshReviewSetCounts) {
     VocabSettingsModule.refreshReviewSetCounts();
   }
-  if (sessionPersistedToServer || !AuthGateService.isValid()) {
-    sessionAnswerLog = [];
-    vocabResultMarks_ = {};
-  }
+  clearQuizSessionAnswers_();
   BackendSyncStatus.refresh();
   const assignmentPanel = document.getElementById('assignment-panel');
   if (assignmentPanel && assignmentPanel.style.display !== 'none' && window.AssignmentModule) {
