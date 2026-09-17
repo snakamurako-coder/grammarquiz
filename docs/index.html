@@ -178,10 +178,31 @@ select { width: 100%; min-height: var(--tap); padding: 10px 12px; border: 1px so
 .filter-axis-hint { font-size: 0.82em; color: var(--c-text-sub); margin: 0 0 12px; line-height: 1.45; }
 .btn-primary { width: 100%; min-height: 54px; padding: 14px; font-size: 1.15em; font-weight: bold; background-color: var(--c-primary); color: white; border: none; border-radius: 10px; cursor: pointer; }
 #result-review-list { text-align: left; max-height: 55vh; overflow-y: auto; margin-bottom: 16px; }
+#assignment-review-screen-list { text-align: left; margin-bottom: 16px; }
 .result-review-item { border-radius: 10px; padding: 12px; margin-bottom: 10px; border-left: 4px solid #ccc; background: #fafafa; }
 .result-review-item.result-item-correct { border-left-color: var(--c-success); }
 .result-review-item.result-item-wrong { border-left-color: var(--c-danger); }
 .result-review-item.result-item-unknown { border-left-color: var(--c-warn); }
+.result-review-item.review-item-answered { border-left-color: var(--c-primary); }
+.result-review-item.review-item-unanswered { border-left-color: var(--c-danger); background: #fffcfc; }
+.review-item-answered .result-review-status { color: var(--c-primary); font-weight: bold; }
+.review-item-unanswered .result-review-status { color: var(--c-danger); font-weight: bold; }
+.review-card-edit-btn {
+  padding: 4px 12px;
+  font-size: 0.85em;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #b0bec5;
+  color: var(--c-text);
+  transition: all 0.15s ease;
+}
+.review-card-edit-btn:hover {
+  background: #e3f2fd;
+  border-color: var(--c-primary);
+  color: var(--c-primary);
+}
 .result-review-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-weight: bold; gap: 8px; }
 .result-review-head-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .result-review-mark-actions { display: flex; gap: 6px; }
@@ -3329,6 +3350,27 @@ body.live-room-board-active #login-screen { display: none !important; }
     </div>
     <div id="result-review-list" class="setting-section"></div>
     <button id="return-settings-btn" class="btn-primary">学習設定に戻る</button>
+  </div>
+
+  <!-- Assignment Review Screen (現在の回答一覧 / 回答状況確認画面) -->
+  <div id="assignment-review-screen" style="display: none;">
+    <div class="header-title">現在の回答一覧・提出確認</div>
+    <div class="setting-section" style="text-align: center;">
+      <h2 id="assignment-review-summary" style="font-size: 1.5em; color: var(--c-primary); margin-bottom: 8px;"></h2>
+      <p id="assignment-review-hint" style="font-size: 0.95em; color: var(--c-text-sub); margin-bottom: 16px;">
+        各問題の「修正 ✏️」ボタンからいつでも回答を変更できます。<br>
+        すべての回答を確認したら、「この内容で提出する」を押してください。
+      </p>
+      <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+        <button type="button" class="btn-secondary" id="assignment-review-back-top-btn" style="min-width: 140px; padding: 10px 18px;">← 問題に戻る</button>
+        <button type="button" class="btn-primary" id="assignment-review-submit-top-btn" style="min-width: 180px; padding: 10px 20px; background: #e91e63; border-color: #e91e63;">この内容で提出する</button>
+      </div>
+    </div>
+    <div id="assignment-review-screen-list" class="setting-section"></div>
+    <div style="display: flex; gap: 12px; justify-content: center; margin: 24px 0 32px; flex-wrap: wrap;">
+      <button type="button" class="btn-secondary" id="assignment-review-back-bottom-btn" style="min-width: 140px; padding: 10px 18px;">← 問題に戻る</button>
+      <button type="button" class="btn-primary" id="assignment-review-submit-bottom-btn" style="min-width: 180px; padding: 10px 20px; background: #e91e63; border-color: #e91e63;">この内容で提出する</button>
+    </div>
   </div>
 
   <!-- Reading Session Screen (token-based) -->
@@ -11625,6 +11667,14 @@ function clearQuizSessionAnswers_() {
     clearTimeout(pendingAdvanceTimer_);
     pendingAdvanceTimer_ = null;
   }
+  if (typeof hideAssignmentReviewScreen_ === 'function') {
+    hideAssignmentReviewScreen_();
+  } else {
+    const rev = document.getElementById('assignment-review-screen');
+    if (rev) rev.style.display = 'none';
+  }
+  const revList = document.getElementById('assignment-review-screen-list');
+  if (revList) revList.innerHTML = '';
   const modalEl = document.getElementById('assignment-answers-modal');
   if (modalEl) modalEl.style.display = 'none';
   const listEl = document.getElementById('assignment-answers-list');
@@ -12599,6 +12649,7 @@ elements.backBtn.addEventListener('click', () => {
   if (window.AssignmentModule && AssignmentModule.abandonActiveSession) {
     AssignmentModule.abandonActiveSession();
   }
+  if (typeof hideAssignmentReviewScreen_ === 'function') hideAssignmentReviewScreen_();
   screens.game.style.display = 'none';
   screens.settings.style.display = 'block';
   currentReviewSetId = null;
@@ -12956,7 +13007,13 @@ function normalizeExplanationField_(value) {
 }
 
 function buildVocabResultMarkButtons_(wordId) {
-  const mark = vocabResultMarks_[wordId];
+  let mark = vocabResultMarks_[wordId];
+  if (!mark && typeof window !== 'undefined' && window.ItemStateModule) {
+    const st = window.ItemStateModule.getState(wordId);
+    if (st && st.User_Mark) {
+      mark = st.User_Mark;
+    }
+  }
   const safeId = escapeHtml_(wordId);
   let html = '<div class="result-review-mark-actions">';
   html += '<button type="button" class="result-vocab-mark unknown' + (mark === 'unknown' ? ' active' : '') + '" data-word-id="' + safeId + '" data-mark="unknown" title="まだ覚えていない（X）">😫<span class="mark-shortcut-hint">Xキー⌨</span></button>';
@@ -12991,7 +13048,8 @@ function renderResultReviewList_() {
     return;
   }
   let html = '<div class="section-title">出題と回答</div>';
-  if (currentAppMode === 'vocab') {
+  const hasVocabMarks = sessionAnswerLog.some(function (it) { return !!it.wordId; });
+  if (currentAppMode === 'vocab' || hasVocabMarks) {
     html += '<p class="filter-axis-hint" style="margin-top:0;">各語の 👍 / 😫 で学習状態を登録できます（キーボード: C＝👍、X＝😫。行にフォーカスまたはポインタを合わせてください）。</p>';
   }
   sessionAnswerLog.forEach(function (item, i) {
@@ -13003,7 +13061,7 @@ function renderResultReviewList_() {
     html += '<div class="result-review-head"><span class="result-review-no">Q' + (i + 1) + '</span>';
     html += '<div class="result-review-head-right">';
     html += '<span class="result-review-status">' + statusLabel + '</span>';
-    if (currentAppMode === 'vocab' && item.wordId) {
+    if (item.wordId) {
       html += buildVocabResultMarkButtons_(item.wordId);
     }
     html += '</div></div>';
@@ -13098,7 +13156,7 @@ window.onQuestionCompleted = (isCorrect, meta) => {
     correctAnswer: meta.correctAnswer || getDefaultCorrectAnswer_(currentQ),
     isCorrect: !!isCorrect,
     isUnknown: !!meta.isUnknown,
-    wordId: currentQ && currentQ.wordId ? currentQ.wordId : '',
+    wordId: (currentQ && currentQ.wordId) ? currentQ.wordId : ((currentQ && currentQ.wordObj && currentQ.wordObj.wordId) ? currentQ.wordObj.wordId : ''),
     grammarArea: normalizeExplanationField_(currentQ && currentQ.grammarArea),
     explanation: normalizeExplanationField_(currentQ && currentQ.explanation)
   });
@@ -13391,43 +13449,120 @@ function handleQuizArrowNav_(key) {
 }
 window.handleQuizArrowNav_ = handleQuizArrowNav_;
 
+function hideAssignmentReviewScreen_() {
+  const revScreen = document.getElementById('assignment-review-screen');
+  if (revScreen) revScreen.style.display = 'none';
+  const modalEl = document.getElementById('assignment-answers-modal');
+  if (modalEl) modalEl.style.display = 'none';
+}
+window.hideAssignmentReviewScreen_ = hideAssignmentReviewScreen_;
+
 function showAssignmentReviewModal_() {
   commitCurrentModulePending_();
-  const listEl = document.getElementById('assignment-answers-list');
+  screens.game.style.display = 'none';
+  const revScreen = document.getElementById('assignment-review-screen');
+  if (revScreen) revScreen.style.display = 'block';
+
+  const summaryEl = document.getElementById('assignment-review-summary');
+  const listEl = document.getElementById('assignment-review-screen-list');
   let html = '';
-  
-  if (!currentQuestionDataList || !currentQuestionDataList.length) {
-    listEl.innerHTML = '<p>問題がありません。</p>';
-  } else {
-    currentQuestionDataList.forEach((q, i) => {
-      const ansItem = (sessionAnswerLog || []).find(a => a.index === (i + 1));
-      let userAnswerText = '<span style="color:#d32f2f; font-weight:bold;">（未回答）</span>';
-      if (ansItem && ansItem.userAnswer !== undefined && ansItem.userAnswer !== null && ansItem.userAnswer !== '') {
-        userAnswerText = escapeHtml_(String(ansItem.userAnswer));
-      } else if (ansItem && ansItem.isUnknown) {
-        userAnswerText = '（わからない）';
-      }
-      
-      html += '<div style="border-bottom: 1px solid #ddd; padding: 12px 0;">';
-      html += '<div style="font-weight: bold; color: var(--c-primary); margin-bottom: 4px;">Q' + (i + 1) + '</div>';
-      html += '<div style="font-size: 0.95em; margin-bottom: 8px;">' + escapeHtml_(getQuestionPrompt_(q)) + '</div>';
-      html += '<div style="background: #f4f6f8; padding: 8px; border-radius: 4px;">あなたの回答: ' + userAnswerText + '</div>';
-      html += '<div style="text-align: right; margin-top: 8px;"><button type="button" class="btn-secondary btn-sm" onclick="jumpToQuestionFromReview_(' + i + ')" style="padding: 4px 12px; font-size: 0.85em;">この問題へ戻る</button></div>';
-      html += '</div>';
-    });
-    listEl.innerHTML = html;
+
+  const total = (currentQuestionDataList || []).length;
+  let answeredCount = 0;
+
+  if (!total) {
+    if (summaryEl) summaryEl.textContent = '問題がありません';
+    if (listEl) listEl.innerHTML = '<p style="text-align:center; padding:20px; color:#888;">問題がありません。</p>';
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    return;
   }
-  
-  document.getElementById('assignment-answers-modal').style.display = 'flex';
+
+  currentQuestionDataList.forEach(function (q, i) {
+    const ansItem = (sessionAnswerLog || []).find(function (a) { return a.index === (i + 1); });
+    const isAnswered = ansItem && (
+      (ansItem.userAnswer !== undefined && ansItem.userAnswer !== null && ansItem.userAnswer !== '') ||
+      ansItem.isUnknown
+    );
+    if (isAnswered) answeredCount++;
+
+    const statusClass = isAnswered ? 'review-item-answered' : 'review-item-unanswered';
+    const statusLabel = isAnswered ? '✔ 回答済み' : '⚠ 未回答';
+    let userAnswerText = '<span style="color:var(--c-danger); font-weight:bold;">（未回答）</span>';
+    if (ansItem && ansItem.userAnswer !== undefined && ansItem.userAnswer !== null && ansItem.userAnswer !== '') {
+      userAnswerText = escapeHtml_(String(ansItem.userAnswer));
+    } else if (ansItem && ansItem.isUnknown) {
+      userAnswerText = '（わからない）';
+    }
+
+    html += '<div class="result-review-item ' + statusClass + '">';
+    html += '<div class="result-review-head">';
+    html += '<span class="result-review-no">Q' + (i + 1) + '</span>';
+    html += '<div class="result-review-head-right">';
+    html += '<span class="result-review-status">' + statusLabel + '</span>';
+    html += '<button type="button" class="review-card-edit-btn" onclick="jumpToQuestionFromReview_(' + i + ')" aria-label="Q' + (i + 1) + 'を修正">修正 ✏️</button>';
+    html += '</div></div>';
+    html += '<div class="result-review-prompt">' + escapeHtml_(getQuestionPrompt_(q)) + '</div>';
+    html += '<div class="result-review-answer"><span class="result-review-label">あなたの回答</span> ' + userAnswerText + '</div>';
+    html += '</div>';
+  });
+
+  if (summaryEl) {
+    const unansweredCount = total - answeredCount;
+    let summaryText = '回答状況: ' + answeredCount + ' / ' + total + ' 問 回答済み';
+    if (unansweredCount > 0) {
+      summaryEl.innerHTML = summaryText + ' <span style="color:var(--c-danger); font-size:0.85em; display:inline-block; margin-left:8px;">（未回答 ' + unansweredCount + ' 問）</span>';
+    } else {
+      summaryEl.innerHTML = summaryText + ' <span style="color:var(--c-success); font-size:0.85em; display:inline-block; margin-left:8px;">（全問回答済み）</span>';
+    }
+  }
+
+  if (listEl) listEl.innerHTML = html;
+  window.scrollTo({ top: 0, behavior: 'instant' });
 }
+window.showAssignmentReviewScreen_ = showAssignmentReviewModal_;
+
+function returnToGameFromReview_() {
+  hideAssignmentReviewScreen_();
+  screens.game.style.display = 'block';
+  window.scrollTo({ top: 0, behavior: 'instant' });
+}
+window.returnToGameFromReview_ = returnToGameFromReview_;
+
+function submitFromReviewScreen_() {
+  const total = (currentQuestionDataList || []).length;
+  let answered = 0;
+  for (let i = 0; i < total; i++) {
+    const item = (sessionAnswerLog || []).find(function (a) { return a.index === (i + 1); });
+    if (item && ((item.userAnswer !== undefined && item.userAnswer !== null && item.userAnswer !== '') || item.isUnknown)) {
+      answered++;
+    }
+  }
+  const unanswered = total - answered;
+  let msg = '現在の回答内容でテストを提出して終了します。よろしいですか？';
+  if (unanswered > 0) {
+    msg = '未回答の問題が ' + unanswered + ' 問あります。未回答のまま提出して終了しますか？';
+  }
+  if (!confirm(msg)) return;
+
+  if (window.commitCurrentModulePending_) {
+    window.commitCurrentModulePending_();
+  }
+  if (window.AssignmentModule && typeof window.AssignmentModule.clearTimer === 'function') {
+    window.AssignmentModule.clearTimer();
+  }
+  hideAssignmentReviewScreen_();
+  showResultScreen();
+}
+window.submitFromReviewScreen_ = submitFromReviewScreen_;
 
 window.jumpToQuestionFromReview_ = function(index) {
   if (pendingAdvanceTimer_) {
     clearTimeout(pendingAdvanceTimer_);
     pendingAdvanceTimer_ = null;
   }
-  document.getElementById('assignment-answers-modal').style.display = 'none';
-  if (index >= 0 && index < currentQuestionDataList.length) {
+  hideAssignmentReviewScreen_();
+  screens.game.style.display = 'block';
+  if (index >= 0 && currentQuestionDataList && index < currentQuestionDataList.length) {
     currentQuestionIndex = index;
     if (window.GameSessionPlay && typeof GameSessionPlay.syncToGlobalIndex === 'function') {
       GameSessionPlay.syncToGlobalIndex(index);
@@ -13435,6 +13570,7 @@ window.jumpToQuestionFromReview_ = function(index) {
     loadQuestionToGame(currentQuestionDataList[currentQuestionIndex]);
     if (window.persistSessionDraft_) window.persistSessionDraft_();
   }
+  window.scrollTo({ top: 0, behavior: 'instant' });
 };
 
 document.getElementById('next-btn').addEventListener('click', function () {
@@ -13443,24 +13579,22 @@ document.getElementById('next-btn').addEventListener('click', function () {
 const qPrevBtn = document.getElementById('q-prev-btn');
 const qNextBtn = document.getElementById('q-next-btn');
 const qReviewBtn = document.getElementById('q-review-answers-btn');
-const earlySubmitBtn = document.getElementById('assignment-early-submit-btn');
 
 if (qPrevBtn) qPrevBtn.addEventListener('click', function () { navigateQuizQuestion_(-1); });
 if (qNextBtn) qNextBtn.addEventListener('click', function () { navigateQuizQuestion_(1); });
 if (qReviewBtn) qReviewBtn.addEventListener('click', showAssignmentReviewModal_);
 
-if (earlySubmitBtn) {
-  earlySubmitBtn.addEventListener('click', function() {
-    if (confirm('現在の内容で提出して終了します。よろしいですか？')) {
-      document.getElementById('assignment-answers-modal').style.display = 'none';
-      if (window.AssignmentModule && typeof window.AssignmentModule.forceSubmitActiveSession === 'function') {
-        window.AssignmentModule.forceSubmitActiveSession().catch(function(e){ console.warn(e); });
-      } else {
-        showResultScreen();
-      }
-    }
-  });
-}
+const reviewBackTopBtn = document.getElementById('assignment-review-back-top-btn');
+const reviewBackBottomBtn = document.getElementById('assignment-review-back-bottom-btn');
+const reviewSubmitTopBtn = document.getElementById('assignment-review-submit-top-btn');
+const reviewSubmitBottomBtn = document.getElementById('assignment-review-submit-bottom-btn');
+const earlySubmitBtn = document.getElementById('assignment-early-submit-btn');
+
+if (reviewBackTopBtn) reviewBackTopBtn.addEventListener('click', returnToGameFromReview_);
+if (reviewBackBottomBtn) reviewBackBottomBtn.addEventListener('click', returnToGameFromReview_);
+if (reviewSubmitTopBtn) reviewSubmitTopBtn.addEventListener('click', submitFromReviewScreen_);
+if (reviewSubmitBottomBtn) reviewSubmitBottomBtn.addEventListener('click', submitFromReviewScreen_);
+if (earlySubmitBtn) earlySubmitBtn.addEventListener('click', submitFromReviewScreen_);
 
 function getResultSavedMessage_(saveResult) {
   if (saveResult && saveResult.reproduce) {
@@ -13512,7 +13646,15 @@ function showResultScreen() {
   const resultScreen = document.getElementById('result-screen');
   resultScreen.style.display = 'block';
 
-  // 回答一覧モーダルを非表示化・中身をリセット
+  // 回答一覧画面・モーダルを非表示化・中身をリセット
+  if (typeof hideAssignmentReviewScreen_ === 'function') {
+    hideAssignmentReviewScreen_();
+  } else {
+    const rev = document.getElementById('assignment-review-screen');
+    if (rev) rev.style.display = 'none';
+  }
+  const revList = document.getElementById('assignment-review-screen-list');
+  if (revList) revList.innerHTML = '';
   const modalEl = document.getElementById('assignment-answers-modal');
   if (modalEl) modalEl.style.display = 'none';
   const listEl = document.getElementById('assignment-answers-list');
@@ -15135,16 +15277,6 @@ window.forceLiveRoomTimeoutSubmit_ = async function () {
 };
 </script>
 <script src="paper-quiz-module.js"></script>
-  <div id="assignment-answers-modal" class="modal-overlay" style="display: none; z-index: 9999;">
-    <div class="modal-content" style="max-width: 800px; max-height: 80vh; overflow-y: auto;">
-      <h2>現在の回答一覧</h2>
-      <p style="margin-bottom: 10px; color: #666; font-size: 0.9em;">現在の回答状況です。空欄や間違いがないか確認してください。</p>
-      <div id="assignment-answers-list" style="margin-bottom: 20px;"></div>
-      <div style="display: flex; justify-content: flex-end; gap: 10px;">
-        <button type="button" class="btn-secondary" onclick="document.getElementById('assignment-answers-modal').style.display='none'">戻る</button>
-        <button type="button" class="btn-primary" id="assignment-early-submit-btn" style="background-color: var(--c-success);">この内容で提出する</button>
-      </div>
-    </div>
-  </div>
+
 </body>
 </html>

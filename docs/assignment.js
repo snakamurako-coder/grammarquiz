@@ -982,6 +982,7 @@ const AssignmentModule = (function () {
       if (resultScreen) resultScreen.style.display = 'none';
       const readingScreen = document.getElementById('reading-screen');
       if (readingScreen) readingScreen.style.display = 'none';
+      if (window.hideAssignmentReviewScreen_) window.hideAssignmentReviewScreen_();
       screens.game.style.display = 'block';
 
       setAssignmentSessionBanner_(a, {
@@ -1080,6 +1081,7 @@ const AssignmentModule = (function () {
     if (resultScreen) resultScreen.style.display = 'none';
     const readingScreen = document.getElementById('reading-screen');
     if (readingScreen) readingScreen.style.display = 'none';
+    if (window.hideAssignmentReviewScreen_) window.hideAssignmentReviewScreen_();
     screens.game.style.display = 'block';
 
     const banner = document.getElementById('assignment-session-banner');
@@ -1195,7 +1197,7 @@ const AssignmentModule = (function () {
       points: activeSession_.pointsEarned,
       pointsMax: activeSession_.pointsMax,
       durationSec: durationSec,
-      timedOut: !!opts.timedOut,
+      timedOut: !!(opts.timedOut || (activeSession_ && activeSession_._timedOut)),
       rangeComplete: a.Kind === 'homework' ? rangeComplete_() : false,
       progress: local,
       detail: {
@@ -1299,15 +1301,10 @@ const AssignmentModule = (function () {
     
     const nextBtn = document.getElementById('next-btn');
     if (nextBtn) nextBtn.style.display = 'none';
-    const res = await finishActiveSession_({ timedOut: true });
+    clearTimer_();
+    if (activeSession_) activeSession_._timedOut = true;
+    if (window.hideAssignmentReviewScreen_) window.hideAssignmentReviewScreen_();
     showResultScreen();
-    if (!isPreview && res && res.data) {
-      const d = res.data;
-      const passed = d.passedThisAttempt || d.resultStatus === 'clear' || d.resultStatus === 'passed';
-      showToast_('時間切れ提出: ' + (passed ? 'クリア' : '未達')
-        + ' / ' + (d.score != null ? d.score : 0) + '%'
-        + (d.points != null ? (' / ' + d.points + '点') : ''));
-    }
     await refreshList();
   }
 
@@ -1357,6 +1354,7 @@ const AssignmentModule = (function () {
     bindUi: bindUi,
     isActive: isActive,
     getActive: getActive,
+    clearTimer: clearTimer_,
     onAnswered: onAnswered,
     finalizeIfActive: finalizeIfActive,
     forceSubmitActiveSession: forceSubmitActiveSession_,
