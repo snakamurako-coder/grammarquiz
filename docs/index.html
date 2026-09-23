@@ -2238,6 +2238,16 @@ body.live-room-board-active #login-screen { display: none !important; }
   margin-bottom: 10px;
 }
 .asg-report-hint { font-size: 0.8em; color: #666; margin-top: 4px; }
+.asg-recover-banner {
+  background: #e8f5e9;
+  border: 1px solid #81c784;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 0 0 12px;
+}
+.asg-recover-banner[hidden] { display: none !important; }
+.asg-recover-banner p { margin: 0 0 8px; font-size: 0.9em; color: #1b5e20; line-height: 1.5; }
+.asg-recover-banner .asg-report-hint { color: #2e7d32; margin-top: 8px; }
 .answer-feedback { display: none; }
 .answer-feedback.is-visible { display: block; margin: 8px 0 14px; }
 #question-explanation { background: #fff8e1; border-left: 4px solid #ffb300; padding: 12px 14px; border-radius: 8px; margin-top: 8px; font-size: 0.9em; line-height: 1.6; color: var(--c-text); text-align: left; }
@@ -2977,6 +2987,11 @@ body.live-room-board-active #login-screen { display: none !important; }
           <button type="button" id="assignment-refresh-btn" class="btn-small" style="font-weight:normal;">更新</button>
         </div>
         <p style="font-size:0.9em;color:#666;margin:0 0 12px;">管理者が出した課題に取り組みます。A宿題は範囲を分割して消化できます。B小テストは制限時間・合格ラインがあります。達成後は「再現」で同じ内容に再挑戦できます（成績には反映されません）。</p>
+        <div id="assignment-recover-banner" class="asg-recover-banner" hidden>
+          <p>ノルマ達成済みの小テストが、管理者シートにまだ届いていない可能性があります。<strong>受け直す必要はありません。</strong>期限後でも、記録の再送だけは送れます。下のボタン1回で報告できます（<span id="assignment-recover-count">0</span>件）。同じ端末の記録、または Drive に残った学習記録から集めます。</p>
+          <button type="button" id="assignment-recover-btn" class="btn-primary">達成を管理者に報告する</button>
+          <p id="assignment-recover-status" class="asg-report-hint"></p>
+        </div>
         <div id="assignment-session-resume-banner" class="vocab-session-resume-banner" style="display:none;" role="status">
           <span id="assignment-session-resume-text"></span>
           <span class="vocab-session-resume-actions">
@@ -13342,6 +13357,8 @@ async function saveSessionResultsUnified(modeOverride, setNameOverride, liveExtr
     setId: summary.Set_ID,
     setName: summary.Set_Name,
     mode: summary.Mode,
+    Correct: summary.Correct,
+    Total: summary.Total,
     score: summary.Score,
     correctRate: summary.Score,
     durationSec: summary.Duration_Sec,

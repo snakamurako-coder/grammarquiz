@@ -8,6 +8,8 @@ const AssignmentModule = (function () {
   let listCache_ = [];
   let listRefreshWarn_ = null;
   let listRefreshPromise_ = null;
+  let driveQuizLogsPromise_ = null;
+  let driveQuizLogsAccount_ = '';
   let activeSession_ = null;
   let timerId_ = null;
   let finishSessionPromise_ = null;
@@ -355,6 +357,7 @@ const AssignmentModule = (function () {
     return { label: '取組中', css: 'asg-status-in-progress' };
   }
 
+  /** 期限後でも再送は許可（受け直しは start 側で拒否）。期間は見ない。 */
   function canReportAchievement_(row, passState) {
     const a = row.assignment || {};
     if (a.Kind !== 'quiz') return false;
@@ -364,12 +367,219 @@ const AssignmentModule = (function () {
     return clearN >= required || !!passState.pendingAchievement;
   }
 
+  function currentAccount_() {
+    const user = (window.AuthGateService && AuthGateService.getUser && AuthGateService.getUser()) || {};
+    return String(user.account || '').toLowerCase();
+  }
+
+  function parseAssignmentSessionLog_(log) {
+    let detail = {};
+    try {
+      const raw = log && (log['詳細'] || log.detail);
+      detail = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw || {});
+    } catch (e) {
+      detail = {};
+    }
+    const settings = (detail && detail.settings && typeof detail.settings === 'object')
+      ? detail.settings : {};
+    const setId = String(detail.Set_ID || detail.setId || '');
+    let assignmentId = String(settings.assignmentId || '').trim();
+    if (!assignmentId && setId.indexOf('assignment:') === 0) {
+      assignmentId = setId.slice('assignment:'.length);
+    }
+    const mode = String((log && (log['モード'] || log.Mode)) || detail.Mode || detail.mode || '').toLowerCase();
+    const scoreRaw = (log && (log['正答率'] != null ? log['正答率'] : log.Score)) != null
+      ? (log['正答率'] != null ? log['正答率'] : log.Score)
+      : (detail.Score != null ? detail.Score : detail.score);
+    const score = parseInt(scoreRaw, 10);
+    const durationSec = Math.max(0, parseInt(
+      (log && (log['解答時間'] != null ? log['解答時間'] : log.durationSec))
+        || detail.Duration_Sec || detail.durationSec || 0,
+      10
+    ) || 0);
+    const correct = Math.max(0, parseInt(detail.Correct != null ? detail.Correct : detail.correct, 10) || 0);
+    const total = Math.max(0, parseInt(detail.Total != null ? detail.Total : detail.total, 10) || 0);
+    const points = Math.max(0, parseInt(detail.points != null ? detail.points : detail.Points, 10) || 0);
+    return {
+      assignmentId: assignmentId,
+      setName: String((log && (log['学習セット名'] || log.Set_Name)) || detail.Set_Name || detail.setName || settings.title || ''),
+      mode: mode,
+      assignmentKind: String(settings.assignmentKind || '').toLowerCase(),
+      preview: !!(settings.preview || settings.reproduce),
+      score: isNaN(score) ? null : score,
+      durationSec: durationSec,
+      correct: correct,
+      total: total,
+      points: points,
+      at: String((log && log['タイムスタンプ']) || '')
+    };
+  }
+
+  function logMatchesQuizAssignment_(parsed, a) {
+    if (!parsed || parsed.preview) return false;
+    if (parsed.assignmentKind === 'homework') return false;
+    if (parsed.mode === 'assignment-homework' || parsed.mode === '宿題') return false;
+    const aid = String(a.Assignment_ID || '');
+    if (parsed.assignmentId) return parsed.assignmentId === aid;
+    if (parsed.assignmentKind === 'quiz' && parsed.setName && parsed.setName === String(a.Title || '')) return true;
+    if ((parsed.mode === 'assignment-quiz' || parsed.mode === '小テスト')
+        && parsed.setName && parsed.setName === String(a.Title || '')) return true;
+    return false;
+  }
+
+  function logCountsAsQuizPass_(a, parsed) {
+    if (!logMatchesQuizAssignment_(parsed, a)) return false;
+    if (a.Pass_Mode === 'points') {
+      if (parsed.points > 0) return parsed.points >= a.Pass_Score;
+      return false;
+    }
+    if (parsed.score == null) return false;
+    return parsed.score >= a.Pass_Score;
+  }
+
+  async function loadDriveAssignmentLogs_() {
+    const account = currentAccount_();
+    if (driveQuizLogsPromise_ && driveQuizLogsAccount_ === account) return driveQuizLogsPromise_;
+    driveQuizLogsAccount_ = account;
+    driveQuizLogsPromise_ = (async function () {
+      try {
+        if (!window.UserDriveModule || typeof UserDriveModule.hasCachedToken !== 'function'
+            || !UserDriveModule.hasCachedToken()) {
+          return [];
+        }
+        if (!window.UserBridge || typeof UserBridge.call !== 'function') return [];
+        const res = await Promise.race([
+          UserBridge.call('scanAssignmentQuizLogs', {}),
+          new Promise(function (resolve) {
+            setTimeout(function () { resolve({ status: 'timeout' }); }, 10000);
+          })
+        ]);
+        if (!res || res.status !== 'success' || !Array.isArray(res.data)) return [];
+        return res.data;
+      } catch (e) {
+        return [];
+      }
+    })();
+    return driveQuizLogsPromise_;
+  }
+
+  function mergeDriveClearsIntoPassState_(a, logs) {
+    if (!a || a.Kind !== 'quiz') return loadPassState_(a.Assignment_ID);
+    const passState = loadPassState_(a.Assignment_ID);
+    if (passState.serverAchieved) return passState;
+    const parsedLogs = (logs || []).map(parseAssignmentSessionLog_);
+    const driveClears = [];
+    parsedLogs.forEach(function (parsed) {
+      if (!logCountsAsQuizPass_(a, parsed)) return;
+      driveClears.push({
+        at: parsed.at || '',
+        score: parsed.score,
+        durationSec: parsed.durationSec,
+        correct: parsed.correct,
+        total: parsed.total,
+        points: parsed.points,
+        fromDrive: true
+      });
+    });
+    if (driveClears.length > (passState.clearCount || 0)) {
+      passState.clearCount = driveClears.length;
+      passState.clears = driveClears;
+      if (!passState.pendingAchievement && driveClears.length) {
+        const last = driveClears[driveClears.length - 1];
+        passState.pendingAchievement = {
+          correct: last.correct || last.score || 0,
+          total: last.total || 100,
+          points: last.points || 0,
+          pointsMax: 0,
+          durationSec: last.durationSec || 0,
+          detail: { recordType: 'achievement', recoveredFrom: 'drive' },
+          clearCount: passState.clearCount
+        };
+      }
+      savePassState_(a.Assignment_ID, passState);
+    }
+    return passState;
+  }
+
+  function listLocalPassAssignmentIds_() {
+    const account = currentAccount_() || 'anon';
+    const suffix = ':' + account;
+    const ids = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || key.indexOf(PASS_PREFIX) !== 0) continue;
+        if (key.slice(-suffix.length) !== suffix) continue;
+        const assignmentId = key.slice(PASS_PREFIX.length, key.length - suffix.length);
+        if (assignmentId) ids.push(assignmentId);
+      }
+    } catch (e) {}
+    return ids;
+  }
+
+  function collectOrphanReportableIds_(rows) {
+    const listed = {};
+    (rows || []).forEach(function (row) {
+      const a = row.assignment || {};
+      if (a.Assignment_ID) listed[a.Assignment_ID] = true;
+    });
+    const orphans = [];
+    listLocalPassAssignmentIds_().forEach(function (id) {
+      if (listed[id]) return;
+      const passState = loadPassState_(id);
+      if (passState.serverAchieved) return;
+      if (passState.pendingAchievement || (passState.clearCount || 0) >= 3) orphans.push(id);
+    });
+    return orphans;
+  }
+
+  function collectReportableQuizRows_(rows) {
+    const out = [];
+    (rows || []).forEach(function (row) {
+      const a = row.assignment || {};
+      if (a.Kind !== 'quiz') return;
+      const passState = loadPassState_(a.Assignment_ID);
+      if (canReportAchievement_(row, passState)) out.push(row);
+    });
+    collectOrphanReportableIds_(rows).forEach(function (id) {
+      out.push({ assignment: { Assignment_ID: id, Kind: 'quiz' }, serverAchieved: false });
+    });
+    return out;
+  }
+
+  function updateRecoverBanner_(rows) {
+    const banner = document.getElementById('assignment-recover-banner');
+    if (!banner) return;
+    const reportable = collectReportableQuizRows_(rows);
+    banner.hidden = reportable.length === 0;
+    const countEl = document.getElementById('assignment-recover-count');
+    if (countEl) countEl.textContent = String(reportable.length);
+  }
+
+  async function recoverQuizPassFromDrive_(rows) {
+    const pending = (rows || []).filter(function (row) {
+      const a = row.assignment || {};
+      return a.Kind === 'quiz' && !row.serverAchieved && !loadPassState_(a.Assignment_ID).serverAchieved;
+    });
+    if (!pending.length) return false;
+    const logs = await loadDriveAssignmentLogs_();
+    if (!logs.length) return false;
+    let changed = false;
+    pending.forEach(function (row) {
+      const before = loadPassState_(row.assignment.Assignment_ID).clearCount || 0;
+      const after = mergeDriveClearsIntoPassState_(row.assignment, logs);
+      if ((after.clearCount || 0) > before) changed = true;
+    });
+    return changed;
+  }
+
   async function refreshList() {
     if (listRefreshPromise_) return listRefreshPromise_;
     const wrap = document.getElementById('assignment-list');
     if (!wrap) return;
     if (!AuthGateService.isValid()) {
       wrap.innerHTML = '<p>ログインすると課題が表示されます。</p>';
+      updateRecoverBanner_([]);
       return;
     }
     if (!listCache_.length) wrap.innerHTML = '<p>読込中...</p>';
@@ -379,13 +589,22 @@ const AssignmentModule = (function () {
         listCache_ = sortAssignmentRows_(res.data || []);
         listRefreshWarn_ = null;
         renderList_(listCache_);
+        updateRecoverBanner_(listCache_);
+        recoverQuizPassFromDrive_(listCache_).then(function (recovered) {
+          if (recovered) renderList_(listCache_);
+          updateRecoverBanner_(listCache_);
+        }).catch(function (e) {
+          console.warn('小テスト達成の復元:', e);
+        });
       } catch (e) {
         if (listCache_.length) {
           listRefreshWarn_ = String(e.message || e);
           renderList_(listCache_);
+          updateRecoverBanner_(listCache_);
         } else {
           wrap.innerHTML = '<p style="color:#c62828;">課題の取得に失敗: ' + escapeHtml_(e.message || e) + '</p>'
             + '<p class="hint" style="font-size:.85em;color:#666;margin-top:8px;">通信状況を確認して「更新」を押してください。</p>';
+          updateRecoverBanner_([]);
         }
       } finally {
         listRefreshPromise_ = null;
@@ -615,7 +834,11 @@ const AssignmentModule = (function () {
         html += '</div>';
       }
       if (showReport && !serverReported) {
-        html += '<p class="asg-report-hint">ノルマ達成済みですがサーバー未確認の場合は「再度報告」を押してください。</p>';
+        if (phase === 'expired') {
+          html += '<p class="asg-report-hint">期限後です。受け直しはできませんが、すでにノルマ達成した記録の再送だけ例外として送れます。「再度報告」を押してください。</p>';
+        } else {
+          html += '<p class="asg-report-hint">ノルマ達成済みですがサーバー未確認の場合は「再度報告」を押してください。</p>';
+        }
       }
       if (achieved) {
         html += '<p class="asg-report-hint">達成済みです。「再現」で同じ課題範囲に再挑戦できます（成績・進捗には反映されません）。</p>';
@@ -691,7 +914,8 @@ const AssignmentModule = (function () {
     });
   }
 
-  async function reportAchievement_(row) {
+  async function reportAchievement_(row, opts) {
+    opts = opts || {};
     const a = row.assignment;
     if (!a || a.Kind !== 'quiz') throw new Error('小テスト以外は報告できません');
     const passState = loadPassState_(a.Assignment_ID);
@@ -701,15 +925,22 @@ const AssignmentModule = (function () {
       throw new Error('ノルマ（' + required + '回クリア）に達していません（現在 ' + clearCount + ' 回）');
     }
     const pending = passState.pendingAchievement || {};
+    const lastClear = (passState.clears && passState.clears.length)
+      ? passState.clears[passState.clears.length - 1]
+      : {};
+    const correct = pending.correct != null ? pending.correct
+      : (lastClear.correct || lastClear.score || 0);
+    const total = pending.total != null ? pending.total
+      : (lastClear.total || (lastClear.score != null ? 100 : 0));
     const res = await postWithRetry_({
       action: 'reportQuizAchievement',
       assignmentId: a.Assignment_ID,
       clearCount: clearCount,
-      correct: pending.correct,
-      total: pending.total,
-      points: pending.points,
+      correct: correct,
+      total: total,
+      points: pending.points != null ? pending.points : lastClear.points,
       pointsMax: pending.pointsMax,
-      durationSec: pending.durationSec || 0,
+      durationSec: pending.durationSec || lastClear.durationSec || 0,
       resubmit: true,
       detail: pending.detail || { recordType: 'achievement', resubmit: true }
     }, 1);
@@ -717,15 +948,53 @@ const AssignmentModule = (function () {
     passState.serverAchieved = !!(d.serverAchieved || d.serverRecorded || d.alreadyAchieved);
     passState.pendingAchievement = null;
     savePassState_(a.Assignment_ID, passState);
-    if (d.alreadyAchieved) {
-      showToast_('サーバーには既に達成記録があります');
-    } else if (d.serverRecorded) {
-      showToast_('達成をサーバーに報告しました');
+    if (!opts.silentToast) {
+      if (d.alreadyAchieved) {
+        showToast_('サーバーには既に達成記録があります');
+      } else if (d.serverRecorded) {
+        showToast_('達成をサーバーに報告しました');
+      } else {
+        showToast_('報告を受け付けました');
+      }
+    }
+    if (!opts.skipRefresh) await refreshList();
+    return res;
+  }
+
+  async function reportAllPendingAchievements_() {
+    const rows = collectReportableQuizRows_(listCache_);
+    if (!rows.length) {
+      showToast_('報告が必要な小テストはありません');
+      updateRecoverBanner_(listCache_);
+      return { ok: 0, fail: 0 };
+    }
+    let ok = 0;
+    let fail = 0;
+    const errors = [];
+    for (let i = 0; i < rows.length; i++) {
+      try {
+        await reportAchievement_(rows[i], { skipRefresh: true, silentToast: true });
+        ok++;
+      } catch (e) {
+        fail++;
+        errors.push((rows[i].assignment && rows[i].assignment.Title) + ': ' + (e.message || e));
+      }
+    }
+    if (ok && !fail) {
+      showToast_(ok + '件の達成を管理者に報告しました');
+    } else if (ok && fail) {
+      showToast_(ok + '件を報告、' + fail + '件は失敗しました');
     } else {
-      showToast_('報告を受け付けました');
+      showToast_('報告に失敗しました' + (errors[0] ? '（' + errors[0] + '）' : ''));
+    }
+    const statusEl = document.getElementById('assignment-recover-status');
+    if (statusEl) {
+      statusEl.textContent = fail
+        ? ('成功 ' + ok + '件 / 失敗 ' + fail + '件。通信できるときにもう一度押してください。')
+        : (ok ? '報告が完了しました。' : '');
     }
     await refreshList();
-    return res;
+    return { ok: ok, fail: fail };
   }
 
   async function buildQuestionsFromSections_(sections, opts) {
@@ -1336,6 +1605,13 @@ const AssignmentModule = (function () {
       btn._bound = true;
       btn.addEventListener('click', function () {
         BusyButton.run(btn, refreshList, '更新中…');
+      });
+    }
+    const recoverBtn = document.getElementById('assignment-recover-btn');
+    if (recoverBtn && !recoverBtn._bound) {
+      recoverBtn._bound = true;
+      recoverBtn.addEventListener('click', function () {
+        BusyButton.run(recoverBtn, reportAllPendingAchievements_, '報告中…');
       });
     }
     if (!bindUi._visibilityBound) {

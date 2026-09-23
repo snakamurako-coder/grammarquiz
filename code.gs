@@ -3234,11 +3234,12 @@ function apiReportQuizAchievement_(requestData) {
       break;
     }
   }
-  if (!asg || asg.Active !== 1) return { status: 'error', message: '課題が無効または見つかりません' };
+  if (!asg) return { status: 'error', message: '課題が見つかりません' };
   if (asg.Kind !== 'quiz') return { status: 'error', message: '小テスト以外は再度報告できません' };
   if (!isAssignmentTargetMatch_(asg, user)) {
     return { status: 'error', message: 'この課題の配布対象ではありません' };
   }
+  /** 期限・公開終了後の再送は例外として許可。受け直し（start）は期間外で拒否する。 */
   const sheet = ss.getSheetByName('assignment_submissions');
   const existing = hasAssignmentAchievement_(sheet, assignmentId, account);
   if (existing) {
@@ -4171,16 +4172,16 @@ function checkCellLooksSubmitted_(value) {
 }
 
 function writeCheckCellIfEmpty_(sheet, row, col, value) {
-  if (!row || !col || value === '' || value == null) return false;
+  if (!row || !col || value === '' || value == null) return { ok: false, wrote: false };
   const cell = sheet.getRange(row, col);
   const cur = cell.getValue();
-  if (checkCellIsProtected_(cur)) return true;
+  if (checkCellIsProtected_(cur)) return { ok: true, wrote: false };
   const s = String(cur == null ? '' : cur).trim();
   if (s === '■' || s === '') {
     cell.setValue(value);
-    return true;
+    return { ok: true, wrote: true };
   }
-  return true;
+  return { ok: true, wrote: false };
 }
 
 function applyCheckTargetMarks_(sheet, col, asg, students, idMap) {
@@ -4381,7 +4382,7 @@ function exportPendingCheckSubmissions_(opts) {
     let pendingLeft = 0;
     for (let i = 0; i < subs.length; i++) {
       const row = subs[i];
-      if (isCheckExportedFlag_(row.Check_Exported)) {
+      if (!opts.force && isCheckExportedFlag_(row.Check_Exported)) {
         skipped++;
         continue;
       }
@@ -4400,16 +4401,20 @@ function exportPendingCheckSubmissions_(opts) {
       });
       if (!dests.length) continue;
       let okAll = true;
+      let wroteAny = false;
       dests.forEach(function (d) {
         const idMap = ensureCheckRosterRows_(d.sheet, d.students);
         const studentRow = idMap[account];
         const col = ensureCheckTaskColumn_(d.sheet, asg);
         const val = checkValueForKind_(d.cfg.Kind, row);
-        if (!writeCheckCellIfEmpty_(d.sheet, studentRow, col, val)) okAll = false;
+        const wr = writeCheckCellIfEmpty_(d.sheet, studentRow, col, val);
+        if (!wr || !wr.ok) okAll = false;
+        if (wr && wr.wrote) wroteAny = true;
       });
       if (okAll && exportedCol > 0) {
         subSheet.getRange(row._row, exportedCol).setValue(1);
-        exported++;
+        if (wroteAny) exported++;
+        else skipped++;
       } else {
         pendingLeft++;
       }
@@ -4515,13 +4520,17 @@ function apiAdminSaveCheckSheetSettings(settings) {
   }
 }
 
-function apiAdminSyncCheckSheetsNow() {
+function apiAdminSyncCheckSheetsNow(opts) {
   try {
     const access = checkDashboardAccess_();
     if (!access.allowed || !isAssignmentAdminEmail_(access.email)) {
       return { status: 'error', message: '管理者権限が必要です（whitelist の class=admin）' };
     }
-    return exportPendingCheckSubmissions_({ source: 'manual' });
+    opts = opts || {};
+    return exportPendingCheckSubmissions_({
+      source: 'manual',
+      force: opts.force === true || opts.force === 1 || opts.force === '1'
+    });
   } catch (e) {
     return { status: 'error', message: e.toString() };
   }

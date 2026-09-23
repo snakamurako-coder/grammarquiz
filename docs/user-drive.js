@@ -1585,6 +1585,18 @@ const UserDriveModule = (function () {
     };
   }
 
+  function isAssignmentSessionLog_(log) {
+    const mode = String((log && log['モード']) || '').toLowerCase();
+    if (mode.indexOf('assignment') === 0 || mode === '小テスト' || mode === '宿題') return true;
+    try {
+      const d = JSON.parse((log && log['詳細']) || '{}');
+      const setId = String((d && (d.Set_ID || d.setId)) || '');
+      if (setId.indexOf('assignment:') === 0) return true;
+      if (d && d.settings && d.settings.kind === 'assignment') return true;
+    } catch (e) {}
+    return false;
+  }
+
   async function opGetLearningLogs_() {
     const bookId = await getLogBookId_();
     await ensureLogBookReady_(bookId);
@@ -1594,6 +1606,21 @@ const UserDriveModule = (function () {
     const logs = [];
     for (let i = values.length - 1; i >= 1 && logs.length < 60; i--) {
       logs.push(normalizeSessionLog_(rowToObj_(headers, values[i])));
+    }
+    return { status: 'success', data: logs };
+  }
+
+  /** 小テスト達成の事後報告用。マイページの直近60件制限をかけず、課題セッションだけ返す */
+  async function opScanAssignmentQuizLogs_() {
+    const bookId = await getLogBookId_();
+    await ensureLogBookReady_(bookId);
+    const values = await sheetsValuesGet_(bookId, SESSION_LOG_SHEET + '!A:F');
+    if (values.length <= 1) return { status: 'success', data: [] };
+    const headers = values[0];
+    const logs = [];
+    for (let i = 1; i < values.length; i++) {
+      const log = normalizeSessionLog_(rowToObj_(headers, values[i]));
+      if (isAssignmentSessionLog_(log)) logs.push(log);
     }
     return { status: 'success', data: logs };
   }
@@ -1687,6 +1714,7 @@ const UserDriveModule = (function () {
         case 'getVocabWords': return await opGetVocabWords_(payload || {});
         case 'registerVocabWords': return await opRegisterVocabWords_(payload || {});
         case 'getLearningLogs': return await opGetLearningLogs_();
+        case 'scanAssignmentQuizLogs': return await opScanAssignmentQuizLogs_();
         case 'getItemStates': return await opGetItemStates_(payload || {});
         case 'upsertItemStates': return await opUpsertItemStates_(payload || {});
         case 'saveSessionLog': return await opSaveSessionLog_(payload || {});

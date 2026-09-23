@@ -434,6 +434,7 @@ body.live-board-open .live-dash-section {
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
       <button type="button" id="check-save-btn" class="btn-small">設定を保存して名簿を整備</button>
       <button type="button" id="check-sync-btn" class="btn-small">未転記分を今すぐ転記</button>
+      <button type="button" id="check-resync-btn" class="btn-small">達成済みを点検票へ再転記</button>
     </div>
   </div>
 
@@ -918,7 +919,7 @@ async function loadCheckSheetSettings() {
     document.getElementById('check-year').value = d.year || '';
     checkAggRows_ = Array.isArray(d.aggregations) ? d.aggregations.slice() : [];
     renderCheckAggList_();
-    document.getElementById('check-trigger-status').textContent = '提出の転記は、Apps Script の時間トリガーで syncCheckSheetsPending を定時実行してください（自動作成しません）。整備時に ■ / 空欄 / ○ も更新します。';
+    document.getElementById('check-trigger-status').textContent = '提出の転記は、Apps Script の時間トリガーで syncCheckSheetsPending を定時実行してください（自動作成しません）。整備時に ■ / 空欄 / ○ も更新します。「達成済みを点検票へ再転記」は空欄だけ埋め、既存の ○／休／× は上書きしません。';
     fillCheckBookLinks_(d);
   } catch (e) {
     document.getElementById('check-trigger-status').textContent = '点検票設定の読込に失敗: ' + (e.message || e);
@@ -953,18 +954,20 @@ async function saveCheckSheetSettings() {
   }
 }
 
-async function syncCheckSheetsNow() {
-  var btn = document.getElementById('check-sync-btn');
+async function syncCheckSheetsNow(force) {
+  var btnId = force ? 'check-resync-btn' : 'check-sync-btn';
+  var btn = document.getElementById(btnId);
   var prev = btn ? btn.textContent : '';
   if (btn) {
     btn.disabled = true;
-    btn.textContent = '転記中…';
+    btn.textContent = force ? '再転記中…' : '転記中…';
   }
   try {
-    var result = await gasRun('apiAdminSyncCheckSheetsNow');
+    var result = await gasRun('apiAdminSyncCheckSheetsNow', force ? { force: true } : {});
     if (result.status !== 'success') throw new Error(result.message);
     var d = result.data || {};
-    showBanner('転記しました（今回 ' + (d.exported || 0) + ' 件、未処理 ' + (d.pendingLeft || 0) + ' 件）', true);
+    var prefix = force ? '再転記しました' : '転記しました';
+    showBanner(prefix + '（今回 ' + (d.exported || 0) + ' 件、未処理 ' + (d.pendingLeft || 0) + ' 件）', true);
     fillCheckBookLinks_({ aggregations: d.destinations || [] });
     await loadCheckSheetSettings();
   } catch (e) {
@@ -972,7 +975,7 @@ async function syncCheckSheetsNow() {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.textContent = prev || '未転記分を今すぐ転記';
+      btn.textContent = prev || (force ? '達成済みを点検票へ再転記' : '未転記分を今すぐ転記');
     }
   }
 }
@@ -1588,7 +1591,8 @@ document.addEventListener('DOMContentLoaded', function() {
   bindIf_('sub-refresh-btn', 'click', loadSubmissions);
   bindIf_('refresh-summaries-btn', 'click', loadSummaries);
   bindIf_('check-save-btn', 'click', saveCheckSheetSettings);
-  bindIf_('check-sync-btn', 'click', syncCheckSheetsNow);
+  bindIf_('check-sync-btn', 'click', function () { syncCheckSheetsNow(false); });
+  bindIf_('check-resync-btn', 'click', function () { syncCheckSheetsNow(true); });
   bindIf_('check-agg-add-btn', 'click', addCheckAggregationRow_);
   bindIf_('live-open-btn', 'click', openLiveRoom_);
   bindIf_('live-refresh-btn', 'click', function () {
