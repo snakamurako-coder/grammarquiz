@@ -2987,12 +2987,32 @@ function slimSubmissionForAdmin_(row) {
   };
 }
 
+/** 提出一覧用: Progress_JSON / Detail_JSON を読まない（巨大セルでタイムアウトしやすい） */
+function sheetAdminSubmissionRows_(sheet) {
+  if (!sheet) return [];
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return [];
+  const core = sheet.getRange(1, 1, lastRow, 12).getValues();
+  const submitted = sheet.getRange(1, 15, lastRow, 1).getValues();
+  const headers = SUBMISSION_HEADERS;
+  const rows = [];
+  for (let i = 1; i < core.length; i++) {
+    const obj = { _row: i + 1 };
+    for (let j = 0; j < 12; j++) {
+      if (headers[j]) obj[headers[j]] = core[i][j];
+    }
+    obj.Submitted_At = submitted[i][0];
+    rows.push(obj);
+  }
+  return rows;
+}
+
 function apiAdminListSubmissions_(requestData) {
   const admin = requireAssignmentAdminFromRequest_(requestData || {});
   if (!admin.ok) return { status: 'error', message: admin.error };
   const assignmentId = String((requestData && requestData.assignmentId) || '').trim();
   const ss = openAppSpreadsheet_({ skipEnsure: true });
-  let rows = sheetRowsToObjects_(ss.getSheetByName('assignment_submissions'));
+  let rows = sheetAdminSubmissionRows_(ss.getSheetByName('assignment_submissions'));
   if (assignmentId) {
     rows = rows.filter(function (r) { return String(r.Assignment_ID) === assignmentId; });
   }
