@@ -456,6 +456,15 @@ const PAGES_URL = '<?= PAGES_URL ?>';
 
 function gasRun(fnName) {
   var args = Array.prototype.slice.call(arguments, 1);
+  var timeoutMs = 25000;
+  if (args.length && typeof args[args.length - 1] === 'number' && args[args.length - 1] > 0) {
+    timeoutMs = args.pop();
+  }
+  var slowOps = {
+    apiAdminSyncCheckSheetsNow: 120000,
+    apiAdminSaveCheckSheetSettings: 120000
+  };
+  if (slowOps[fnName] && timeoutMs === 25000) timeoutMs = slowOps[fnName];
   return new Promise(function(resolve, reject) {
     if (typeof google === 'undefined' || !google.script || !google.script.run) {
       reject(new Error('管理画面の通信機能が使えません。GAS① の URL から開き直してください。'));
@@ -464,9 +473,9 @@ function gasRun(fnName) {
     var settled = false;
     var timer = setTimeout(function () {
       finish(function () {
-        reject(new Error('読み込みが時間切れです。再読込してください（' + fnName + '）'));
+        reject(new Error('読み込みが時間切れです。再読込してください（' + fnName + '）。点検票転記は未処理が残ることがあります。もう一度押すか、時間トリガー syncCheckSheetsPending を使ってください。'));
       });
-    }, 25000);
+    }, timeoutMs);
     function finish(cb) {
       if (settled) return;
       settled = true;
@@ -967,9 +976,15 @@ async function syncCheckSheetsNow(force) {
     if (result.status !== 'success') throw new Error(result.message);
     var d = result.data || {};
     var prefix = force ? '再転記しました' : '転記しました';
-    showBanner(prefix + '（今回 ' + (d.exported || 0) + ' 件、未処理 ' + (d.pendingLeft || 0) + ' 件）', true);
+    var msg = prefix + '（今回 ' + (d.exported || 0) + ' 件、未処理 ' + (d.pendingLeft || 0) + ' 件）';
+    if ((d.pendingLeft || 0) > 0) {
+      msg += ' — 未処理が残っている場合は同じボタンをもう一度押してください（1回最大 ' + 80 + ' 件ずつ）。';
+    }
+    showBanner(msg, true);
     fillCheckBookLinks_({ aggregations: d.destinations || [] });
-    await loadCheckSheetSettings();
+    if ((d.pendingLeft || 0) === 0) {
+      await loadCheckSheetSettings();
+    }
   } catch (e) {
     showBanner(e.message || String(e), false);
   } finally {

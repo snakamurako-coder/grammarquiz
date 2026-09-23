@@ -4267,7 +4267,7 @@ function summarizeCheckPrepare_(runtime) {
 function prepareCheckBooksRuntime_(opts) {
   opts = opts || {};
   const includeTaskColumns = opts.includeTaskColumns !== false;
-  const ssApp = openAppSpreadsheet_();
+  const ssApp = openAppSpreadsheet_(opts.skipEnsure ? { skipEnsure: true } : undefined);
   const allStudents = listWhitelistStudentsAll_();
   const assignments = sheetRowsToObjects_(ssApp.getSheetByName('assignments')).map(normalizeAssignmentRow_);
   const asgById = {};
@@ -4366,16 +4366,21 @@ function exportPendingCheckSubmissions_(opts) {
   cache.put('check_export_running', '1', 180);
   try {
     try { /* ダッシュボードからはトリガー一覧を触らない（権限待ちで固まる） */ } catch (eTrig) { /* ignore */ }
-    const runtime = prepareCheckBooksRuntime_({ includeTaskColumns: true });
+    /** 転記時は名簿・列だけ整備。全提出の二重書き込み（includeTaskColumns:true）は時間切れの主因 */
+    const runtime = prepareCheckBooksRuntime_({ includeTaskColumns: false, skipEnsure: true });
     const assignments = runtime.assignments;
     const asgById = {};
     assignments.forEach(function (a) { asgById[a.Assignment_ID] = a; });
 
-    const ssApp = openAppSpreadsheet_();
+    const ssApp = openAppSpreadsheet_({ skipEnsure: true });
     const subSheet = ssApp.getSheetByName('assignment_submissions');
     migrateSheetHeaders_(subSheet, SUBMISSION_HEADERS);
     const exportedCol = SUBMISSION_HEADERS.indexOf('Check_Exported') + 1;
     const subs = sheetRowsToObjects_(subSheet);
+    const colCacheByDest_ = {};
+    runtime.destinations.forEach(function (d) {
+      colCacheByDest_[d.cfg.Config_ID] = {};
+    });
 
     let exported = 0;
     let skipped = 0;
@@ -4403,16 +4408,27 @@ function exportPendingCheckSubmissions_(opts) {
       let okAll = true;
       let wroteAny = false;
       dests.forEach(function (d) {
-        const idMap = ensureCheckRosterRows_(d.sheet, d.students);
+        const idMap = d.idMap || ensureCheckRosterRows_(d.sheet, d.students);
         const studentRow = idMap[account];
-        const col = ensureCheckTaskColumn_(d.sheet, asg);
+        if (!studentRow) {
+          okAll = false;
+          return;
+        }
+        const cacheKey = d.cfg.Config_ID;
+        let col = colCacheByDest_[cacheKey][asg.Assignment_ID];
+        if (!col) {
+          col = ensureCheckTaskColumn_(d.sheet, asg);
+          colCacheByDest_[cacheKey][asg.Assignment_ID] = col;
+        }
         const val = checkValueForKind_(d.cfg.Kind, row);
         const wr = writeCheckCellIfEmpty_(d.sheet, studentRow, col, val);
         if (!wr || !wr.ok) okAll = false;
         if (wr && wr.wrote) wroteAny = true;
       });
       if (okAll && exportedCol > 0) {
-        subSheet.getRange(row._row, exportedCol).setValue(1);
+        if (wroteAny || !isCheckExportedFlag_(row.Check_Exported)) {
+          subSheet.getRange(row._row, exportedCol).setValue(1);
+        }
         if (wroteAny) exported++;
         else skipped++;
       } else {
