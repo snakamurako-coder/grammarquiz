@@ -2658,7 +2658,7 @@ body.live-room-board-active #login-screen { display: none !important; }
         <label class="check-item"><input type="radio" name="play-mode" value="normal" checked> 順番通り</label>
         <label class="check-item"><input type="radio" name="play-mode" value="random10"> ランダム演習</label>
         <label class="check-item"><input type="radio" name="play-mode" value="weakness"> 苦手克服優先</label>
-        <label class="check-item"><input type="radio" name="play-mode" value="unseen"> 未定着優先</label>
+        <label class="check-item"><input type="radio" name="play-mode" value="unseen"> 未着手優先</label>
       </div>
       <div class="form-group" style="margin-top:12px;">
         <label>出題数</label>
@@ -2767,7 +2767,7 @@ body.live-room-board-active #login-screen { display: none !important; }
             <div class="check-list">
               <label class="check-item"><input type="radio" name="vocab-card-quiz-strategy" value="recentWrong" checked> 最近間違えた順に</label>
               <label class="check-item"><input type="radio" name="vocab-card-quiz-strategy" value="historicalWrong"> 過去に間違えた問題を中心に</label>
-              <label class="check-item"><input type="radio" name="vocab-card-quiz-strategy" value="unseen"> 解いたことのない問題を中心に</label>
+              <label class="check-item"><input type="radio" name="vocab-card-quiz-strategy" value="unseen"> 未着手優先</label>
             </div>
           </div>
         </div>
@@ -14439,7 +14439,7 @@ function formatSessionSettingsText_(log) {
 
   if (settings.kind === 'grammar') {
     const playLabels = {
-      normal: '順番通り', random10: 'ランダム演習', weakness: '苦手克服優先', unseen: '未定着優先'
+      normal: '順番通り', random10: 'ランダム演習', weakness: '苦手克服優先', unseen: '未着手優先'
     };
     lines.push('学年・区分: ' + (settings.subject || '（不明）'));
     lines.push('教材: ' + joinSettingList_(settings.units, '（未選択）'));
@@ -14506,7 +14506,7 @@ function formatSessionSettingsText_(log) {
         if (ct.markNone) parts.push('未登録');
         lines.push('単語カード特定語: マーク登録(' + (ct.markMode === 'include' ? '該当' : '除外') + ') ' + (parts.join('・') || '—'));
       } else {
-        const quizLabels = { recentWrong: '最近間違えた順', historicalWrong: '過去の誤答中心', unseen: '未演習中心' };
+        const quizLabels = { recentWrong: '最近間違えた順', historicalWrong: '過去の誤答中心', unseen: '未着手優先' };
         lines.push('単語カード特定語: テスト結果(' + (quizLabels[ct.quizStrategy] || ct.quizStrategy) + ')');
       }
     }
@@ -14532,7 +14532,7 @@ function formatSessionSettingsText_(log) {
         if (ct.markNone) parts.push('未登録');
         lines.push('特定語: マーク登録(' + (ct.markMode === 'include' ? '該当' : '除外') + ') ' + (parts.join('・') || '—'));
       } else {
-        const quizLabels = { recentWrong: '最近間違えた順', historicalWrong: '過去の誤答中心', unseen: '未演習中心' };
+        const quizLabels = { recentWrong: '最近間違えた順', historicalWrong: '過去の誤答中心', unseen: '未着手優先' };
         lines.push('特定語: テスト結果(' + (quizLabels[ct.quizStrategy] || ct.quizStrategy) + ')');
       }
     }
@@ -15099,7 +15099,7 @@ function renderGrammarAreaProgress_(areaMap) {
     const acc = attempts > 0 ? Math.round(((attempts - stat.wrong) / attempts) * 100) : 0;
     const recent = stat.recentAccN > 0 ? Math.round(stat.recentAccSum / stat.recentAccN) : acc;
     const displayRate = stat.recentAccN > 0 ? recent : acc;
-    const sub = (attempts > 0 ? '正答率 ' + acc + '%' : '未演習')
+    const sub = (attempts > 0 ? '正答率 ' + acc + '%' : '未着手')
       + ' / 直近 ' + displayRate + '%'
       + ' / ' + stat.itemCount + '問に取組';
     html += renderProgressBarHtml_(area, displayRate, sub);
