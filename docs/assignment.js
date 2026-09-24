@@ -8,6 +8,30 @@ const AssignmentModule = (function () {
   let listCache_ = [];
   let listRefreshWarn_ = null;
   let listRefreshPromise_ = null;
+  const LIST_FILTER_KEY = 'dd_asg_list_filter';
+  const DEFAULT_LIST_FILTER_ = { status: 'all', reported: 'all', overdue: 'all' };
+  let listFilter_ = loadListFilter_();
+
+  function loadListFilter_() {
+    try {
+      const raw = localStorage.getItem(LIST_FILTER_KEY);
+      if (!raw) return Object.assign({}, DEFAULT_LIST_FILTER_);
+      const parsed = JSON.parse(raw);
+      return {
+        status: parsed.status || 'all',
+        reported: parsed.reported || 'all',
+        overdue: parsed.overdue || 'all'
+      };
+    } catch (e) {
+      return Object.assign({}, DEFAULT_LIST_FILTER_);
+    }
+  }
+
+  function saveListFilter_() {
+    try {
+      localStorage.setItem(LIST_FILTER_KEY, JSON.stringify(listFilter_));
+    } catch (e) {}
+  }
   let driveQuizLogsPromise_ = null;
   let driveQuizLogsAccount_ = '';
   let activeSession_ = null;
@@ -236,15 +260,34 @@ const AssignmentModule = (function () {
     return 'open';
   }
 
+  function assignmentDueMs_(row) {
+    const a = (row && row.assignment) || row || {};
+    const deadline = parseLooseDate_(a.Deadline);
+    const end = parseLooseDate_(a.Window_End);
+    if (deadline == null) return end;
+    if (end == null) return deadline;
+    return Math.min(deadline, end);
+  }
+
+  function assignmentTitle_(row) {
+    return String((row && row.assignment && row.assignment.Title) || '');
+  }
+
   function sortAssignmentRows_(rows) {
     const order = { open: 0, future: 1, expired: 2 };
     return (rows || []).slice().sort(function (x, y) {
       const px = getAssignmentWindowPhase_(x);
       const py = getAssignmentWindowPhase_(y);
       if (order[px] !== order[py]) return order[px] - order[py];
-      return String((x.assignment && x.assignment.Title) || '').localeCompare(
-        String((y.assignment && y.assignment.Title) || ''), 'ja'
-      );
+      const dx = assignmentDueMs_(x);
+      const dy = assignmentDueMs_(y);
+      if (dx == null && dy == null) {
+        return assignmentTitle_(x).localeCompare(assignmentTitle_(y), 'ja');
+      }
+      if (dx == null) return 1;
+      if (dy == null) return -1;
+      if (dx !== dy) return px === 'expired' ? (dy - dx) : (dx - dy);
+      return assignmentTitle_(x).localeCompare(assignmentTitle_(y), 'ja');
     });
   }
 
@@ -365,6 +408,62 @@ const AssignmentModule = (function () {
     const required = a.Required_Pass_Count || a.Max_Attempts || 1;
     const clearN = passState.clearCount || 0;
     return clearN >= required || !!passState.pendingAchievement;
+  }
+
+  function listRowMeta_(row) {
+    const a = row.assignment || {};
+    const passState = loadPassState_(a.Assignment_ID);
+    if (row.serverAchieved) passState.serverAchieved = true;
+    const local = loadLocalProgress_(a.Assignment_ID);
+    const phase = getAssignmentWindowPhase_(row);
+    const status = deriveStatus_(row, passState, local, phase);
+    return {
+      a: a,
+      passState: passState,
+      local: local,
+      phase: phase,
+      status: status,
+      statusKey: String(status.css || '').replace('asg-status-', ''),
+      reported: isAchieved_(row, passState),
+      overdue: phase === 'expired'
+    };
+  }
+
+  function matchesListFilter_(row) {
+    const meta = listRowMeta_(row);
+    if (listFilter_.status !== 'all' && meta.statusKey !== listFilter_.status) return false;
+    if (listFilter_.reported === 'yes' && !meta.reported) return false;
+    if (listFilter_.reported === 'no' && meta.reported) return false;
+    if (listFilter_.overdue === 'yes' && !meta.overdue) return false;
+    if (listFilter_.overdue === 'no' && meta.overdue) return false;
+    return true;
+  }
+
+  function applyListFilters_(rows) {
+    return (rows || []).filter(matchesListFilter_);
+  }
+
+  function syncListFilterUi_(visibleCount, totalCount, show) {
+    const box = document.getElementById('assignment-list-filters');
+    if (box) box.hidden = !show;
+    if (!box) return;
+    box.querySelectorAll('[data-filter]').forEach(function (group) {
+      const key = group.getAttribute('data-filter');
+      const want = listFilter_[key] || 'all';
+      group.querySelectorAll('.asg-filter-chip').forEach(function (chip) {
+        chip.classList.toggle('is-active', chip.getAttribute('data-value') === want);
+      });
+    });
+    const countEl = document.getElementById('assignment-list-count');
+    if (!countEl) return;
+    if (!totalCount) {
+      countEl.textContent = '';
+      return;
+    }
+    const suffix = ' · 期限内は期限が近い順';
+    countEl.textContent = visibleCount === totalCount
+      ? (totalCount + '件' + suffix)
+      : (visibleCount + '件 / 全' + totalCount + '件' + suffix);
   }
 
   function currentAccount_() {
@@ -580,6 +679,7 @@ const AssignmentModule = (function () {
     if (!AuthGateService.isValid()) {
       wrap.innerHTML = '<p>ログインすると課題が表示されます。</p>';
       updateRecoverBanner_([]);
+      syncListFilterUi_(0, 0, false);
       return;
     }
     if (!listCache_.length) wrap.innerHTML = '<p>読込中...</p>';
@@ -605,6 +705,7 @@ const AssignmentModule = (function () {
           wrap.innerHTML = '<p style="color:#c62828;">課題の取得に失敗: ' + escapeHtml_(e.message || e) + '</p>'
             + '<p class="hint" style="font-size:.85em;color:#666;margin-top:8px;">通信状況を確認して「更新」を押してください。</p>';
           updateRecoverBanner_([]);
+          syncListFilterUi_(0, 0, false);
         }
       } finally {
         listRefreshPromise_ = null;
@@ -758,6 +859,9 @@ const AssignmentModule = (function () {
   function renderList_(rows) {
     const wrap = document.getElementById('assignment-list');
     if (!wrap) return;
+    rows = rows || [];
+    const visible = applyListFilters_(rows);
+    syncListFilterUi_(visible.length, rows.length, rows.length > 0);
     let html = '';
     if (listRefreshWarn_) {
       html += '<p class="asg-refresh-warn">一覧の更新に失敗しました（前回の表示）: '
@@ -768,12 +872,20 @@ const AssignmentModule = (function () {
       wrap.innerHTML = html;
       return;
     }
-    rows.forEach(function (row, idx) {
-      const a = row.assignment || {};
-      const kindLabel = a.Kind === 'quiz' ? '小テスト' : '宿題';
-      const limit = a.Time_Limit_Sec > 0 ? ('制限 ' + formatLimit_(a.Time_Limit_Sec)) : '制限なし';
-      const required = a.Required_Pass_Count || a.Max_Attempts || 1;
-      const passState = loadPassState_(a.Assignment_ID);
+    if (!visible.length) {
+      html += '<p>この条件に合う課題はありません。上の表示フィルタを変更してください。</p>';
+      wrap.innerHTML = html;
+      return;
+    }
+    visible.forEach(function (row) {
+      const idx = listCache_.indexOf(row);
+      if (idx < 0) return;
+      const meta = listRowMeta_(row);
+      const a = meta.a;
+      const passState = meta.passState;
+      const local = meta.local;
+      const phase = meta.phase;
+      const status = meta.status;
       if (row.serverAchieved) {
         passState.serverAchieved = true;
         if (passState.pendingAchievement) {
@@ -781,9 +893,9 @@ const AssignmentModule = (function () {
         }
         savePassState_(a.Assignment_ID, passState);
       }
-      const local = loadLocalProgress_(a.Assignment_ID);
-      const phase = getAssignmentWindowPhase_(row);
-      const status = deriveStatus_(row, passState, local, phase);
+      const kindLabel = a.Kind === 'quiz' ? '小テスト' : '宿題';
+      const limit = a.Time_Limit_Sec > 0 ? ('制限 ' + formatLimit_(a.Time_Limit_Sec)) : '制限なし';
+      const required = a.Required_Pass_Count || a.Max_Attempts || 1;
       const clearN = passState.clearCount || 0;
       const serverReported = !!(row.serverAchieved || passState.serverAchieved);
       const doneN = (local.doneIds || []).length;
@@ -846,7 +958,7 @@ const AssignmentModule = (function () {
       html += '</div>';
       html += '<div class="log-item-aside">';
       html += '<span class="asg-status asg-status-timer">' + escapeHtml_(limit) + '</span>';
-      html += '<span class="asg-status-sub">' + escapeHtml_(status.label) + '</span>';
+      html += '<span class="asg-status ' + escapeHtml_(status.css) + '">' + escapeHtml_(status.label) + '</span>';
       html += '</div>';
       html += '</div>';
     });
@@ -1612,6 +1724,23 @@ const AssignmentModule = (function () {
       recoverBtn._bound = true;
       recoverBtn.addEventListener('click', function () {
         BusyButton.run(recoverBtn, reportAllPendingAchievements_, '報告中…');
+      });
+    }
+    const filterBox = document.getElementById('assignment-list-filters');
+    if (filterBox && !filterBox._bound) {
+      filterBox._bound = true;
+      filterBox.addEventListener('click', function (ev) {
+        const chip = ev.target && ev.target.closest ? ev.target.closest('.asg-filter-chip') : null;
+        if (!chip || !filterBox.contains(chip)) return;
+        const group = chip.closest('[data-filter]');
+        if (!group) return;
+        const key = group.getAttribute('data-filter');
+        const value = chip.getAttribute('data-value') || 'all';
+        if (key !== 'status' && key !== 'reported' && key !== 'overdue') return;
+        if (listFilter_[key] === value) return;
+        listFilter_[key] = value;
+        saveListFilter_();
+        renderList_(listCache_);
       });
     }
     if (!bindUi._visibilityBound) {

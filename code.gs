@@ -2498,6 +2498,7 @@ const LIVE_WORD_LINK_MODE_LABELS = {
 };
 const CHECK_HEADER_ROWS = 5;
 const CHECK_ROSTER_COLS = 7;
+const CHECK_TASK_COL_WIDTH = 20;
 const CHECK_EXPORT_BATCH = 80;
 const CHECK_DEFAULT_INPUT_SHEET = '名簿＠入力';
 const CHECK_AGGREGATION_HEADERS = [
@@ -4136,7 +4137,13 @@ function writeCheckTaskColumnHeader_(sheet, col, asg) {
   const titleCell = sheet.getRange(5, col);
   titleCell.setValue(title);
   titleCell.setWrap(true);
-  sheet.setColumnWidth(col, 92);
+  sheet.setColumnWidth(col, CHECK_TASK_COL_WIDTH);
+}
+
+function resizeCheckTaskColumns_(sheet) {
+  const lastCol = sheet.getLastColumn();
+  if (lastCol <= CHECK_ROSTER_COLS) return;
+  sheet.setColumnWidths(CHECK_ROSTER_COLS + 1, lastCol - CHECK_ROSTER_COLS, CHECK_TASK_COL_WIDTH);
 }
 
 function refreshExistingCheckTaskTitles_(sheet, assignments) {
@@ -4342,6 +4349,7 @@ function prepareCheckBooksRuntime_(opts) {
       }
     }
     renumberCheckTaskSerials_(sh);
+    resizeCheckTaskColumns_(sh);
     const dest = {
       cfg: cfg,
       students: students,

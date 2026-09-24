@@ -1121,6 +1121,7 @@ body.vl-audio-lock .vl-card.vl-audio-playing { opacity: 1; }
 .asg-status-in-progress { background: #fff8e1; color: #f57f17; }
 .asg-status-ended { background: #e8f5e9; color: #2e7d32; }
 .asg-status-expired { background: #212121; color: #fff; }
+.asg-status-scheduled { background: #e3f2fd; color: #1565c0; }
 .asg-status-timer {
   background: #ffebee;
   color: #b71c1c;
@@ -2248,6 +2249,55 @@ body.live-room-board-active #login-screen { display: none !important; }
 .asg-recover-banner[hidden] { display: none !important; }
 .asg-recover-banner p { margin: 0 0 8px; font-size: 0.9em; color: #1b5e20; line-height: 1.5; }
 .asg-recover-banner .asg-report-hint { color: #2e7d32; margin-top: 8px; }
+.asg-list-filters {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.asg-list-filters[hidden] { display: none !important; }
+.asg-filter-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+}
+.asg-filter-row:first-of-type { margin-top: 0; }
+.asg-filter-label {
+  flex: 0 0 4.5em;
+  font-size: 0.78em;
+  font-weight: 700;
+  color: #546e7a;
+  padding-top: 6px;
+}
+.asg-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.asg-filter-chip {
+  padding: 5px 10px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 999px;
+  font-size: 0.78em;
+  font-weight: 700;
+  color: #64748b;
+  cursor: pointer;
+}
+.asg-filter-chip.is-active {
+  background: #1565c0;
+  color: #fff;
+  border-color: #1565c0;
+}
+.asg-list-count {
+  margin: 8px 0 0;
+  font-size: 0.78em;
+  color: #78909c;
+}
 .answer-feedback { display: none; }
 .answer-feedback.is-visible { display: block; margin: 8px 0 14px; }
 #question-explanation { background: #fff8e1; border-left: 4px solid #ffb300; padding: 12px 14px; border-radius: 8px; margin-top: 8px; font-size: 0.9em; line-height: 1.6; color: var(--c-text); text-align: left; }
@@ -2998,6 +3048,36 @@ body.live-room-board-active #login-screen { display: none !important; }
             <button type="button" class="btn-secondary session-resume-btn">続きから</button>
             <button type="button" class="btn-secondary session-resume-discard-btn">破棄</button>
           </span>
+        </div>
+        <div id="assignment-list-filters" class="asg-list-filters" hidden>
+          <div class="asg-filter-row">
+            <span class="asg-filter-label">状態</span>
+            <div class="asg-filter-chips" data-filter="status">
+              <button type="button" class="asg-filter-chip is-active" data-value="all">すべて</button>
+              <button type="button" class="asg-filter-chip" data-value="not-started">未着手</button>
+              <button type="button" class="asg-filter-chip" data-value="in-progress">取組中</button>
+              <button type="button" class="asg-filter-chip" data-value="ended">終了済み</button>
+              <button type="button" class="asg-filter-chip" data-value="scheduled">予定</button>
+              <button type="button" class="asg-filter-chip" data-value="expired">期限超過</button>
+            </div>
+          </div>
+          <div class="asg-filter-row">
+            <span class="asg-filter-label">達成報告</span>
+            <div class="asg-filter-chips" data-filter="reported">
+              <button type="button" class="asg-filter-chip is-active" data-value="all">すべて</button>
+              <button type="button" class="asg-filter-chip" data-value="yes">報告済</button>
+              <button type="button" class="asg-filter-chip" data-value="no">未報告</button>
+            </div>
+          </div>
+          <div class="asg-filter-row">
+            <span class="asg-filter-label">期限</span>
+            <div class="asg-filter-chips" data-filter="overdue">
+              <button type="button" class="asg-filter-chip is-active" data-value="all">すべて</button>
+              <button type="button" class="asg-filter-chip" data-value="no">期限内</button>
+              <button type="button" class="asg-filter-chip" data-value="yes">期限超過</button>
+            </div>
+          </div>
+          <p id="assignment-list-count" class="asg-list-count"></p>
         </div>
         <div id="assignment-list"><p>タブを開くと読み込みます</p></div>
       </div>
