@@ -36,6 +36,64 @@ button:active { opacity: 0.9; }
    共通スタイル & 設定画面
    ========================================= */
 .header-title { font-size: clamp(1.3em, 5vw, 1.8em); font-weight: bold; color: #2c3e50; text-align: center; margin: 4px 0 16px; }
+.login-upgrade-notice {
+  text-align: left;
+  max-width: 420px;
+  margin: 0 auto 28px;
+  padding: 16px 16px 14px;
+  background: #e8f5e9;
+  border: 1px solid #81c784;
+  border-radius: 12px;
+}
+.login-upgrade-kicker {
+  margin: 0 0 6px;
+  font-size: 0.78em;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #1b5e20;
+}
+.login-upgrade-notice p {
+  margin: 0 0 10px;
+  font-size: 0.92em;
+  color: #1b5e20;
+  line-height: 1.55;
+}
+.login-upgrade-btn {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  padding: 12px 14px;
+  background: #2e7d32;
+  color: #fff;
+  border-radius: 8px;
+  font-weight: 800;
+  font-size: 1em;
+  text-align: center;
+  text-decoration: none;
+}
+.login-current-notice {
+  text-align: left;
+  max-width: 420px;
+  margin: 0 auto 24px;
+  padding: 14px 16px;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 12px;
+}
+.login-current-kicker {
+  margin: 0 0 6px;
+  font-size: 0.78em;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #6d4c00;
+}
+.login-current-notice p {
+  margin: 0;
+  font-size: 0.88em;
+  color: #5d4037;
+  line-height: 1.55;
+}
 .backend-sync-status {
   position: fixed;
   top: 0;
@@ -2525,6 +2583,7 @@ body.live-room-board-active #login-screen { display: none !important; }
   .btn-small:hover { background-color: #4d636f; }
   .key:hover { background-color: #e9ecef; }
   #submit-btn:hover, #next-btn:hover { filter: brightness(0.95); }
+  .login-upgrade-btn:hover { background: #1b5e20; }
 }
 
   </style>
@@ -2535,6 +2594,15 @@ body.live-room-board-active #login-screen { display: none !important; }
   <div id="login-screen">
     <div class="header-title">DigitalDrill（デジドリ） ログイン</div>
     <div class="setting-section" style="text-align: center; padding: 40px 10px;">
+      <div class="login-upgrade-notice">
+        <p class="login-upgrade-kicker">授業中はこちら</p>
+        <p>授業中の学習は、アップグレード版を使ってください。</p>
+        <a class="login-upgrade-btn" href="https://english-digital-drill.web.app/" target="_blank" rel="noopener noreferrer">アップグレード版を開く</a>
+      </div>
+      <div class="login-current-notice">
+        <p class="login-current-kicker">この画面（現行版）</p>
+        <p>現行版は、宿題・小テストなど課題への取り組み用として、<strong>12月まで</strong>使い続けます。新しい機能の追加はありません。</p>
+      </div>
       <p style="margin-bottom: 20px; font-size: 1.1em; color: #555;">システムを利用するには Google アカウントで認証が必要です。</p>
       <p style="margin-bottom: 20px; font-size: 0.9em; color: #777;">下のボタン1回で、ログインとマイドライブ（単語帳・学習記録）の許可まで完了します。</p>
       <p style="margin: 0 auto 8px; max-width: 320px; font-size: 0.85em; font-weight: bold; color: #455a64; text-align: left;">Googleでログイン</p>
